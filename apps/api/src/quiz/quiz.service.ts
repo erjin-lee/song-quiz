@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { CacheService } from '../cache/cache.service';
 import { QuizListItemDto } from './dto/quiz-list-item.dto';
 import { QuizSongItemDto } from './dto/quiz-song-item.dto';
 import { Quiz } from './entities/quiz.entity';
 import { QuizSong } from './entities/quiz-song.entity';
+
+const QUIZ_LIST_CACHE_KEY = 'quiz:list';
+const QUIZ_LIST_CACHE_TTL_SECONDS = 60;
 
 @Injectable()
 export class QuizService {
@@ -13,9 +17,18 @@ export class QuizService {
     private readonly quizRepository: Repository<Quiz>,
     @InjectRepository(QuizSong)
     private readonly quizSongRepository: Repository<QuizSong>,
+    private readonly cacheService: CacheService,
   ) {}
 
   async getQuizzes(): Promise<QuizListItemDto[]> {
+    return this.cacheService.getOrSet(
+      QUIZ_LIST_CACHE_KEY,
+      () => this.findQuizzes(),
+      QUIZ_LIST_CACHE_TTL_SECONDS,
+    );
+  }
+
+  private async findQuizzes(): Promise<QuizListItemDto[]> {
     const quizzes = await this.quizRepository.find({
       where: { useYn: 'Y' },
       order: { crtDt: 'DESC' },
