@@ -1,0 +1,24 @@
+{
+  "name": "iu-test",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "yarn@4.5.3",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "api": "turbo run start:dev --filter=api",
+    "api:local": "turbo run start:dev:local --filter=api",
+    "api:build": "turbo run build --filter=api",
+    "web": "turbo run dev --filter=web",
+    "web:build": "turbo run build --filter=web"
+  },
+  "devDependencies": {
+    "turbo": "^2.10.8",
+    "typescript": "^5.5.3"
+  }
+}
