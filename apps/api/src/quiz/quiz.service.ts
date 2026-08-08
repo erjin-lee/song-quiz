@@ -1,13 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Brackets, Repository } from 'typeorm';
 import { CacheService } from '../cache/cache.service';
+import { GetQuizzesQueryDto, QuizSearchType } from './dto/get-quizzes-query.dto';
 import { QuizListItemDto } from './dto/quiz-list-item.dto';
 import { QuizSongItemDto } from './dto/quiz-song-item.dto';
+import { QuizArtist } from './entities/quiz-artist.entity';
 import { Quiz } from './entities/quiz.entity';
 import { QuizSong } from './entities/quiz-song.entity';
 
-const QUIZ_LIST_CACHE_KEY = 'quiz:list';
 const QUIZ_LIST_CACHE_TTL_SECONDS = 60;
 
 @Injectable()
@@ -20,19 +21,55 @@ export class QuizService {
     private readonly cacheService: CacheService,
   ) {}
 
-  async getQuizzes(): Promise<QuizListItemDto[]> {
+  async getQuizzes(query: GetQuizzesQueryDto): Promise<QuizListItemDto[]> {
+    const keyword = query.keyword?.trim() ?? '';
+    const searchType = query.searchType ?? QuizSearchType.ALL;
+    const cacheKey = `quiz:list:${searchType}:${keyword}`;
+
     return this.cacheService.getOrSet(
-      QUIZ_LIST_CACHE_KEY,
-      () => this.findQuizzes(),
+      cacheKey,
+      () => this.findQuizzes(keyword, searchType),
       QUIZ_LIST_CACHE_TTL_SECONDS,
     );
   }
 
-  private async findQuizzes(): Promise<QuizListItemDto[]> {
-    const quizzes = await this.quizRepository.find({
-      where: { useYn: 'Y' },
-      order: { crtDt: 'DESC' },
-    });
+  private async findQuizzes(
+    keyword: string,
+    searchType: QuizSearchType,
+  ): Promise<QuizListItemDto[]> {
+    const qb = this.quizRepository
+      .createQueryBuilder('quiz')
+      .where('quiz.useYn = :useYn', { useYn: 'Y' });
+
+    if (keyword) {
+      const likeKeyword = `%${keyword}%`;
+
+      if (searchType === QuizSearchType.ARTIST || searchType === QuizSearchType.ALL) {
+        qb.leftJoin(
+          QuizArtist,
+          'quizArtist',
+          'quizArtist.quizId = quiz.quizId',
+        )
+          .leftJoin('quizArtist.artist', 'artist')
+          .distinct(true);
+      }
+
+      if (searchType === QuizSearchType.TITLE) {
+        qb.andWhere('quiz.quizTtl LIKE :keyword', { keyword: likeKeyword });
+      } else if (searchType === QuizSearchType.ARTIST) {
+        qb.andWhere('artist.atstNm LIKE :keyword', { keyword: likeKeyword });
+      } else {
+        qb.andWhere(
+          new Brackets((sub) => {
+            sub
+              .where('quiz.quizTtl LIKE :keyword', { keyword: likeKeyword })
+              .orWhere('artist.atstNm LIKE :keyword', { keyword: likeKeyword });
+          }),
+        );
+      }
+    }
+
+    const quizzes = await qb.orderBy('quiz.crtDt', 'DESC').getMany();
 
     return quizzes.map((quiz) => ({
       quizId: quiz.quizId,

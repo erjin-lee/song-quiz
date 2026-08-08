@@ -1,12 +1,21 @@
-import { Controller, Get, Param, ParseIntPipe, Post } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  ParseIntPipe,
+  Post,
+  Query,
+} from '@nestjs/common';
 import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { GenerateQuizResultDto } from './dto/generate-quiz-result.dto';
+import { GetQuizzesQueryDto, QuizSearchType } from './dto/get-quizzes-query.dto';
 import { QuizListItemDto } from './dto/quiz-list-item.dto';
 import { QuizSongItemDto } from './dto/quiz-song-item.dto';
 import { QuizGeneratorService } from './quiz-generator.service';
@@ -21,10 +30,26 @@ export class QuizController {
   ) {}
 
   @Get()
-  @ApiOperation({ summary: '퀴즈 리스트 조회' })
-  @ApiOkResponse({ description: '퀴즈 리스트', type: QuizListItemDto, isArray: true })
-  getQuizzes(): Promise<QuizListItemDto[]> {
-    return this.quizService.getQuizzes();
+  @ApiOperation({ summary: '퀴즈 리스트 조회(키워드 검색 가능)' })
+  @ApiQuery({
+    name: 'keyword',
+    required: false,
+    description: '검색 키워드',
+    example: '아이유',
+  })
+  @ApiQuery({
+    name: 'searchType',
+    required: false,
+    enum: QuizSearchType,
+    description: '검색 대상 (기본값 ALL)',
+  })
+  @ApiOkResponse({
+    description: '퀴즈 리스트',
+    type: QuizListItemDto,
+    isArray: true,
+  })
+  getQuizzes(@Query() query: GetQuizzesQueryDto): Promise<QuizListItemDto[]> {
+    return this.quizService.getQuizzes(query);
   }
 
   @Get(':quizId/songs')
