@@ -408,6 +408,84 @@ describe('RoomService', () => {
       expect(repeated.action).toBe('blocked');
     });
 
+    it('과반 미만이 스킵을 요청하면 라운드가 끝나지 않는다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom(3);
+      const { userId: guest1 } = await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+      });
+      await roomService.joinRoom(room.roomId, { nickname: '참가자2' });
+      await roomService.startGame(room.roomId, hostUserId);
+      await roomService.markReady(room.roomId, hostUserId);
+      await roomService.markReady(room.roomId, guest1);
+      const finalReady = await roomService.markReady(
+        room.roomId,
+        (await roomService.getRoom(room.roomId))!.participants[2].userId,
+      );
+      expect(finalReady.gameStatus).toBe('READY_TO_PLAY');
+      await roomService.startRound(room.roomId, hostUserId);
+
+      // 3명 중 1명만 스킵 요청 -> 과반(2명) 미달이므로 라운드 유지
+      const afterOneSkip = await roomService.requestSkip(
+        room.roomId,
+        hostUserId,
+      );
+
+      expect(afterOneSkip.gameStatus).toBe('PLAYING');
+      expect(afterOneSkip.currentRound?.skipUserIds).toEqual([hostUserId]);
+    });
+
+    it('과반이 스킵을 요청하면 라운드가 즉시 종료(정답 공개)된다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom(3);
+      const { userId: guest1 } = await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+      });
+      const { userId: guest2 } = await roomService.joinRoom(room.roomId, {
+        nickname: '참가자2',
+      });
+      await roomService.startGame(room.roomId, hostUserId);
+      await roomService.markReady(room.roomId, hostUserId);
+      await roomService.markReady(room.roomId, guest1);
+      await roomService.markReady(room.roomId, guest2);
+      await roomService.startRound(room.roomId, hostUserId);
+
+      await roomService.requestSkip(room.roomId, hostUserId);
+      const afterMajoritySkip = await roomService.requestSkip(
+        room.roomId,
+        guest1,
+      );
+
+      expect(afterMajoritySkip.gameStatus).toBe('ROUND_ENDED');
+      expect(afterMajoritySkip.currentRound?.revealed).toBe(true);
+      expect(afterMajoritySkip.currentRound?.songNm).toBe('노래1');
+    });
+
+    it('같은 유저가 스킵을 여러 번 요청해도 한 표로만 계산된다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom(3);
+      const { userId: guest1 } = await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+      });
+      await roomService.joinRoom(room.roomId, { nickname: '참가자2' });
+      await roomService.startGame(room.roomId, hostUserId);
+      await roomService.markReady(room.roomId, hostUserId);
+      await roomService.markReady(room.roomId, guest1);
+      await roomService.markReady(
+        room.roomId,
+        (await roomService.getRoom(room.roomId))!.participants[2].userId,
+      );
+      await roomService.startRound(room.roomId, hostUserId);
+
+      await roomService.requestSkip(room.roomId, hostUserId);
+      const afterRepeatedSkip = await roomService.requestSkip(
+        room.roomId,
+        hostUserId,
+      );
+
+      expect(afterRepeatedSkip.gameStatus).toBe('PLAYING');
+      expect(afterRepeatedSkip.currentRound?.skipUserIds).toEqual([
+        hostUserId,
+      ]);
+    });
+
     it('제한 시간이 지나면 라운드가 자동 종료된다', async () => {
       jest.useFakeTimers();
       try {

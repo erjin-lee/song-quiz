@@ -20,6 +20,7 @@ export interface RoundPublicStateDto {
   endSec: number | null;
   readyUserIds: string[];
   correctUserIds: string[];
+  skipUserIds: string[];
   playStartedAt: string | null;
   revealed: boolean;
   songNm: string | null;

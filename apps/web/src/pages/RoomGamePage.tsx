@@ -188,6 +188,10 @@ export function RoomGamePage() {
     socketRef.current?.emit('game:next-round');
   };
 
+  const handleSkip = () => {
+    socketRef.current?.emit('game:skip');
+  };
+
   return (
     <div className="min-h-screen px-4 py-8 sm:px-8">
       <div className="mx-auto flex max-w-5xl flex-col gap-4">
@@ -230,6 +234,7 @@ export function RoomGamePage() {
               onReady={handleGameReady}
               onPlay={handlePlay}
               onNextRound={handleNextRound}
+              onSkip={handleSkip}
             />
 
             <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">

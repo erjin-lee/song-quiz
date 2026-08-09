@@ -32,6 +32,7 @@ export interface RoomClientToServerEvents {
   'game:ready': () => void;
   'game:play': () => void;
   'game:next-round': () => void;
+  'game:skip': () => void;
 }
 
 export type RoomSocket = Socket<RoomServerToClientEvents, RoomClientToServerEvents>;

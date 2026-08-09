@@ -194,6 +194,9 @@ export class RoomService extends EventEmitter {
         );
         room.currentRound.correctUserIds =
           room.currentRound.correctUserIds.filter((id) => id !== userId);
+        room.currentRound.skipUserIds = room.currentRound.skipUserIds.filter(
+          (id) => id !== userId,
+        );
       }
 
       if (room.gameStatus === 'LOADING') {
@@ -202,7 +205,7 @@ export class RoomService extends EventEmitter {
         const allAnswered = room.participants.every((participant) =>
           room.currentRound!.correctUserIds.includes(participant.userId),
         );
-        if (allAnswered) {
+        if (allAnswered || this.hasSkipMajority(room)) {
           this.finalizeRoundEnd(room);
         }
       }
@@ -397,6 +400,30 @@ export class RoomService extends EventEmitter {
     });
   }
 
+  /** 참가자가 현재 라운드 스킵을 요청한다. 과반이 요청하면 라운드가 즉시 종료(정답 공개)된다. */
+  async requestSkip(roomId: string, userId: string): Promise<RoomItemDto> {
+    return this.withRoomLock(roomId, async () => {
+      const room = await this.getRoomOrThrow(roomId);
+      const round = room.currentRound;
+
+      if (!round || room.gameStatus !== 'PLAYING') {
+        return room;
+      }
+
+      if (!round.skipUserIds.includes(userId)) {
+        round.skipUserIds.push(userId);
+      }
+
+      if (this.hasSkipMajority(room)) {
+        this.finalizeRoundEnd(room);
+      }
+
+      await this.saveRoom(room);
+      this.emit('room-updated', room);
+      return room;
+    });
+  }
+
   private assertHost(room: RoomItemDto, requesterUserId: string): void {
     if (room.hostUserId !== requesterUserId) {
       throw new ForbiddenException('방장만 할 수 있는 작업입니다.');
@@ -414,6 +441,16 @@ export class RoomService extends EventEmitter {
     if (allReady) {
       room.gameStatus = 'READY_TO_PLAY';
     }
+  }
+
+  /** 참가자 과반(절반 초과)이 스킵을 요청했는지 확인한다. */
+  private hasSkipMajority(room: RoomItemDto): boolean {
+    const round = room.currentRound;
+    if (!round) {
+      return false;
+    }
+    const majorityThreshold = Math.floor(room.participants.length / 2) + 1;
+    return round.skipUserIds.length >= majorityThreshold;
   }
 
   private finalizeRoundEnd(room: RoomItemDto): void {
@@ -521,6 +558,7 @@ export class RoomService extends EventEmitter {
       endSec: quizSong.endSec,
       readyUserIds: [],
       correctUserIds: [],
+      skipUserIds: [],
       playStartedAt: null,
       revealed: false,
       songNm: null,

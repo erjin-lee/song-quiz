@@ -35,6 +35,13 @@ export class RoundPublicStateDto {
   correctUserIds: string[];
 
   @ApiProperty({
+    description: '이번 라운드 스킵을 요청한 유저 ID 목록(과반이면 라운드가 종료된다)',
+    example: [],
+    type: [String],
+  })
+  skipUserIds: string[];
+
+  @ApiProperty({
     description: '방장이 재생을 시작한 시각(ISO). 아직 시작 전이면 null',
     example: null,
     nullable: true,
