@@ -1,6 +1,30 @@
 export interface RoomParticipantDto {
   userId: string;
   nickname: string;
+  score: number;
+}
+
+export type GameStatus =
+  | 'WAITING'
+  | 'LOADING'
+  | 'READY_TO_PLAY'
+  | 'PLAYING'
+  | 'ROUND_ENDED'
+  | 'FINISHED';
+
+export interface RoundPublicStateDto {
+  roundIndex: number;
+  totalRounds: number;
+  youtubeVideoId: string | null;
+  startSec: number | null;
+  endSec: number | null;
+  readyUserIds: string[];
+  correctUserIds: string[];
+  playStartedAt: string | null;
+  revealed: boolean;
+  songNm: string | null;
+  atstNm: string | null;
+  albmNm: string | null;
 }
 
 export interface RoomItemDto {
@@ -16,6 +40,8 @@ export interface RoomItemDto {
   hostUserId: string;
   participants: RoomParticipantDto[];
   crtDt: string;
+  gameStatus: GameStatus;
+  currentRound: RoundPublicStateDto | null;
 }
 
 export interface RoomJoinResultDto {

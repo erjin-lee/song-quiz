@@ -53,6 +53,7 @@ export function ParticipantList({
                   </span>
                 )}
               </p>
+              <p className="text-xs text-slate-400">{participant.score} P</p>
             </div>
           </div>
         );
