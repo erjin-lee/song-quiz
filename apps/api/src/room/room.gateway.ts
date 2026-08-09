@@ -8,6 +8,7 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { RoomItemDto } from './dto/room-item.dto';
 import { RoomService } from './room.service';
 
 interface EnterRoomPayload {
@@ -26,10 +27,11 @@ interface SocketMembership {
 }
 
 /**
- * 방 채팅 전용 소켓 게이트웨이.
+ * 방 채팅 + 게임 진행 전용 소켓 게이트웨이.
  * 방 입장/퇴장/정원 등 방의 상태 자체는 REST(RoomController)가 기준(source of truth)이다.
- * 이 게이트웨이는 이미 REST로 입장한 유저를 소켓 룸에 연결해 실시간 채팅만 중계하고,
- * 명시적 퇴장(room:leave)이나 비정상 연결 종료 시 RoomService.leaveRoom을 호출해 정원을 정리한다.
+ * 게임 시작/영상 로딩 완료/재생/다음 라운드는 실시간성이 필요해 소켓 이벤트로만 제공한다.
+ * 방 상태가 바뀔 때마다 RoomService가 발생시키는 'room-updated' 이벤트를 구독해
+ * 최신 RoomItemDto를 'room:state'로 방 전체에 브로드캐스트한다.
  *
  * CORS origin은 apps/api/src/main.ts의 HTTP CORS 설정과 동일하게 맞춰야 한다.
  */
@@ -44,7 +46,11 @@ export class RoomGateway implements OnGatewayDisconnect {
   private readonly logger = new Logger(RoomGateway.name);
   private readonly socketMemberships = new Map<string, SocketMembership>();
 
-  constructor(private readonly roomService: RoomService) {}
+  constructor(private readonly roomService: RoomService) {
+    this.roomService.on('room-updated', (room: RoomItemDto) => {
+      this.server?.to(room.roomId).emit('room:state', room);
+    });
+  }
 
   @SubscribeMessage('room:enter')
   async handleEnter(
@@ -77,28 +83,97 @@ export class RoomGateway implements OnGatewayDisconnect {
     client.to(payload.roomId).emit('chat:system', {
       message: `${participant.nickname}님이 입장했습니다.`,
     });
-    this.server
-      .to(payload.roomId)
-      .emit('room:participants-updated', { participants: room.participants });
   }
 
   @SubscribeMessage('chat:message')
-  handleMessage(
+  async handleMessage(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: ChatMessagePayload,
-  ): void {
+  ): Promise<void> {
     const membership = this.socketMemberships.get(client.id);
     if (!membership) {
       client.emit('room:error', { message: '방에 먼저 입장해주세요.' });
       return;
     }
 
-    this.server.to(membership.roomId).emit('chat:message', {
-      userId: membership.userId,
-      nickname: membership.nickname,
-      message: payload.message,
-      sentAt: new Date().toISOString(),
-    });
+    try {
+      const result = await this.roomService.submitChatMessage(
+        membership.roomId,
+        membership.userId,
+        payload.message,
+      );
+
+      if (result.action === 'blocked') {
+        client.emit('room:error', {
+          message: '정답이 포함된 메시지는 전송할 수 없어요.',
+        });
+        return;
+      }
+
+      if (result.action === 'correct' && result.correctInfo) {
+        this.server.to(membership.roomId).emit('chat:system', {
+          message: `🎉 ${result.correctInfo.nickname}님이 정답을 맞췄습니다! (+${result.correctInfo.points}P)`,
+        });
+        return;
+      }
+
+      this.server.to(membership.roomId).emit('chat:message', {
+        userId: membership.userId,
+        nickname: membership.nickname,
+        message: payload.message,
+        sentAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      client.emit('room:error', { message: (err as Error).message });
+    }
+  }
+
+  @SubscribeMessage('game:start')
+  async handleGameStart(@ConnectedSocket() client: Socket): Promise<void> {
+    const membership = this.requireMembership(client);
+    if (!membership) return;
+
+    try {
+      await this.roomService.startGame(membership.roomId, membership.userId);
+    } catch (err) {
+      client.emit('room:error', { message: (err as Error).message });
+    }
+  }
+
+  @SubscribeMessage('game:ready')
+  async handleGameReady(@ConnectedSocket() client: Socket): Promise<void> {
+    const membership = this.requireMembership(client);
+    if (!membership) return;
+
+    try {
+      await this.roomService.markReady(membership.roomId, membership.userId);
+    } catch (err) {
+      client.emit('room:error', { message: (err as Error).message });
+    }
+  }
+
+  @SubscribeMessage('game:play')
+  async handleGamePlay(@ConnectedSocket() client: Socket): Promise<void> {
+    const membership = this.requireMembership(client);
+    if (!membership) return;
+
+    try {
+      await this.roomService.startRound(membership.roomId, membership.userId);
+    } catch (err) {
+      client.emit('room:error', { message: (err as Error).message });
+    }
+  }
+
+  @SubscribeMessage('game:next-round')
+  async handleGameNextRound(@ConnectedSocket() client: Socket): Promise<void> {
+    const membership = this.requireMembership(client);
+    if (!membership) return;
+
+    try {
+      await this.roomService.nextRound(membership.roomId, membership.userId);
+    } catch (err) {
+      client.emit('room:error', { message: (err as Error).message });
+    }
   }
 
   @SubscribeMessage('room:leave')
@@ -108,6 +183,15 @@ export class RoomGateway implements OnGatewayDisconnect {
 
   async handleDisconnect(client: Socket): Promise<void> {
     await this.leaveMembership(client);
+  }
+
+  private requireMembership(client: Socket): SocketMembership | undefined {
+    const membership = this.socketMemberships.get(client.id);
+    if (!membership) {
+      client.emit('room:error', { message: '방에 먼저 입장해주세요.' });
+      return undefined;
+    }
+    return membership;
   }
 
   private async leaveMembership(client: Socket): Promise<void> {
@@ -120,21 +204,10 @@ export class RoomGateway implements OnGatewayDisconnect {
     await client.leave(membership.roomId);
 
     try {
-      const result = await this.roomService.leaveRoom(
-        membership.roomId,
-        membership.userId,
-      );
-
+      await this.roomService.leaveRoom(membership.roomId, membership.userId);
       client.to(membership.roomId).emit('chat:system', {
         message: `${membership.nickname}님이 퇴장했습니다.`,
       });
-      if (!result.roomDeleted && result.room) {
-        this.server
-          .to(membership.roomId)
-          .emit('room:participants-updated', {
-            participants: result.room.participants,
-          });
-      }
     } catch (err) {
       // REST로 이미 퇴장 처리된 경우 등은 정상적인 상황이므로 조용히 무시한다.
       this.logger.debug(

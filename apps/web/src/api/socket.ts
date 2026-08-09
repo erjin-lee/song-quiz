@@ -1,6 +1,6 @@
 import { io, type Socket } from 'socket.io-client';
 import { API_BASE_URL } from './client';
-import type { RoomParticipantDto } from '../types/room';
+import type { RoomItemDto } from '../types/room';
 
 export interface ChatMessageEvent {
   userId: string;
@@ -17,21 +17,21 @@ export interface RoomErrorEvent {
   message: string;
 }
 
-export interface RoomParticipantsUpdatedEvent {
-  participants: RoomParticipantDto[];
-}
-
 export interface RoomServerToClientEvents {
   'chat:message': (payload: ChatMessageEvent) => void;
   'chat:system': (payload: ChatSystemEvent) => void;
   'room:error': (payload: RoomErrorEvent) => void;
-  'room:participants-updated': (payload: RoomParticipantsUpdatedEvent) => void;
+  'room:state': (payload: RoomItemDto) => void;
 }
 
 export interface RoomClientToServerEvents {
   'room:enter': (payload: { roomId: string; userId: string }) => void;
   'chat:message': (payload: { message: string }) => void;
   'room:leave': () => void;
+  'game:start': () => void;
+  'game:ready': () => void;
+  'game:play': () => void;
+  'game:next-round': () => void;
 }
 
 export type RoomSocket = Socket<RoomServerToClientEvents, RoomClientToServerEvents>;

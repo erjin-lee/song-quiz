@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Logo } from '../components/Logo';
 import { ParticipantList } from '../components/ParticipantList';
-import { PlayerCard } from '../components/PlayerCard';
+import { GamePlayer } from '../components/GamePlayer';
 import { ChatPanel, type ChatEntry } from '../components/ChatPanel';
 import { getRoomById, leaveRoom } from '../api/room';
 import { getQuizSongCount } from '../api/quiz';
@@ -121,16 +121,8 @@ export function RoomGamePage() {
       ]);
     });
 
-    socket.on('room:participants-updated', (payload) => {
-      setRoom((prev) =>
-        prev
-          ? {
-              ...prev,
-              participants: payload.participants,
-              curUserCnt: payload.participants.length,
-            }
-          : prev,
-      );
+    socket.on('room:state', (updatedRoom) => {
+      setRoom(updatedRoom);
     });
 
     socket.on('room:error', (payload) => {
@@ -180,6 +172,22 @@ export function RoomGamePage() {
     socketRef.current?.emit('chat:message', { message });
   };
 
+  const handleStartGame = () => {
+    socketRef.current?.emit('game:start');
+  };
+
+  const handleGameReady = () => {
+    socketRef.current?.emit('game:ready');
+  };
+
+  const handlePlay = () => {
+    socketRef.current?.emit('game:play');
+  };
+
+  const handleNextRound = () => {
+    socketRef.current?.emit('game:next-round');
+  };
+
   return (
     <div className="min-h-screen px-4 py-8 sm:px-8">
       <div className="mx-auto flex max-w-5xl flex-col gap-4">
@@ -215,7 +223,14 @@ export function RoomGamePage() {
           </aside>
 
           <main className="flex flex-col gap-4 rounded-2xl bg-white p-5 shadow-sm">
-            <PlayerCard />
+            <GamePlayer
+              room={room}
+              myUserId={userId}
+              onStartGame={handleStartGame}
+              onReady={handleGameReady}
+              onPlay={handlePlay}
+              onNextRound={handleNextRound}
+            />
 
             <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">
               <ChatPanel entries={chatEntries} onSend={handleSendChat} />

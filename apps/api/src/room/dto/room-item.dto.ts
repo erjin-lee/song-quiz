@@ -1,5 +1,14 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { RoomParticipantDto } from './room-participant.dto';
+import { RoundPublicStateDto } from './round-public-state.dto';
+
+export type GameStatus =
+  | 'WAITING'
+  | 'LOADING'
+  | 'READY_TO_PLAY'
+  | 'PLAYING'
+  | 'ROUND_ENDED'
+  | 'FINISHED';
 
 export class RoomItemDto {
   @ApiProperty({
@@ -58,4 +67,18 @@ export class RoomItemDto {
     example: '2026-08-09T08:00:00.000Z',
   })
   crtDt: string;
+
+  @ApiProperty({
+    description:
+      '게임 진행 상태: WAITING(시작 전)/LOADING(라운드 준비, 영상 로딩 대기)/READY_TO_PLAY(전원 로딩 완료, 방장 시작 대기)/PLAYING(재생 중)/ROUND_ENDED(라운드 종료, 다음 라운드 대기)/FINISHED(게임 종료)',
+    example: 'WAITING',
+  })
+  gameStatus: GameStatus;
+
+  @ApiProperty({
+    description: '현재 라운드 정보. 게임 시작 전(WAITING)에는 null',
+    type: RoundPublicStateDto,
+    nullable: true,
+  })
+  currentRound: RoundPublicStateDto | null;
 }

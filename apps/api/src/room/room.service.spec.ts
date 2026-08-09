@@ -1,10 +1,50 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { CacheService } from '../cache/cache.service';
+import { QuizAnswer } from '../quiz/entities/quiz-answer.entity';
 import { QuizArtist } from '../quiz/entities/quiz-artist.entity';
+import { QuizSong } from '../quiz/entities/quiz-song.entity';
 import { Quiz } from '../quiz/entities/quiz.entity';
 import { RoomService } from './room.service';
+
+const QUIZ_SONGS = [
+  {
+    quizSongId: '101',
+    quizId: '1',
+    quizSeq: 1,
+    youtubeVideoId: 'video1',
+    startSec: 10,
+    endSec: 40,
+    song: {
+      songNm: '노래1',
+      artist: { atstNm: '아이유' },
+      album: { albmNm: '앨범1' },
+    },
+  },
+  {
+    quizSongId: '102',
+    quizId: '1',
+    quizSeq: 2,
+    youtubeVideoId: 'video2',
+    startSec: 0,
+    endSec: 30,
+    song: {
+      songNm: '노래2',
+      artist: { atstNm: '아이유' },
+      album: { albmNm: '앨범2' },
+    },
+  },
+];
+
+const QUIZ_ANSWERS: Record<string, string[]> = {
+  '101': ['노래1', '노래 1'],
+  '102': ['노래2'],
+};
 
 describe('RoomService', () => {
   let roomService: RoomService;
@@ -14,6 +54,13 @@ describe('RoomService', () => {
     findOne: jest.fn(),
   };
   const quizArtistRepositoryMock = {
+    find: jest.fn(),
+  };
+  const quizSongRepositoryMock = {
+    find: jest.fn(),
+    findOne: jest.fn(),
+  };
+  const quizAnswerRepositoryMock = {
     find: jest.fn(),
   };
 
@@ -28,6 +75,21 @@ describe('RoomService', () => {
     quizArtistRepositoryMock.find.mockResolvedValue([
       { atstId: '10', artist: { atstNm: '아이유' } },
     ]);
+    quizSongRepositoryMock.find.mockResolvedValue(QUIZ_SONGS);
+    quizSongRepositoryMock.findOne.mockImplementation(
+      ({ where }: { where: { quizSongId: string } }) =>
+        Promise.resolve(
+          QUIZ_SONGS.find((qs) => qs.quizSongId === where.quizSongId) ?? null,
+        ),
+    );
+    quizAnswerRepositoryMock.find.mockImplementation(
+      ({ where }: { where: { quizSongId: string } }) =>
+        Promise.resolve(
+          (QUIZ_ANSWERS[where.quizSongId] ?? []).map((answerTxt) => ({
+            answerTxt,
+          })),
+        ),
+    );
 
     const app: TestingModule = await Test.createTestingModule({
       providers: [
@@ -37,6 +99,14 @@ describe('RoomService', () => {
         {
           provide: getRepositoryToken(QuizArtist),
           useValue: quizArtistRepositoryMock,
+        },
+        {
+          provide: getRepositoryToken(QuizSong),
+          useValue: quizSongRepositoryMock,
+        },
+        {
+          provide: getRepositoryToken(QuizAnswer),
+          useValue: quizAnswerRepositoryMock,
         },
       ],
     }).compile();
@@ -49,159 +119,350 @@ describe('RoomService', () => {
     await cacheService.onModuleDestroy();
   });
 
-  it('방을 생성하면 방장이 참가자로 포함되고 아티스트 정보가 채워진다', async () => {
-    const result = await roomService.createRoom({
+  async function createTestRoom(maxUserCnt = 4) {
+    return roomService.createRoom({
       roomTtl: '아이유 방',
       quizId: '1',
       isRandom: false,
-      maxUserCnt: 4,
+      maxUserCnt,
       nickname: '방장',
     });
+  }
 
-    expect(result.room.quizTtl).toBe('아이유');
-    expect(result.room.atstIds).toEqual(['10']);
-    expect(result.room.atstNms).toEqual(['아이유']);
-    expect(result.room.curUserCnt).toBe(1);
-    expect(result.room.hostUserId).toBe(result.userId);
-    expect(result.room.participants).toEqual([
-      { userId: result.userId, nickname: '방장' },
-    ]);
+  describe('방 생성/입장/퇴장', () => {
+    it('방을 생성하면 방장이 참가자로 포함되고 아티스트 정보가 채워진다', async () => {
+      const result = await createTestRoom();
+
+      expect(result.room.quizTtl).toBe('아이유');
+      expect(result.room.atstIds).toEqual(['10']);
+      expect(result.room.atstNms).toEqual(['아이유']);
+      expect(result.room.curUserCnt).toBe(1);
+      expect(result.room.hostUserId).toBe(result.userId);
+      expect(result.room.gameStatus).toBe('WAITING');
+      expect(result.room.currentRound).toBeNull();
+      expect(result.room.participants).toEqual([
+        { userId: result.userId, nickname: '방장', score: 0 },
+      ]);
+    });
+
+    it('존재하지 않는 퀴즈로 생성하면 NotFoundException', async () => {
+      quizRepositoryMock.findOne.mockResolvedValue(null);
+
+      await expect(
+        roomService.createRoom({
+          roomTtl: '방',
+          quizId: '999',
+          isRandom: false,
+          maxUserCnt: 4,
+          nickname: '방장',
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('생성한 방은 목록 조회에 나타난다', async () => {
+      const { room } = await createTestRoom();
+
+      const rooms = await roomService.getRooms();
+
+      expect(rooms.map((r) => r.roomId)).toContain(room.roomId);
+    });
+
+    it('입장하면 참가자가 추가되고 현재 인원이 증가한다', async () => {
+      const { room } = await createTestRoom();
+
+      const joinResult = await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+      });
+
+      expect(joinResult.room.curUserCnt).toBe(2);
+      expect(joinResult.room.participants).toEqual([
+        { userId: room.hostUserId, nickname: '방장', score: 0 },
+        { userId: joinResult.userId, nickname: '참가자1', score: 0 },
+      ]);
+    });
+
+    it('정원이 가득 찬 방에 입장하면 ConflictException', async () => {
+      const { room } = await createTestRoom(1);
+
+      await expect(
+        roomService.joinRoom(room.roomId, { nickname: '참가자1' }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('존재하지 않는 방에 입장하면 NotFoundException', async () => {
+      await expect(
+        roomService.joinRoom('없는방', { nickname: '참가자1' }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('퇴장하면 참가자가 제거되고, 마지막 참가자가 나가면 방이 삭제된다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom();
+      const { userId: guestUserId } = await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+      });
+
+      const afterHostLeaves = await roomService.leaveRoom(
+        room.roomId,
+        hostUserId,
+      );
+      expect(afterHostLeaves.roomDeleted).toBe(false);
+      expect(afterHostLeaves.room?.hostUserId).toBe(guestUserId);
+      expect(afterHostLeaves.room?.curUserCnt).toBe(1);
+
+      const afterGuestLeaves = await roomService.leaveRoom(
+        room.roomId,
+        guestUserId,
+      );
+      expect(afterGuestLeaves.roomDeleted).toBe(true);
+
+      const rooms = await roomService.getRooms();
+      expect(rooms.map((r) => r.roomId)).not.toContain(room.roomId);
+    });
+
+    it('방에 없는 유저가 퇴장을 시도하면 NotFoundException', async () => {
+      const { room } = await createTestRoom();
+
+      await expect(
+        roomService.leaveRoom(room.roomId, '존재하지-않는-유저'),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('동시에 여러 명이 입장해도 정원을 초과하지 않는다', async () => {
+      const { room } = await createTestRoom(3);
+
+      const results = await Promise.allSettled([
+        roomService.joinRoom(room.roomId, { nickname: 'A' }),
+        roomService.joinRoom(room.roomId, { nickname: 'B' }),
+        roomService.joinRoom(room.roomId, { nickname: 'C' }),
+      ]);
+
+      const fulfilled = results.filter((r) => r.status === 'fulfilled');
+      const rejected = results.filter((r) => r.status === 'rejected');
+
+      expect(fulfilled).toHaveLength(2);
+      expect(rejected).toHaveLength(1);
+
+      const finalRoom = await roomService.getRoom(room.roomId);
+      expect(finalRoom?.curUserCnt).toBe(3);
+    });
   });
 
-  it('존재하지 않는 퀴즈로 생성하면 NotFoundException', async () => {
-    quizRepositoryMock.findOne.mockResolvedValue(null);
+  describe('게임 진행', () => {
+    it('방장만 게임을 시작할 수 있다', async () => {
+      const { room } = await createTestRoom();
+      const { userId: guestUserId } = await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+      });
 
-    await expect(
-      roomService.createRoom({
-        roomTtl: '방',
-        quizId: '999',
-        isRandom: false,
-        maxUserCnt: 4,
+      await expect(
+        roomService.startGame(room.roomId, guestUserId),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('게임을 시작하면 첫 라운드가 준비되고 정답 정보는 노출하지 않는다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom();
+
+      const started = await roomService.startGame(room.roomId, hostUserId);
+
+      expect(started.gameStatus).toBe('LOADING');
+      expect(started.currentRound?.roundIndex).toBe(0);
+      expect(started.currentRound?.totalRounds).toBe(2);
+      expect(started.currentRound?.youtubeVideoId).toBe('video1');
+      expect(started.currentRound?.revealed).toBe(false);
+      expect(started.currentRound?.songNm).toBeNull();
+    });
+
+    it('모든 참가자가 로딩 완료를 알려야 READY_TO_PLAY가 된다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom();
+      const { userId: guestUserId } = await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+      });
+      await roomService.startGame(room.roomId, hostUserId);
+
+      const afterHostReady = await roomService.markReady(
+        room.roomId,
+        hostUserId,
+      );
+      expect(afterHostReady.gameStatus).toBe('LOADING');
+
+      const afterGuestReady = await roomService.markReady(
+        room.roomId,
+        guestUserId,
+      );
+      expect(afterGuestReady.gameStatus).toBe('READY_TO_PLAY');
+    });
+
+    it('전원 로딩 완료 전에는 재생을 시작할 수 없다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom();
+      await roomService.startGame(room.roomId, hostUserId);
+
+      await expect(
+        roomService.startRound(room.roomId, hostUserId),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('전원 로딩 완료 후 방장이 재생을 시작하면 PLAYING 상태가 된다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom(1);
+      await roomService.startGame(room.roomId, hostUserId);
+      await roomService.markReady(room.roomId, hostUserId);
+
+      const started = await roomService.startRound(room.roomId, hostUserId);
+
+      expect(started.gameStatus).toBe('PLAYING');
+      expect(started.currentRound?.playStartedAt).not.toBeNull();
+    });
+
+    it('정답과 무관한 채팅은 그대로 broadcast된다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom(1);
+      await roomService.startGame(room.roomId, hostUserId);
+      await roomService.markReady(room.roomId, hostUserId);
+      await roomService.startRound(room.roomId, hostUserId);
+
+      const result = await roomService.submitChatMessage(
+        room.roomId,
+        hostUserId,
+        '안녕하세요',
+      );
+
+      expect(result.action).toBe('broadcast');
+    });
+
+    it('정답 텍스트가 포함된 메시지는 채팅에 올라가지 않는다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom(1);
+      await roomService.startGame(room.roomId, hostUserId);
+      await roomService.markReady(room.roomId, hostUserId);
+      await roomService.startRound(room.roomId, hostUserId);
+
+      const result = await roomService.submitChatMessage(
+        room.roomId,
+        hostUserId,
+        '정답은 노래1 같은데',
+      );
+
+      expect(result.action).toBe('blocked');
+    });
+
+    it('정답과 정확히 일치하면 점수를 받고 정답 처리된다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom(2);
+      const { userId: guestUserId } = await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+      });
+      await roomService.startGame(room.roomId, hostUserId);
+      await roomService.markReady(room.roomId, hostUserId);
+      await roomService.markReady(room.roomId, guestUserId);
+      await roomService.startRound(room.roomId, hostUserId);
+
+      const firstResult = await roomService.submitChatMessage(
+        room.roomId,
+        hostUserId,
+        '노래1',
+      );
+      expect(firstResult.action).toBe('correct');
+      expect(firstResult.correctInfo).toEqual({
+        userId: hostUserId,
         nickname: '방장',
-      }),
-    ).rejects.toThrow(NotFoundException);
-  });
+        points: 6,
+        rank: 1,
+      });
 
-  it('생성한 방은 목록 조회에 나타난다', async () => {
-    const { room } = await roomService.createRoom({
-      roomTtl: '아이유 방',
-      quizId: '1',
-      isRandom: false,
-      maxUserCnt: 4,
-      nickname: '방장',
+      const secondResult = await roomService.submitChatMessage(
+        room.roomId,
+        guestUserId,
+        '노래 1',
+      );
+      expect(secondResult.action).toBe('correct');
+      expect(secondResult.correctInfo?.points).toBe(4);
+      expect(secondResult.correctInfo?.rank).toBe(2);
+
+      const roomAfter = await roomService.getRoom(room.roomId);
+      expect(
+        roomAfter?.participants.find((p) => p.userId === hostUserId)?.score,
+      ).toBe(6);
+      expect(
+        roomAfter?.participants.find((p) => p.userId === guestUserId)?.score,
+      ).toBe(4);
+
+      // 전원이 맞췄으므로 라운드가 자동 종료되고 정답이 공개된다.
+      expect(roomAfter?.gameStatus).toBe('ROUND_ENDED');
+      expect(roomAfter?.currentRound?.revealed).toBe(true);
+      expect(roomAfter?.currentRound?.songNm).toBe('노래1');
     });
 
-    const rooms = await roomService.getRooms();
+    it('이미 정답을 맞춘 사람이 같은 정답을 다시 보내면 blocked 처리된다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom(2);
+      const { userId: guestUserId } = await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+      });
+      await roomService.startGame(room.roomId, hostUserId);
+      await roomService.markReady(room.roomId, hostUserId);
+      await roomService.markReady(room.roomId, guestUserId);
+      await roomService.startRound(room.roomId, hostUserId);
 
-    expect(rooms.map((r) => r.roomId)).toContain(room.roomId);
-  });
+      await roomService.submitChatMessage(room.roomId, hostUserId, '노래1');
+      const repeated = await roomService.submitChatMessage(
+        room.roomId,
+        hostUserId,
+        '노래1',
+      );
 
-  it('입장하면 참가자가 추가되고 현재 인원이 증가한다', async () => {
-    const { room } = await roomService.createRoom({
-      roomTtl: '아이유 방',
-      quizId: '1',
-      isRandom: false,
-      maxUserCnt: 4,
-      nickname: '방장',
+      expect(repeated.action).toBe('blocked');
     });
 
-    const joinResult = await roomService.joinRoom(room.roomId, {
-      nickname: '참가자1',
+    it('제한 시간이 지나면 라운드가 자동 종료된다', async () => {
+      jest.useFakeTimers();
+      try {
+        const { room, userId: hostUserId } = await createTestRoom(1);
+        await roomService.startGame(room.roomId, hostUserId);
+        await roomService.markReady(room.roomId, hostUserId);
+        await roomService.startRound(room.roomId, hostUserId);
+
+        await jest.advanceTimersByTimeAsync(30_000);
+
+        const roomAfter = await roomService.getRoom(room.roomId);
+        expect(roomAfter?.gameStatus).toBe('ROUND_ENDED');
+        expect(roomAfter?.currentRound?.revealed).toBe(true);
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
-    expect(joinResult.room.curUserCnt).toBe(2);
-    expect(joinResult.room.participants).toEqual([
-      { userId: room.hostUserId, nickname: '방장' },
-      { userId: joinResult.userId, nickname: '참가자1' },
-    ]);
-  });
+    it('방장만 다음 라운드로 넘어갈 수 있고, 라운드가 끝나야 넘어갈 수 있다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom(1);
+      await roomService.startGame(room.roomId, hostUserId);
 
-  it('정원이 가득 찬 방에 입장하면 ConflictException', async () => {
-    const { room } = await roomService.createRoom({
-      roomTtl: '방',
-      quizId: '1',
-      isRandom: false,
-      maxUserCnt: 1,
-      nickname: '방장',
+      await expect(
+        roomService.nextRound(room.roomId, hostUserId),
+      ).rejects.toThrow(ConflictException);
+
+      await roomService.markReady(room.roomId, hostUserId);
+      await roomService.startRound(room.roomId, hostUserId);
+      await roomService.submitChatMessage(room.roomId, hostUserId, '노래1');
+
+      await expect(roomService.nextRound(room.roomId, '남')).rejects.toThrow(
+        ForbiddenException,
+      );
+
+      const next = await roomService.nextRound(room.roomId, hostUserId);
+      expect(next.gameStatus).toBe('LOADING');
+      expect(next.currentRound?.roundIndex).toBe(1);
+      expect(next.currentRound?.youtubeVideoId).toBe('video2');
     });
 
-    await expect(
-      roomService.joinRoom(room.roomId, { nickname: '참가자1' }),
-    ).rejects.toThrow(ConflictException);
-  });
+    it('마지막 라운드까지 끝나면 게임이 FINISHED로 종료된다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom(1);
+      await roomService.startGame(room.roomId, hostUserId);
+      await roomService.markReady(room.roomId, hostUserId);
+      await roomService.startRound(room.roomId, hostUserId);
+      await roomService.submitChatMessage(room.roomId, hostUserId, '노래1');
+      await roomService.nextRound(room.roomId, hostUserId);
 
-  it('존재하지 않는 방에 입장하면 NotFoundException', async () => {
-    await expect(
-      roomService.joinRoom('없는방', { nickname: '참가자1' }),
-    ).rejects.toThrow(NotFoundException);
-  });
+      await roomService.markReady(room.roomId, hostUserId);
+      await roomService.startRound(room.roomId, hostUserId);
+      await roomService.submitChatMessage(room.roomId, hostUserId, '노래2');
+      const finished = await roomService.nextRound(room.roomId, hostUserId);
 
-  it('퇴장하면 참가자가 제거되고, 마지막 참가자가 나가면 방이 삭제된다', async () => {
-    const { room, userId: hostUserId } = await roomService.createRoom({
-      roomTtl: '아이유 방',
-      quizId: '1',
-      isRandom: false,
-      maxUserCnt: 4,
-      nickname: '방장',
+      expect(finished.gameStatus).toBe('FINISHED');
+      expect(finished.currentRound).toBeNull();
     });
-    const { userId: guestUserId } = await roomService.joinRoom(room.roomId, {
-      nickname: '참가자1',
-    });
-
-    const afterHostLeaves = await roomService.leaveRoom(
-      room.roomId,
-      hostUserId,
-    );
-    expect(afterHostLeaves.roomDeleted).toBe(false);
-    expect(afterHostLeaves.room?.hostUserId).toBe(guestUserId);
-    expect(afterHostLeaves.room?.curUserCnt).toBe(1);
-
-    const afterGuestLeaves = await roomService.leaveRoom(
-      room.roomId,
-      guestUserId,
-    );
-    expect(afterGuestLeaves.roomDeleted).toBe(true);
-
-    const rooms = await roomService.getRooms();
-    expect(rooms.map((r) => r.roomId)).not.toContain(room.roomId);
-  });
-
-  it('방에 없는 유저가 퇴장을 시도하면 NotFoundException', async () => {
-    const { room } = await roomService.createRoom({
-      roomTtl: '방',
-      quizId: '1',
-      isRandom: false,
-      maxUserCnt: 4,
-      nickname: '방장',
-    });
-
-    await expect(
-      roomService.leaveRoom(room.roomId, '존재하지-않는-유저'),
-    ).rejects.toThrow(NotFoundException);
-  });
-
-  it('동시에 여러 명이 입장해도 정원을 초과하지 않는다', async () => {
-    const { room } = await roomService.createRoom({
-      roomTtl: '방',
-      quizId: '1',
-      isRandom: false,
-      maxUserCnt: 3,
-      nickname: '방장',
-    });
-
-    const results = await Promise.allSettled([
-      roomService.joinRoom(room.roomId, { nickname: 'A' }),
-      roomService.joinRoom(room.roomId, { nickname: 'B' }),
-      roomService.joinRoom(room.roomId, { nickname: 'C' }),
-    ]);
-
-    const fulfilled = results.filter((r) => r.status === 'fulfilled');
-    const rejected = results.filter((r) => r.status === 'rejected');
-
-    expect(fulfilled).toHaveLength(2);
-    expect(rejected).toHaveLength(1);
-
-    const finalRoom = await roomService.getRoom(room.roomId);
-    expect(finalRoom?.curUserCnt).toBe(3);
   });
 });

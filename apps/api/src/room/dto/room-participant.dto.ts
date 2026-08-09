@@ -9,4 +9,7 @@ export class RoomParticipantDto {
 
   @ApiProperty({ description: '닉네임', example: '홍길동' })
   nickname: string;
+
+  @ApiProperty({ description: '누적 점수', example: 0 })
+  score: number;
 }
