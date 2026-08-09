@@ -1,0 +1,5 @@
+@import 'tailwindcss';
+
+body {
+  @apply bg-gradient-to-br from-purple-100 via-fuchsia-50 to-pink-100 text-slate-800;
+}
