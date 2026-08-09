@@ -9,6 +9,7 @@ interface GamePlayerProps {
   onStartGame: () => void;
   onPlay: () => void;
   onNextRound: () => void;
+  onSkip: () => void;
 }
 
 export function GamePlayer({
@@ -18,6 +19,7 @@ export function GamePlayer({
   onStartGame,
   onPlay,
   onNextRound,
+  onSkip,
 }: GamePlayerProps) {
   const isHost = room.hostUserId === myUserId;
   const round = room.currentRound;
@@ -34,6 +36,39 @@ export function GamePlayer({
       playerRef.current?.getInternalPlayer()?.playVideo();
     }
   }, [room.gameStatus, round]);
+
+  // 방장이 대기 상태(재생/다음 라운드 버튼 대기)일 때 Enter로 바로 진행할 수 있게 한다.
+  // 채팅 입력창에 포커스가 있을 때는 채팅 전송과 겹치지 않도록 무시한다.
+  useEffect(() => {
+    if (!isHost) {
+      return;
+    }
+    if (room.gameStatus !== 'READY_TO_PLAY' && room.gameStatus !== 'ROUND_ENDED') {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter') {
+        return;
+      }
+      const target = event.target;
+      const isTyping =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement;
+      if (isTyping) {
+        return;
+      }
+
+      if (room.gameStatus === 'READY_TO_PLAY') {
+        onPlay();
+      } else if (room.gameStatus === 'ROUND_ENDED') {
+        onNextRound();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isHost, room.gameStatus, onPlay, onNextRound]);
 
   if (room.gameStatus === 'WAITING') {
     return (
@@ -147,7 +182,21 @@ export function GamePlayer({
         ))}
 
       {room.gameStatus === 'PLAYING' && (
-        <p className="text-sm text-slate-500">정답을 채팅창에 입력하세요</p>
+        <div className="flex flex-col items-center gap-2">
+          <p className="text-sm text-slate-500">정답을 채팅창에 입력하세요</p>
+          <button
+            type="button"
+            onClick={onSkip}
+            disabled={round.skipUserIds.includes(myUserId)}
+            className="rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+          >
+            {round.skipUserIds.includes(myUserId)
+              ? '스킵 요청함'
+              : '스킵'}{' '}
+            ({round.skipUserIds.length}/
+            {Math.floor(room.participants.length / 2) + 1})
+          </button>
+        </div>
       )}
 
       {room.gameStatus === 'ROUND_ENDED' && (

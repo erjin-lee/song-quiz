@@ -176,6 +176,18 @@ export class RoomGateway implements OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('game:skip')
+  async handleGameSkip(@ConnectedSocket() client: Socket): Promise<void> {
+    const membership = this.requireMembership(client);
+    if (!membership) return;
+
+    try {
+      await this.roomService.requestSkip(membership.roomId, membership.userId);
+    } catch (err) {
+      client.emit('room:error', { message: (err as Error).message });
+    }
+  }
+
   @SubscribeMessage('room:leave')
   async handleLeave(@ConnectedSocket() client: Socket): Promise<void> {
     await this.leaveMembership(client);
