@@ -11,6 +11,10 @@ export function getRooms(): Promise<RoomItemDto[]> {
   return apiGet<RoomItemDto[]>('/rooms');
 }
 
+export function getRoomById(roomId: string): Promise<RoomItemDto> {
+  return apiGet<RoomItemDto>(`/rooms/${roomId}`);
+}
+
 export function createRoom(
   body: CreateRoomRequestDto,
 ): Promise<RoomJoinResultDto> {

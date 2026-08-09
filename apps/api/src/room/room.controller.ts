@@ -1,4 +1,11 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  NotFoundException,
+  Param,
+  Post,
+} from '@nestjs/common';
 import {
   ApiConflictResponse,
   ApiNotFoundResponse,
@@ -25,6 +32,19 @@ export class RoomController {
   @ApiOkResponse({ description: '방 목록', type: RoomItemDto, isArray: true })
   getRooms(): Promise<RoomItemDto[]> {
     return this.roomService.getRooms();
+  }
+
+  @Get(':roomId')
+  @ApiOperation({ summary: '퀴즈 방 단건 조회(새로고침 시 방 상태 복구용)' })
+  @ApiParam({ name: 'roomId', description: '방 ID' })
+  @ApiOkResponse({ description: '방 정보', type: RoomItemDto })
+  @ApiNotFoundResponse({ description: '방을 찾을 수 없음' })
+  async getRoom(@Param('roomId') roomId: string): Promise<RoomItemDto> {
+    const room = await this.roomService.getRoom(roomId);
+    if (!room) {
+      throw new NotFoundException(`방을 찾을 수 없습니다. (roomId: ${roomId})`);
+    }
+    return room;
   }
 
   @Post()

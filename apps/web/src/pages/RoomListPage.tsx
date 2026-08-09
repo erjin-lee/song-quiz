@@ -10,6 +10,7 @@ import { useSession } from '../context/SessionContext';
 import { ApiError } from '../api/client';
 import { getQuizzes } from '../api/quiz';
 import { createRoom, getRooms, joinRoom } from '../api/room';
+import { saveRoomSession } from '../utils/roomSession';
 import type { QuizListItemDto } from '../types/quiz';
 import type { RoomItemDto } from '../types/room';
 
@@ -72,6 +73,7 @@ export function RoomListPage() {
     setCreateError(null);
     try {
       const result = await createRoom({ ...values, nickname });
+      saveRoomSession({ roomId: result.room.roomId, userId: result.userId });
       navigate(`/rooms/${result.room.roomId}`, {
         state: { room: result.room, userId: result.userId },
       });
@@ -89,6 +91,7 @@ export function RoomListPage() {
     setListError(null);
     try {
       const result = await joinRoom(roomId, { nickname });
+      saveRoomSession({ roomId, userId: result.userId });
       navigate(`/rooms/${roomId}`, {
         state: { room: result.room, userId: result.userId },
       });

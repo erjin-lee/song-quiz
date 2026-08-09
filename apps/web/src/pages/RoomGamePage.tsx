@@ -4,10 +4,14 @@ import { Logo } from '../components/Logo';
 import { ParticipantList } from '../components/ParticipantList';
 import { PlayerCard } from '../components/PlayerCard';
 import { ChatPanel, type ChatEntry } from '../components/ChatPanel';
-import { useSession } from '../context/SessionContext';
-import { leaveRoom } from '../api/room';
+import { getRoomById, leaveRoom } from '../api/room';
 import { getQuizSongCount } from '../api/quiz';
 import { createRoomSocket, type RoomSocket } from '../api/socket';
+import {
+  clearRoomSession,
+  loadRoomSession,
+  saveRoomSession,
+} from '../utils/roomSession';
 import type { RoomItemDto } from '../types/room';
 
 interface LocationState {
@@ -22,18 +26,76 @@ export function RoomGamePage() {
   const { roomId } = useParams<{ roomId: string }>();
   const location = useLocation();
   const navigate = useNavigate();
-  const { nickname } = useSession();
 
   const state = location.state as LocationState | null;
 
   const [room, setRoom] = useState<RoomItemDto | null>(state?.room ?? null);
+  const [userId, setUserId] = useState<string | null>(state?.userId ?? null);
+  const [loading, setLoading] = useState(true);
   const [chatEntries, setChatEntries] = useState<ChatEntry[]>([]);
   const [songCount, setSongCount] = useState<number | null>(null);
   const socketRef = useRef<RoomSocket | null>(null);
 
+  // 방 상태를 서버에서 최신으로 확인/복구한다. 새로고침으로 location.state가
+  // 사라진 경우 로컬스토리지에 저장해둔 { roomId, userId }로 이어서 입장한다.
   useEffect(() => {
-    if (!nickname || !state || !roomId) {
+    if (!roomId) {
       navigate('/rooms', { replace: true });
+      return;
+    }
+
+    const candidateUserId =
+      state?.userId ??
+      (() => {
+        const session = loadRoomSession();
+        return session && session.roomId === roomId ? session.userId : null;
+      })();
+
+    if (!candidateUserId) {
+      navigate('/rooms', { replace: true });
+      return;
+    }
+
+    let cancelled = false;
+
+    getRoomById(roomId)
+      .then((fetchedRoom) => {
+        if (cancelled) {
+          return;
+        }
+        const isParticipant = fetchedRoom.participants.some(
+          (participant) => participant.userId === candidateUserId,
+        );
+        if (!isParticipant) {
+          clearRoomSession();
+          navigate('/rooms', { replace: true });
+          return;
+        }
+
+        saveRoomSession({ roomId, userId: candidateUserId });
+        setRoom(fetchedRoom);
+        setUserId(candidateUserId);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          clearRoomSession();
+          navigate('/rooms', { replace: true });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId]);
+
+  useEffect(() => {
+    if (!roomId || !userId) {
       return;
     }
 
@@ -79,14 +141,13 @@ export function RoomGamePage() {
     });
 
     socket.connect();
-    socket.emit('room:enter', { roomId, userId: state.userId });
+    socket.emit('room:enter', { roomId, userId });
 
     return () => {
       socket.disconnect();
       socketRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId]);
+  }, [roomId, userId]);
 
   const quizId = room?.quizId;
   useEffect(() => {
@@ -98,14 +159,19 @@ export function RoomGamePage() {
       .catch(() => setSongCount(null));
   }, [quizId]);
 
-  if (!room || !state) {
-    return null;
+  if (!room || !userId) {
+    return (
+      <div className="flex min-h-screen items-center justify-center text-sm text-slate-400">
+        {loading ? '방 정보를 불러오는 중...' : null}
+      </div>
+    );
   }
 
   const handleLeave = async () => {
     try {
-      await leaveRoom(room.roomId, state.userId);
+      await leaveRoom(room.roomId, userId);
     } finally {
+      clearRoomSession();
       navigate('/rooms', { replace: true });
     }
   };
@@ -143,7 +209,7 @@ export function RoomGamePage() {
             <ParticipantList
               participants={room.participants}
               hostUserId={room.hostUserId}
-              currentUserId={state.userId}
+              currentUserId={userId}
               maxUserCnt={room.maxUserCnt}
             />
           </aside>
