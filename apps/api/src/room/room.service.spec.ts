@@ -272,7 +272,7 @@ describe('RoomService', () => {
       expect(started.currentRound?.songNm).toBeNull();
     });
 
-    it('모든 참가자가 로딩 완료를 알려야 READY_TO_PLAY가 된다', async () => {
+    it('모든 참가자가 로딩 완료를 알리면 별도 조작 없이 자동으로 재생이 시작된다', async () => {
       const { room, userId: hostUserId } = await createTestRoom();
       const { userId: guestUserId } = await roomService.joinRoom(room.roomId, {
         nickname: '참가자1',
@@ -289,34 +289,14 @@ describe('RoomService', () => {
         room.roomId,
         guestUserId,
       );
-      expect(afterGuestReady.gameStatus).toBe('READY_TO_PLAY');
-    });
-
-    it('전원 로딩 완료 전에는 재생을 시작할 수 없다', async () => {
-      const { room, userId: hostUserId } = await createTestRoom();
-      await roomService.startGame(room.roomId, hostUserId);
-
-      await expect(
-        roomService.startRound(room.roomId, hostUserId),
-      ).rejects.toThrow(ConflictException);
-    });
-
-    it('전원 로딩 완료 후 방장이 재생을 시작하면 PLAYING 상태가 된다', async () => {
-      const { room, userId: hostUserId } = await createTestRoom(1);
-      await roomService.startGame(room.roomId, hostUserId);
-      await roomService.markReady(room.roomId, hostUserId);
-
-      const started = await roomService.startRound(room.roomId, hostUserId);
-
-      expect(started.gameStatus).toBe('PLAYING');
-      expect(started.currentRound?.playStartedAt).not.toBeNull();
+      expect(afterGuestReady.gameStatus).toBe('PLAYING');
+      expect(afterGuestReady.currentRound?.playStartedAt).not.toBeNull();
     });
 
     it('정답과 무관한 채팅은 그대로 broadcast된다', async () => {
       const { room, userId: hostUserId } = await createTestRoom(1);
       await roomService.startGame(room.roomId, hostUserId);
       await roomService.markReady(room.roomId, hostUserId);
-      await roomService.startRound(room.roomId, hostUserId);
 
       const result = await roomService.submitChatMessage(
         room.roomId,
@@ -331,7 +311,6 @@ describe('RoomService', () => {
       const { room, userId: hostUserId } = await createTestRoom(1);
       await roomService.startGame(room.roomId, hostUserId);
       await roomService.markReady(room.roomId, hostUserId);
-      await roomService.startRound(room.roomId, hostUserId);
 
       const result = await roomService.submitChatMessage(
         room.roomId,
@@ -350,7 +329,6 @@ describe('RoomService', () => {
       await roomService.startGame(room.roomId, hostUserId);
       await roomService.markReady(room.roomId, hostUserId);
       await roomService.markReady(room.roomId, guestUserId);
-      await roomService.startRound(room.roomId, hostUserId);
 
       const firstResult = await roomService.submitChatMessage(
         room.roomId,
@@ -396,7 +374,6 @@ describe('RoomService', () => {
       await roomService.startGame(room.roomId, hostUserId);
       await roomService.markReady(room.roomId, hostUserId);
       await roomService.markReady(room.roomId, guestUserId);
-      await roomService.startRound(room.roomId, hostUserId);
 
       await roomService.submitChatMessage(room.roomId, hostUserId, '노래1');
       const repeated = await roomService.submitChatMessage(
@@ -421,8 +398,7 @@ describe('RoomService', () => {
         room.roomId,
         (await roomService.getRoom(room.roomId))!.participants[2].userId,
       );
-      expect(finalReady.gameStatus).toBe('READY_TO_PLAY');
-      await roomService.startRound(room.roomId, hostUserId);
+      expect(finalReady.gameStatus).toBe('PLAYING');
 
       // 3명 중 1명만 스킵 요청 -> 과반(2명) 미달이므로 라운드 유지
       const afterOneSkip = await roomService.requestSkip(
@@ -446,7 +422,6 @@ describe('RoomService', () => {
       await roomService.markReady(room.roomId, hostUserId);
       await roomService.markReady(room.roomId, guest1);
       await roomService.markReady(room.roomId, guest2);
-      await roomService.startRound(room.roomId, hostUserId);
 
       await roomService.requestSkip(room.roomId, hostUserId);
       const afterMajoritySkip = await roomService.requestSkip(
@@ -472,7 +447,6 @@ describe('RoomService', () => {
         room.roomId,
         (await roomService.getRoom(room.roomId))!.participants[2].userId,
       );
-      await roomService.startRound(room.roomId, hostUserId);
 
       await roomService.requestSkip(room.roomId, hostUserId);
       const afterRepeatedSkip = await roomService.requestSkip(
@@ -492,13 +466,60 @@ describe('RoomService', () => {
         const { room, userId: hostUserId } = await createTestRoom(1);
         await roomService.startGame(room.roomId, hostUserId);
         await roomService.markReady(room.roomId, hostUserId);
-        await roomService.startRound(room.roomId, hostUserId);
 
         await jest.advanceTimersByTimeAsync(30_000);
 
         const roomAfter = await roomService.getRoom(room.roomId);
         expect(roomAfter?.gameStatus).toBe('ROUND_ENDED');
         expect(roomAfter?.currentRound?.revealed).toBe(true);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('방장만 강제 스킵을 요청할 수 있다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom(2);
+      const { userId: guestUserId } = await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+      });
+      await roomService.startGame(room.roomId, hostUserId);
+      await roomService.markReady(room.roomId, hostUserId);
+      await roomService.markReady(room.roomId, guestUserId);
+
+      await expect(
+        roomService.forceSkip(room.roomId, guestUserId),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('재생 중이 아니면 강제 스킵을 요청할 수 없다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom(1);
+      await roomService.startGame(room.roomId, hostUserId);
+
+      await expect(
+        roomService.forceSkip(room.roomId, hostUserId),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('방장이 강제 스킵을 요청하면 유예 시간 후 라운드가 종료(정답 공개)된다', async () => {
+      jest.useFakeTimers();
+      try {
+        const { room, userId: hostUserId } = await createTestRoom(1);
+        await roomService.startGame(room.roomId, hostUserId);
+        await roomService.markReady(room.roomId, hostUserId);
+
+        const afterForceSkip = await roomService.forceSkip(
+          room.roomId,
+          hostUserId,
+        );
+        expect(afterForceSkip.gameStatus).toBe('PLAYING');
+        expect(afterForceSkip.currentRound?.forceSkipAt).not.toBeNull();
+
+        await jest.advanceTimersByTimeAsync(3_000);
+
+        const roomAfter = await roomService.getRoom(room.roomId);
+        expect(roomAfter?.gameStatus).toBe('ROUND_ENDED');
+        expect(roomAfter?.currentRound?.revealed).toBe(true);
+        expect(roomAfter?.currentRound?.songNm).toBe('노래1');
       } finally {
         jest.useRealTimers();
       }
@@ -513,7 +534,6 @@ describe('RoomService', () => {
       ).rejects.toThrow(ConflictException);
 
       await roomService.markReady(room.roomId, hostUserId);
-      await roomService.startRound(room.roomId, hostUserId);
       await roomService.submitChatMessage(room.roomId, hostUserId, '노래1');
 
       await expect(roomService.nextRound(room.roomId, '남')).rejects.toThrow(
@@ -530,12 +550,10 @@ describe('RoomService', () => {
       const { room, userId: hostUserId } = await createTestRoom(1);
       await roomService.startGame(room.roomId, hostUserId);
       await roomService.markReady(room.roomId, hostUserId);
-      await roomService.startRound(room.roomId, hostUserId);
       await roomService.submitChatMessage(room.roomId, hostUserId, '노래1');
       await roomService.nextRound(room.roomId, hostUserId);
 
       await roomService.markReady(room.roomId, hostUserId);
-      await roomService.startRound(room.roomId, hostUserId);
       await roomService.submitChatMessage(room.roomId, hostUserId, '노래2');
       const finished = await roomService.nextRound(room.roomId, hostUserId);
 

@@ -29,7 +29,8 @@ interface SocketMembership {
 /**
  * 방 채팅 + 게임 진행 전용 소켓 게이트웨이.
  * 방 입장/퇴장/정원 등 방의 상태 자체는 REST(RoomController)가 기준(source of truth)이다.
- * 게임 시작/영상 로딩 완료/재생/다음 라운드는 실시간성이 필요해 소켓 이벤트로만 제공한다.
+ * 게임 시작/영상 로딩 완료/다음 라운드/스킵은 실시간성이 필요해 소켓 이벤트로만 제공한다.
+ * 재생 자체는 전원 로딩 완료 시 서버가 자동으로 시작한다(별도 방장 조작 불필요).
  * 방 상태가 바뀔 때마다 RoomService가 발생시키는 'room-updated' 이벤트를 구독해
  * 최신 RoomItemDto를 'room:state'로 방 전체에 브로드캐스트한다.
  *
@@ -152,18 +153,6 @@ export class RoomGateway implements OnGatewayDisconnect {
     }
   }
 
-  @SubscribeMessage('game:play')
-  async handleGamePlay(@ConnectedSocket() client: Socket): Promise<void> {
-    const membership = this.requireMembership(client);
-    if (!membership) return;
-
-    try {
-      await this.roomService.startRound(membership.roomId, membership.userId);
-    } catch (err) {
-      client.emit('room:error', { message: (err as Error).message });
-    }
-  }
-
   @SubscribeMessage('game:next-round')
   async handleGameNextRound(@ConnectedSocket() client: Socket): Promise<void> {
     const membership = this.requireMembership(client);
@@ -183,6 +172,18 @@ export class RoomGateway implements OnGatewayDisconnect {
 
     try {
       await this.roomService.requestSkip(membership.roomId, membership.userId);
+    } catch (err) {
+      client.emit('room:error', { message: (err as Error).message });
+    }
+  }
+
+  @SubscribeMessage('game:force-skip')
+  async handleGameForceSkip(@ConnectedSocket() client: Socket): Promise<void> {
+    const membership = this.requireMembership(client);
+    if (!membership) return;
+
+    try {
+      await this.roomService.forceSkip(membership.roomId, membership.userId);
     } catch (err) {
       client.emit('room:error', { message: (err as Error).message });
     }
