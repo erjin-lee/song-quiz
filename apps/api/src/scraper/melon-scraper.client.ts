@@ -11,6 +11,7 @@ const ALBUM_PAGE_SIZE = 15;
 const SONG_PAGE_SIZE = 50;
 const PAGE_FETCH_DELAY_MS = 200;
 const MAX_PAGE_ITERATIONS = 500;
+const AGE_CHART_PAGE_INDICES = [1, 2];
 
 export interface ScrapedArtist {
   melonArtistId: string;
@@ -33,11 +34,37 @@ export interface ScrapedSong {
   melonAlbmId: string | null;
 }
 
+export interface ScrapedChartArtist {
+  melonArtistId: string;
+  atstNm: string;
+}
+
+export interface ScrapedChartSong {
+  melonSongId: string;
+  songNm: string;
+  melonAlbmId: string;
+  albmNm: string;
+  albumThumbImgUrl: string | null;
+  artists: ScrapedChartArtist[];
+}
+
 export class MelonFetchError extends Error {}
 
 function extractId(href: string | undefined): string | null {
   const matched = href?.match(/\('(\d+)'/);
   return matched ? matched[1] : null;
+}
+
+function extractQueryId(
+  href: string | undefined,
+  paramName: string,
+): string | null {
+  const matched = href?.match(new RegExp(`${paramName}=(\\d+)`));
+  return matched ? matched[1] : null;
+}
+
+function normalizeText(text: string): string {
+  return text.replace(/\u00A0/g, ' ').trim();
 }
 
 function toIsoDate(text: string): string | null {
@@ -147,6 +174,29 @@ export class MelonScraperClient {
     return songs;
   }
 
+  async fetchAgeChartSongs(chartDate: string): Promise<ScrapedChartSong[]> {
+    const songs: ScrapedChartSong[] = [];
+
+    for (const idx of AGE_CHART_PAGE_INDICES) {
+      const url =
+        `${MELON_BASE_URL}/chart/age/list.htm` +
+        `?idx=${idx}&chartType=AG&chartGenre=KPOP&chartDate=${chartDate}&moved=Y`;
+      const html = await this.getHtml(url);
+      const $ = cheerio.load(html);
+
+      $('tr.lst50').each((_, el) => {
+        const song = this.parseChartSongRow($, $(el));
+        if (song) {
+          songs.push(song);
+        }
+      });
+
+      await delay(PAGE_FETCH_DELAY_MS);
+    }
+
+    return songs;
+  }
+
   private parseAlbumItem<T extends AnyNode>(
     $: cheerio.CheerioAPI,
     $li: cheerio.Cheerio<T>,
@@ -201,6 +251,65 @@ export class MelonScraperClient {
     );
 
     return { melonSongId, songNm, titleYn, melonAlbmId };
+  }
+
+  private parseChartSongRow<T extends AnyNode>(
+    $: cheerio.CheerioAPI,
+    $tr: cheerio.Cheerio<T>,
+  ): ScrapedChartSong | null {
+    const melonSongId = $tr
+      .find('input.input_check[name="input_check"]')
+      .attr('value');
+    if (!melonSongId) {
+      return null;
+    }
+
+    const $titleAnchor = $tr.find('div.ellipsis.rank01 a').first();
+    const songNm = normalizeText(
+      $titleAnchor.attr('title') || $titleAnchor.text(),
+    );
+    if (!songNm) {
+      return null;
+    }
+
+    const melonAlbmId = extractQueryId(
+      $tr.find('a.image_type15').attr('href'),
+      'albumId',
+    );
+    const albmNm = normalizeText(
+      $tr.find('div.ellipsis.rank03 a').first().text(),
+    );
+    if (!melonAlbmId || !albmNm) {
+      return null;
+    }
+
+    const albumThumbImgUrl =
+      $tr.find('a.image_type15 img').attr('src')?.trim() || null;
+
+    const artists = $tr
+      .find('div.ellipsis.rank02')
+      .first()
+      .children('a')
+      .map((_, a): ScrapedChartArtist | null => {
+        const $a = $(a);
+        const melonArtistId = extractQueryId($a.attr('href'), 'artistId');
+        const atstNm = normalizeText($a.text());
+        return melonArtistId && atstNm ? { melonArtistId, atstNm } : null;
+      })
+      .get()
+      .filter((artist): artist is ScrapedChartArtist => artist !== null);
+    if (artists.length === 0) {
+      return null;
+    }
+
+    return {
+      melonSongId,
+      songNm,
+      melonAlbmId,
+      albmNm,
+      albumThumbImgUrl,
+      artists,
+    };
   }
 
   private async getHtml(url: string, referer?: string): Promise<string> {
