@@ -16,6 +16,7 @@ import {
   loadRoomSession,
   saveRoomSession,
 } from '../utils/roomSession';
+import { sortParticipantsByScore } from '../utils/participants';
 import type { RoomItemDto } from '../types/room';
 
 interface LocationState {
@@ -234,7 +235,11 @@ export function RoomGamePage() {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_1fr]">
           <aside className="max-h-[40vh] overflow-y-auto pr-1 sm:max-h-[55vh] lg:max-h-[calc(100vh-11rem)]">
             <ParticipantList
-              participants={room.participants}
+              participants={
+                room.gameStatus === 'WAITING'
+                  ? room.participants
+                  : sortParticipantsByScore(room.participants)
+              }
               hostUserId={room.hostUserId}
               currentUserId={userId}
               maxUserCnt={room.maxUserCnt}
