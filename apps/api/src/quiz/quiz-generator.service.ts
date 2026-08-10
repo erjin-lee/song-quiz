@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
+import { FillQuizYoutubeLinksResultDto } from './dto/fill-quiz-youtube-links-result.dto';
 import { GenerateQuizResultDto } from './dto/generate-quiz-result.dto';
 import { Artist } from './entities/artist.entity';
 import { QuizSong } from './entities/quiz-song.entity';
@@ -14,6 +15,8 @@ import { Song } from './entities/song.entity';
 import { YoutubeScraperClient, delay } from './youtube-scraper.client';
 
 const YOUTUBE_REQUEST_DELAY_MS = 300;
+const YOUTUBE_BATCH_SIZE = 10;
+const YOUTUBE_BATCH_DELAY_MS = 5000;
 const QUIZ_SONG_CLIP_SEC = 30;
 
 @Injectable()
@@ -35,7 +38,9 @@ export class QuizGeneratorService {
   async generateQuiz(atstId: string): Promise<GenerateQuizResultDto> {
     const artist = await this.artistRepository.findOne({ where: { atstId } });
     if (!artist) {
-      throw new NotFoundException(`아티스트를 찾을 수 없습니다. (atstId: ${atstId})`);
+      throw new NotFoundException(
+        `아티스트를 찾을 수 없습니다. (atstId: ${atstId})`,
+      );
     }
 
     const songs = await this.songRepository.find({
@@ -60,11 +65,12 @@ export class QuizGeneratorService {
     let savedSongCount = 0;
     let skippedSongCount = 0;
 
-    for (const song of songs) {
+    for (let i = 0; i < songs.length; i++) {
+      const song = songs[i];
       const result = await this.searchSongVideo(artist.atstNm, song.songNm);
       if (!result) {
         skippedSongCount++;
-        await delay(YOUTUBE_REQUEST_DELAY_MS);
+        await this.waitBetweenYoutubeRequests(i + 1);
         continue;
       }
 
@@ -87,7 +93,7 @@ export class QuizGeneratorService {
       );
       savedSongCount++;
 
-      await delay(YOUTUBE_REQUEST_DELAY_MS);
+      await this.waitBetweenYoutubeRequests(i + 1);
     }
 
     return {
@@ -100,11 +106,89 @@ export class QuizGeneratorService {
     };
   }
 
+  async fillYoutubeLinks(
+    quizId: string,
+  ): Promise<FillQuizYoutubeLinksResultDto> {
+    const quiz = await this.quizRepository.findOne({ where: { quizId } });
+    if (!quiz) {
+      throw new NotFoundException(
+        `퀴즈를 찾을 수 없습니다. (quizId: ${quizId})`,
+      );
+    }
+
+    const quizSongs = await this.quizSongRepository
+      .createQueryBuilder('quizSong')
+      .innerJoinAndSelect('quizSong.song', 'song')
+      .innerJoinAndSelect('song.artist', 'artist')
+      .where('quizSong.quizId = :quizId', { quizId })
+      .andWhere('quizSong.youtubeUrl = :emptyUrl', { emptyUrl: '' })
+      .orderBy('quizSong.quizSeq', 'ASC')
+      .getMany();
+    if (quizSongs.length === 0) {
+      throw new BadRequestException(
+        `유튜브 링크가 없는 출제곡이 없어 채울 대상이 없습니다. (quizId: ${quizId})`,
+      );
+    }
+
+    let savedSongCount = 0;
+    let skippedSongCount = 0;
+
+    for (let i = 0; i < quizSongs.length; i++) {
+      const quizSong = quizSongs[i];
+      const result = await this.searchSongVideo(
+        quizSong.song.artist.atstNm,
+        quizSong.song.songNm,
+      );
+      if (!result) {
+        skippedSongCount++;
+        await this.waitBetweenYoutubeRequests(i + 1);
+        continue;
+      }
+
+      const startSec = Math.round(result.durationSec / 2);
+      const youtubeUrl = `https://www.youtube.com/watch?v=${result.videoId}&t=${startSec}`;
+
+      quizSong.youtubeUrl = youtubeUrl;
+      quizSong.youtubeVideoId = result.videoId;
+      quizSong.startSec = startSec;
+      quizSong.endSec = startSec + QUIZ_SONG_CLIP_SEC;
+      await this.quizSongRepository.save(quizSong);
+
+      if (!quizSong.song.ytbLink) {
+        quizSong.song.ytbLink = youtubeUrl;
+        await this.songRepository.save(quizSong.song);
+      }
+      savedSongCount++;
+
+      await this.waitBetweenYoutubeRequests(i + 1);
+    }
+
+    return {
+      quizId: quiz.quizId,
+      quizTtl: quiz.quizTtl,
+      targetSongCount: quizSongs.length,
+      savedSongCount,
+      skippedSongCount,
+    };
+  }
+
+  private async waitBetweenYoutubeRequests(
+    processedCount: number,
+  ): Promise<void> {
+    await delay(YOUTUBE_REQUEST_DELAY_MS);
+    if (processedCount % YOUTUBE_BATCH_SIZE === 0) {
+      await delay(YOUTUBE_BATCH_DELAY_MS);
+    }
+  }
+
   private async searchSongVideo(atstNm: string, songNm: string) {
     try {
       return await this.youtubeScraperClient.search(`${atstNm} - ${songNm}`);
     } catch (error) {
-      this.logger.warn(`유튜브 검색 실패, 곡을 건너뜁니다. (${atstNm} - ${songNm})`, error);
+      this.logger.warn(
+        `유튜브 검색 실패, 곡을 건너뜁니다. (${atstNm} - ${songNm})`,
+        error,
+      );
       return null;
     }
   }

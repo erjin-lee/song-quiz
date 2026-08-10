@@ -14,8 +14,12 @@ import {
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import { FillQuizYoutubeLinksResultDto } from './dto/fill-quiz-youtube-links-result.dto';
 import { GenerateQuizResultDto } from './dto/generate-quiz-result.dto';
-import { GetQuizzesQueryDto, QuizSearchType } from './dto/get-quizzes-query.dto';
+import {
+  GetQuizzesQueryDto,
+  QuizSearchType,
+} from './dto/get-quizzes-query.dto';
 import { QuizListItemDto } from './dto/quiz-list-item.dto';
 import { QuizSongItemDto } from './dto/quiz-song-item.dto';
 import { QuizGeneratorService } from './quiz-generator.service';
@@ -73,5 +77,17 @@ export class QuizController {
     @Param('atstId', ParseIntPipe) atstId: number,
   ): Promise<GenerateQuizResultDto> {
     return this.quizGeneratorService.generateQuiz(String(atstId));
+  }
+
+  @Post(':quizId/youtube-links')
+  @ApiOperation({
+    summary: '퀴즈 출제곡 중 유튜브 링크가 없는 곡에 유튜브 정보 채우기',
+  })
+  @ApiParam({ name: 'quizId', description: '퀴즈 ID', type: Number })
+  @ApiNotFoundResponse({ description: '퀴즈를 찾을 수 없음' })
+  fillYoutubeLinks(
+    @Param('quizId', ParseIntPipe) quizId: number,
+  ): Promise<FillQuizYoutubeLinksResultDto> {
+    return this.quizGeneratorService.fillYoutubeLinks(String(quizId));
   }
 }
