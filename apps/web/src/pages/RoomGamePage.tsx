@@ -16,6 +16,7 @@ import {
   loadRoomSession,
   saveRoomSession,
 } from '../utils/roomSession';
+import { sortParticipantsByScore } from '../utils/participants';
 import type { RoomItemDto } from '../types/room';
 
 interface LocationState {
@@ -237,7 +238,7 @@ export function RoomGamePage() {
               participants={
                 room.gameStatus === 'WAITING'
                   ? room.participants
-                  : [...room.participants].sort((a, b) => b.score - a.score)
+                  : sortParticipantsByScore(room.participants)
               }
               hostUserId={room.hostUserId}
               currentUserId={userId}

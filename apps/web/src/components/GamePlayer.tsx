@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import YouTube from 'react-youtube';
+import { sortParticipantsByScore } from '../utils/participants';
 import type { RoomItemDto } from '../types/room';
 
 interface GamePlayerProps {
@@ -126,7 +127,7 @@ export function GamePlayer({
   }
 
   if (room.gameStatus === 'FINISHED') {
-    const ranked = [...room.participants].sort((a, b) => b.score - a.score);
+    const ranked = sortParticipantsByScore(room.participants);
     return (
       <div className="flex flex-col items-center gap-4 rounded-2xl bg-gradient-to-br from-purple-100 to-purple-50 px-6 py-10">
         <p className="text-lg font-bold text-purple-600">게임 종료!</p>

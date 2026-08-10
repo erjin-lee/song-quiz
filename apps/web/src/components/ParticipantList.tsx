@@ -9,6 +9,18 @@ const AVATAR_COLORS = [
   'bg-rose-500',
 ];
 
+/**
+ * 정렬 순서가 바뀌어도(예: 점수순 정렬) 같은 참가자는 항상 같은 색을 유지하도록
+ * 배열 인덱스 대신 userId를 해시해 색을 고른다.
+ */
+function avatarColorForUser(userId: string): string {
+  let hash = 0;
+  for (let i = 0; i < userId.length; i++) {
+    hash = (hash * 31 + userId.charCodeAt(i)) >>> 0;
+  }
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+}
+
 interface ParticipantListProps {
   participants: RoomParticipantDto[];
   hostUserId: string;
@@ -26,7 +38,7 @@ export function ParticipantList({
 
   return (
     <div className="flex flex-col gap-3">
-      {participants.map((participant, index) => {
+      {participants.map((participant) => {
         const isMe = participant.userId === currentUserId;
         return (
           <div
@@ -39,7 +51,7 @@ export function ParticipantList({
           >
             <span
               className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white ${
-                AVATAR_COLORS[index % AVATAR_COLORS.length]
+                avatarColorForUser(participant.userId)
               }`}
             >
               {participant.nickname.slice(0, 1)}
