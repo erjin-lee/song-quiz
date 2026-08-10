@@ -3,7 +3,11 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Logo } from '../components/Logo';
 import { ParticipantList } from '../components/ParticipantList';
 import { GamePlayer } from '../components/GamePlayer';
-import { ChatPanel, type ChatEntry } from '../components/ChatPanel';
+import {
+  ChatPanel,
+  type ChatEntry,
+  type ChatPanelHandle,
+} from '../components/ChatPanel';
 import { getRoomById, leaveRoom } from '../api/room';
 import { getQuizSongCount } from '../api/quiz';
 import { createRoomSocket, type RoomSocket } from '../api/socket';
@@ -34,7 +38,10 @@ export function RoomGamePage() {
   const [loading, setLoading] = useState(true);
   const [chatEntries, setChatEntries] = useState<ChatEntry[]>([]);
   const [songCount, setSongCount] = useState<number | null>(null);
+  const [nextRoundShortcutEnabled, setNextRoundShortcutEnabled] =
+    useState(true);
   const socketRef = useRef<RoomSocket | null>(null);
+  const chatPanelRef = useRef<ChatPanelHandle>(null);
 
   // 방 상태를 서버에서 최신으로 확인/복구한다. 새로고침으로 location.state가
   // 사라진 경우 로컬스토리지에 저장해둔 { roomId, userId }로 이어서 입장한다.
@@ -180,17 +187,25 @@ export function RoomGamePage() {
     socketRef.current?.emit('game:ready');
   };
 
-  const handlePlay = () => {
-    socketRef.current?.emit('game:play');
-  };
-
   const handleNextRound = () => {
     socketRef.current?.emit('game:next-round');
+    // 단축키(Shift+N) 입력이 채팅창에 문자로 반영됐을 가능성에 대비해 초기화한다.
+    chatPanelRef.current?.clearDraft();
+    chatPanelRef.current?.focus();
   };
 
   const handleSkip = () => {
     socketRef.current?.emit('game:skip');
   };
+
+  const handleForceSkip = () => {
+    socketRef.current?.emit('game:force-skip');
+  };
+
+  const isNextRoundShortcutActive =
+    room.hostUserId === userId &&
+    room.gameStatus === 'ROUND_ENDED' &&
+    nextRoundShortcutEnabled;
 
   return (
     <div className="min-h-screen px-4 py-8 sm:px-8">
@@ -232,13 +247,20 @@ export function RoomGamePage() {
               myUserId={userId}
               onStartGame={handleStartGame}
               onReady={handleGameReady}
-              onPlay={handlePlay}
               onNextRound={handleNextRound}
               onSkip={handleSkip}
+              onForceSkip={handleForceSkip}
+              shortcutEnabled={nextRoundShortcutEnabled}
+              onShortcutEnabledChange={setNextRoundShortcutEnabled}
             />
 
             <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">
-              <ChatPanel entries={chatEntries} onSend={handleSendChat} />
+              <ChatPanel
+                ref={chatPanelRef}
+                entries={chatEntries}
+                onSend={handleSendChat}
+                blockNextRoundShortcutKey={isNextRoundShortcutActive}
+              />
             </div>
           </main>
         </div>

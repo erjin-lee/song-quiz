@@ -28,6 +28,8 @@ const ROOM_CACHE_KEY_PREFIX = 'room:';
 const ROOM_TTL_SECONDS = 6 * 60 * 60;
 /** 한 라운드의 제한 시간. 이 시간이 지나면 전원이 못 맞춰도 라운드가 강제 종료된다. */
 const ROUND_TIME_LIMIT_SECONDS = 30;
+/** 방장이 강제 스킵을 요청한 뒤 실제로 라운드가 종료되기까지의 유예 시간. */
+const FORCE_SKIP_DELAY_SECONDS = 3;
 
 export interface ChatSubmissionResult {
   action: 'broadcast' | 'blocked' | 'correct';
@@ -153,11 +155,6 @@ export class RoomService extends EventEmitter {
       room.participants.push({ userId, nickname: dto.nickname, score: 0 });
       room.curUserCnt = room.participants.length;
 
-      if (room.gameStatus === 'READY_TO_PLAY') {
-        // 새 참가자는 아직 영상 로딩을 완료하지 않았으므로 다시 로딩 대기로 되돌린다.
-        room.gameStatus = 'LOADING';
-      }
-
       await this.saveRoom(room);
       this.emit('room-updated', room);
 
@@ -263,28 +260,6 @@ export class RoomService extends EventEmitter {
       this.recomputeReadyStatus(room);
 
       await this.saveRoom(room);
-      this.emit('room-updated', room);
-      return room;
-    });
-  }
-
-  /** 방장이 (전원 로딩 완료 후) 실제 재생을 시작한다. */
-  async startRound(roomId: string, requesterUserId: string): Promise<RoomItemDto> {
-    return this.withRoomLock(roomId, async () => {
-      const room = await this.getRoomOrThrow(roomId);
-      this.assertHost(room, requesterUserId);
-
-      if (room.gameStatus !== 'READY_TO_PLAY' || !room.currentRound) {
-        throw new ConflictException(
-          '아직 모든 참가자의 영상 로딩이 끝나지 않았습니다.',
-        );
-      }
-
-      room.gameStatus = 'PLAYING';
-      room.currentRound.playStartedAt = new Date().toISOString();
-
-      await this.saveRoom(room);
-      this.scheduleRoundTimer(roomId);
       this.emit('room-updated', room);
       return room;
     });
@@ -424,6 +399,31 @@ export class RoomService extends EventEmitter {
     });
   }
 
+  /**
+   * 방장이 현재 라운드를 강제로 스킵한다. 즉시 끝내지 않고 유예 시간(3초) 후 종료되도록
+   * 예약해, 그 사이 마지막으로 답을 제출할 시간을 준다.
+   */
+  async forceSkip(roomId: string, requesterUserId: string): Promise<RoomItemDto> {
+    return this.withRoomLock(roomId, async () => {
+      const room = await this.getRoomOrThrow(roomId);
+      this.assertHost(room, requesterUserId);
+
+      const round = room.currentRound;
+      if (!round || room.gameStatus !== 'PLAYING') {
+        throw new ConflictException('지금은 강제 스킵을 요청할 수 없습니다.');
+      }
+
+      round.forceSkipAt = new Date(
+        Date.now() + FORCE_SKIP_DELAY_SECONDS * 1000,
+      ).toISOString();
+      this.scheduleRoundTimer(roomId, FORCE_SKIP_DELAY_SECONDS);
+
+      await this.saveRoom(room);
+      this.emit('room-updated', room);
+      return room;
+    });
+  }
+
   private assertHost(room: RoomItemDto, requesterUserId: string): void {
     if (room.hostUserId !== requesterUserId) {
       throw new ForbiddenException('방장만 할 수 있는 작업입니다.');
@@ -439,8 +439,18 @@ export class RoomService extends EventEmitter {
       round.readyUserIds.includes(participant.userId),
     );
     if (allReady) {
-      room.gameStatus = 'READY_TO_PLAY';
+      this.beginRound(room);
     }
+  }
+
+  /** 전원 로딩 완료 시 별도 방장 조작 없이 곧바로 재생 상태로 전환하고 라운드 타이머를 건다. */
+  private beginRound(room: RoomItemDto): void {
+    if (!room.currentRound) {
+      return;
+    }
+    room.gameStatus = 'PLAYING';
+    room.currentRound.playStartedAt = new Date().toISOString();
+    this.scheduleRoundTimer(room.roomId, ROUND_TIME_LIMIT_SECONDS);
   }
 
   /** 참가자 과반(절반 초과)이 스킵을 요청했는지 확인한다. */
@@ -466,7 +476,7 @@ export class RoomService extends EventEmitter {
     room.gameStatus = 'ROUND_ENDED';
   }
 
-  private scheduleRoundTimer(roomId: string): void {
+  private scheduleRoundTimer(roomId: string, delaySeconds: number): void {
     this.clearRoundTimer(roomId);
     const timer = setTimeout(() => {
       this.handleRoundTimeout(roomId).catch((err) => {
@@ -474,7 +484,7 @@ export class RoomService extends EventEmitter {
           `라운드 타임아웃 처리 실패(roomId: ${roomId}): ${(err as Error).message}`,
         );
       });
-    }, ROUND_TIME_LIMIT_SECONDS * 1000);
+    }, delaySeconds * 1000);
     timer.unref();
     this.roundTimers.set(roomId, timer);
   }
@@ -559,6 +569,7 @@ export class RoomService extends EventEmitter {
       readyUserIds: [],
       correctUserIds: [],
       skipUserIds: [],
+      forceSkipAt: null,
       playStartedAt: null,
       revealed: false,
       songNm: null,

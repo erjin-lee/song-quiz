@@ -42,6 +42,14 @@ export class RoundPublicStateDto {
   skipUserIds: string[];
 
   @ApiProperty({
+    description:
+      '방장이 강제 스킵을 요청해 라운드가 종료될 예정 시각(ISO). 요청 전이면 null',
+    example: null,
+    nullable: true,
+  })
+  forceSkipAt: string | null;
+
+  @ApiProperty({
     description: '방장이 재생을 시작한 시각(ISO). 아직 시작 전이면 null',
     example: null,
     nullable: true,

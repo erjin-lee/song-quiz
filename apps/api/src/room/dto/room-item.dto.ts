@@ -5,7 +5,6 @@ import { RoundPublicStateDto } from './round-public-state.dto';
 export type GameStatus =
   | 'WAITING'
   | 'LOADING'
-  | 'READY_TO_PLAY'
   | 'PLAYING'
   | 'ROUND_ENDED'
   | 'FINISHED';
@@ -70,7 +69,7 @@ export class RoomItemDto {
 
   @ApiProperty({
     description:
-      '게임 진행 상태: WAITING(시작 전)/LOADING(라운드 준비, 영상 로딩 대기)/READY_TO_PLAY(전원 로딩 완료, 방장 시작 대기)/PLAYING(재생 중)/ROUND_ENDED(라운드 종료, 다음 라운드 대기)/FINISHED(게임 종료)',
+      '게임 진행 상태: WAITING(시작 전)/LOADING(라운드 준비, 영상 로딩 대기 - 전원 로딩 완료 시 별도 조작 없이 자동으로 PLAYING 전환)/PLAYING(재생 중)/ROUND_ENDED(라운드 종료, 다음 라운드 대기)/FINISHED(게임 종료)',
     example: 'WAITING',
   })
   gameStatus: GameStatus;

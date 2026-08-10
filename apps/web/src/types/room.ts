@@ -7,7 +7,6 @@ export interface RoomParticipantDto {
 export type GameStatus =
   | 'WAITING'
   | 'LOADING'
-  | 'READY_TO_PLAY'
   | 'PLAYING'
   | 'ROUND_ENDED'
   | 'FINISHED';
@@ -21,6 +20,7 @@ export interface RoundPublicStateDto {
   readyUserIds: string[];
   correctUserIds: string[];
   skipUserIds: string[];
+  forceSkipAt: string | null;
   playStartedAt: string | null;
   revealed: boolean;
   songNm: string | null;
