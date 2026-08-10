@@ -21,7 +21,8 @@ export interface RoundPublicStateDto {
   correctUserIds: string[];
   skipUserIds: string[];
   forceSkipAt: string | null;
-  playStartedAt: string | null;
+  /** 재생을 시작해야 하는 예정 시각(ISO, 서버 기준). 이 시각에 맞춰 재생해야 동시 재생이 가능하다. */
+  playScheduledAt: string | null;
   revealed: boolean;
   songNm: string | null;
   atstNm: string | null;

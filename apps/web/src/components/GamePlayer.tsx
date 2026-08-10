@@ -52,16 +52,36 @@ export function GamePlayer({
   const playedRoundRef = useRef<number | null>(null);
   const forceSkipRemaining = useCountdownSeconds(round?.forceSkipAt ?? null);
 
+  // 재생 시작은 이벤트를 받는 즉시가 아니라, 서버가 지정한 예정 시각(playScheduledAt)에
+  // 맞춰 실행한다. 클라이언트마다 소켓 이벤트 수신 시각이 달라 즉시 재생하면 유저별로
+  // 재생 시점이 어긋나는데, 같은 목표 시각까지 각자 기다렸다가 재생하면 동시성이 개선된다.
+  // roundIndex/playScheduledAt만 의존성으로 둬서, 라운드 도중 다른 상태(정답 제출 등)
+  // 갱신으로 인해 예약된 타이머가 불필요하게 취소/재설정되지 않도록 한다.
+  const roundIndex = round?.roundIndex ?? null;
+  const playScheduledAt = round?.playScheduledAt ?? null;
+
   useEffect(() => {
     if (
-      room.gameStatus === 'PLAYING' &&
-      round &&
-      playedRoundRef.current !== round.roundIndex
+      room.gameStatus !== 'PLAYING' ||
+      roundIndex === null ||
+      !playScheduledAt ||
+      playedRoundRef.current === roundIndex
     ) {
-      playedRoundRef.current = round.roundIndex;
-      playerRef.current?.getInternalPlayer()?.playVideo();
+      return;
     }
-  }, [room.gameStatus, round]);
+
+    playedRoundRef.current = roundIndex;
+
+    const delayMs = new Date(playScheduledAt).getTime() - Date.now();
+    const timer = setTimeout(
+      () => {
+        playerRef.current?.getInternalPlayer()?.playVideo();
+      },
+      Math.max(0, delayMs),
+    );
+
+    return () => clearTimeout(timer);
+  }, [room.gameStatus, roundIndex, playScheduledAt]);
 
   // 방장이 라운드 종료(다음 라운드 대기) 상태일 때 Shift+→로 바로 다음 라운드를
   // 진행할 수 있게 한다. 화살표 키는 문자 입력/IME 조합과 무관해 채팅 입력창에

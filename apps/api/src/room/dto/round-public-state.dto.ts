@@ -50,11 +50,14 @@ export class RoundPublicStateDto {
   forceSkipAt: string | null;
 
   @ApiProperty({
-    description: '방장이 재생을 시작한 시각(ISO). 아직 시작 전이면 null',
+    description:
+      '재생을 시작해야 하는 예정 시각(ISO, 서버 기준). 아직 예약 전이면 null. ' +
+      '모든 클라이언트가 각자 수신 시점과 무관하게 이 시각에 맞춰 재생을 시작해야' +
+      ' 동시 재생이 가능하다.',
     example: null,
     nullable: true,
   })
-  playStartedAt: string | null;
+  playScheduledAt: string | null;
 
   @ApiProperty({
     description: '라운드 종료(정답 공개) 여부',
