@@ -19,11 +19,6 @@ export function RoomCard({ room, onJoin, joining }: RoomCardProps) {
           <span className="shrink-0 rounded-full bg-purple-50 px-2.5 py-0.5 text-xs font-medium text-purple-600">
             {room.quizTtl}
           </span>
-          {room.isRandom && (
-            <span className="shrink-0 rounded-full bg-pink-50 px-2.5 py-0.5 text-xs font-medium text-pink-500">
-              랜덤 출제
-            </span>
-          )}
         </div>
         {room.atstNms.length > 0 && (
           <p className="mt-1 truncate text-sm text-slate-400">

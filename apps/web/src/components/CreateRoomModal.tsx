@@ -25,7 +25,6 @@ export function CreateRoomModal({
 }: CreateRoomModalProps) {
   const [roomTtl, setRoomTtl] = useState('');
   const [quizId, setQuizId] = useState(quizzes[0]?.quizId ?? '');
-  const [isRandom, setIsRandom] = useState(false);
   const [maxUserCnt, setMaxUserCnt] = useState(8);
 
   const handleSubmit = (event: FormEvent) => {
@@ -33,7 +32,7 @@ export function CreateRoomModal({
     if (!roomTtl.trim() || !quizId) {
       return;
     }
-    onSubmit({ roomTtl: roomTtl.trim(), quizId, isRandom, maxUserCnt });
+    onSubmit({ roomTtl: roomTtl.trim(), quizId, isRandom: true, maxUserCnt });
   };
 
   return (
@@ -78,16 +77,6 @@ export function CreateRoomModal({
               onChange={(event) => setMaxUserCnt(Number(event.target.value))}
               className="rounded-xl border border-slate-200 px-4 py-2.5 outline-none focus:border-purple-300"
             />
-          </label>
-
-          <label className="flex items-center gap-2 text-sm text-slate-600">
-            <input
-              type="checkbox"
-              checked={isRandom}
-              onChange={(event) => setIsRandom(event.target.checked)}
-              className="h-4 w-4 accent-purple-500"
-            />
-            출제곡 랜덤 여부
           </label>
 
           {errorMessage && (
