@@ -4,7 +4,7 @@ module.exports = {
       name: 'song-quiz-api',
       cwd: __dirname,
       script: 'yarn',
-      args: 'start:prod:local',
+      args: 'start:prod:env',
       interpreter: 'none',
       env: { NODE_ENV: 'production' },
       autorestart: true,
