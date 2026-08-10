@@ -290,7 +290,12 @@ describe('RoomService', () => {
         guestUserId,
       );
       expect(afterGuestReady.gameStatus).toBe('PLAYING');
-      expect(afterGuestReady.currentRound?.playStartedAt).not.toBeNull();
+      expect(afterGuestReady.currentRound?.playScheduledAt).not.toBeNull();
+      expect(
+        new Date(
+          afterGuestReady.currentRound!.playScheduledAt!,
+        ).getTime(),
+      ).toBeGreaterThan(Date.now());
     });
 
     it('정답과 무관한 채팅은 그대로 broadcast된다', async () => {
@@ -467,7 +472,8 @@ describe('RoomService', () => {
         await roomService.startGame(room.roomId, hostUserId);
         await roomService.markReady(room.roomId, hostUserId);
 
-        await jest.advanceTimersByTimeAsync(30_000);
+        // 라운드 제한시간(30초) + 재생 예약 유예시간(1초)
+        await jest.advanceTimersByTimeAsync(31_000);
 
         const roomAfter = await roomService.getRoom(room.roomId);
         expect(roomAfter?.gameStatus).toBe('ROUND_ENDED');

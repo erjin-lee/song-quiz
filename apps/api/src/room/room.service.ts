@@ -30,6 +30,12 @@ const ROOM_TTL_SECONDS = 6 * 60 * 60;
 const ROUND_TIME_LIMIT_SECONDS = 30;
 /** 방장이 강제 스킵을 요청한 뒤 실제로 라운드가 종료되기까지의 유예 시간. */
 const FORCE_SKIP_DELAY_SECONDS = 3;
+/**
+ * 재생 시작 신호를 보낸 뒤 실제로 재생을 시작하기까지 주는 유예 시간.
+ * 클라이언트마다 소켓 이벤트 수신 시각이 달라 즉시 재생하면 동시 재생이 어긋나므로,
+ * 모두가 같은 미래 시각(now + 이 값)에 맞춰 재생을 시작하도록 예약한다.
+ */
+const PLAY_SCHEDULE_DELAY_SECONDS = 1;
 
 export interface ChatSubmissionResult {
   action: 'broadcast' | 'blocked' | 'correct';
@@ -443,14 +449,24 @@ export class RoomService extends EventEmitter {
     }
   }
 
-  /** 전원 로딩 완료 시 별도 방장 조작 없이 곧바로 재생 상태로 전환하고 라운드 타이머를 건다. */
+  /**
+   * 전원 로딩 완료 시 별도 방장 조작 없이 곧바로 재생 상태로 전환한다.
+   * 실제 재생은 즉시가 아니라 PLAY_SCHEDULE_DELAY_SECONDS 뒤로 예약해, 모든
+   * 클라이언트가 이벤트 수신 시각과 무관하게 같은 시각에 재생을 시작하도록 한다.
+   * 라운드 제한시간도 이 예약 시각 기준으로 흐르도록 그만큼 늦춰서 건다.
+   */
   private beginRound(room: RoomItemDto): void {
     if (!room.currentRound) {
       return;
     }
     room.gameStatus = 'PLAYING';
-    room.currentRound.playStartedAt = new Date().toISOString();
-    this.scheduleRoundTimer(room.roomId, ROUND_TIME_LIMIT_SECONDS);
+    room.currentRound.playScheduledAt = new Date(
+      Date.now() + PLAY_SCHEDULE_DELAY_SECONDS * 1000,
+    ).toISOString();
+    this.scheduleRoundTimer(
+      room.roomId,
+      ROUND_TIME_LIMIT_SECONDS + PLAY_SCHEDULE_DELAY_SECONDS,
+    );
   }
 
   /** 참가자 과반(절반 초과)이 스킵을 요청했는지 확인한다. */
@@ -570,7 +586,7 @@ export class RoomService extends EventEmitter {
       correctUserIds: [],
       skipUserIds: [],
       forceSkipAt: null,
-      playStartedAt: null,
+      playScheduledAt: null,
       revealed: false,
       songNm: null,
       atstNm: null,
