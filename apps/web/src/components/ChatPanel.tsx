@@ -72,7 +72,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       <div className="flex flex-col gap-3">
         <div
           ref={scrollRef}
-          className="flex max-h-32 flex-col gap-1 overflow-y-auto text-sm"
+          className="flex h-40 min-h-[6rem] max-h-[24rem] flex-col gap-1 overflow-y-auto rounded-xl border border-slate-100 p-2 text-sm resize-y"
         >
           {entries.map((entry) =>
             entry.type === 'system' ? (
