@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { AdBanner } from '../components/AdBanner';
 import { Logo } from '../components/Logo';
 import { RoomCard } from '../components/RoomCard';
 import {
@@ -139,6 +140,14 @@ export function RoomListPage() {
               onJoin={() => handleJoin(room.roomId)}
             />
           ))}
+        </div>
+
+        <div className="flex justify-center">
+          <AdBanner
+            unitId={"DAN-HY8VhIUN3ZhwbYKP"}
+            width={320}
+            height={50}
+          />
         </div>
       </div>
 
