@@ -38,6 +38,8 @@ const FORCE_SKIP_DELAY_SECONDS = 3;
  * 흡수하면 되는 짧은 값(1.8초)으로 충분하다.
  */
 const PLAY_SCHEDULE_DELAY_SECONDS = 1.8;
+/** roomId별로 보관하는 채팅 히스토리 최대 개수. 초과분은 오래된 것부터 버린다. */
+const CHAT_HISTORY_MAX_ENTRIES = 100;
 
 export interface ChatSubmissionResult {
   action: 'broadcast' | 'blocked' | 'correct';
@@ -47,6 +49,13 @@ export interface ChatSubmissionResult {
     points: number;
     rank: number;
   };
+}
+
+export interface ChatHistoryEntry {
+  type: 'message' | 'system';
+  nickname?: string;
+  message: string;
+  sentAt: string;
 }
 
 interface RoundRevealInfo {
@@ -79,6 +88,8 @@ export class RoomService extends EventEmitter {
   private readonly currentReveal = new Map<string, RoundRevealInfo>();
   /** roomId -> 라운드 제한시간 타이머 */
   private readonly roundTimers = new Map<string, NodeJS.Timeout>();
+  /** roomId -> 최근 채팅/시스템 메시지 히스토리(재접속 시 복원용, 최대 CHAT_HISTORY_MAX_ENTRIES개). */
+  private readonly chatHistory = new Map<string, ChatHistoryEntry[]>();
 
   constructor(
     private readonly cacheService: CacheService,
@@ -432,6 +443,21 @@ export class RoomService extends EventEmitter {
     });
   }
 
+  /** 채팅/시스템 메시지를 히스토리에 기록한다(재접속 시 복원용). 방 상태와 무관해 락을 타지 않는다. */
+  appendChatHistory(roomId: string, entry: ChatHistoryEntry): void {
+    const history = this.chatHistory.get(roomId) ?? [];
+    history.push(entry);
+    if (history.length > CHAT_HISTORY_MAX_ENTRIES) {
+      history.splice(0, history.length - CHAT_HISTORY_MAX_ENTRIES);
+    }
+    this.chatHistory.set(roomId, history);
+  }
+
+  /** roomId의 채팅 히스토리를 조회한다(재접속 시 복원용). */
+  getChatHistory(roomId: string): ChatHistoryEntry[] {
+    return this.chatHistory.get(roomId) ?? [];
+  }
+
   private assertHost(room: RoomItemDto, requesterUserId: string): void {
     if (room.hostUserId !== requesterUserId) {
       throw new ForbiddenException('방장만 할 수 있는 작업입니다.');
@@ -619,6 +645,7 @@ export class RoomService extends EventEmitter {
     this.songOrders.delete(roomId);
     this.currentAnswers.delete(roomId);
     this.currentReveal.delete(roomId);
+    this.chatHistory.delete(roomId);
   }
 
   private roomKey(roomId: string): string {

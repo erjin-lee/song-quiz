@@ -17,9 +17,17 @@ export interface RoomErrorEvent {
   message: string;
 }
 
+export interface ChatHistoryEntry {
+  type: 'message' | 'system';
+  nickname?: string;
+  message: string;
+  sentAt: string;
+}
+
 export interface RoomServerToClientEvents {
   'chat:message': (payload: ChatMessageEvent) => void;
   'chat:system': (payload: ChatSystemEvent) => void;
+  'chat:history': (payload: ChatHistoryEntry[]) => void;
   'room:error': (payload: RoomErrorEvent) => void;
   'room:state': (payload: RoomItemDto) => void;
 }
