@@ -3,6 +3,12 @@ import type { RoomSocket } from '../api/socket';
 
 const SAMPLE_COUNT = 5;
 const SAMPLE_INTERVAL_MS = 150;
+/**
+ * ack 응답 대기 타임아웃. 샘플링 도중 소켓이 응답 없이 끊기면(ack가 유실되면)
+ * socket.io는 재전송하지 않으므로, 타임아웃 없이는 for 루프가 영구 대기해
+ * offsetMs가 갱신되지 않는 문제가 생긴다.
+ */
+const ACK_TIMEOUT_MS = 2000;
 
 interface ClockSample {
   offsetMs: number;
@@ -12,7 +18,23 @@ interface ClockSample {
 function measureOnce(socket: RoomSocket): Promise<ClockSample> {
   return new Promise((resolve) => {
     const clientSentAt = Date.now();
+    let settled = false;
+
+    const timeoutId = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      // 타임아웃된 샘플은 rttMs를 Infinity로 표시해 최선값 선택에서 제외되도록 한다.
+      resolve({ offsetMs: 0, rttMs: Infinity });
+    }, ACK_TIMEOUT_MS);
+
     socket.emit('time:sync', { clientSentAt }, (response) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeoutId);
       const clientReceivedAt = Date.now();
       resolve({
         rttMs: clientReceivedAt - clientSentAt,
@@ -51,10 +73,16 @@ export function useServerClockOffset(socket: RoomSocket | null): number {
           );
         }
       }
-      if (cancelled || samples.length === 0) {
+      if (cancelled) {
         return;
       }
-      const best = samples.reduce((a, b) => (b.rttMs < a.rttMs ? b : a));
+      const validSamples = samples.filter((sample) =>
+        Number.isFinite(sample.rttMs),
+      );
+      if (validSamples.length === 0) {
+        return;
+      }
+      const best = validSamples.reduce((a, b) => (b.rttMs < a.rttMs ? b : a));
       setOffsetMs(best.offsetMs);
     };
 

@@ -59,13 +59,22 @@ export function GamePlayer({
   const reportedReadyRoundRef = useRef<number | null>(null);
   const forceSkipRemaining = useCountdownSeconds(round?.forceSkipAt ?? null);
 
+  // serverTimeOffsetMs는 소켓 (재)연결마다 비동기로 갱신되는 값이라 아래 재생 예약
+  // effect의 의존성으로 두면, 라운드가 이미 시작된 뒤 offset이 갱신될 때마다 effect가
+  // 재실행되어 예약된 타이머가 취소된다. 이때 playedRoundRef 가드에 걸려 재예약은
+  // 되지 않으므로, 새로고침/재접속 직후 라운드가 PLAYING 중이면 영상이 영원히 자동
+  // 재생되지 않는 문제가 생긴다. 그래서 값 자체는 ref로만 보관해 effect 재실행을
+  // 유발하지 않고, 타이머를 설정하는 시점에만 최신 값을 읽는다.
+  const serverTimeOffsetRef = useRef(serverTimeOffsetMs);
+  serverTimeOffsetRef.current = serverTimeOffsetMs;
+
   // 재생 시작은 이벤트를 받는 즉시가 아니라, 서버가 지정한 예정 시각(playScheduledAt)에
   // 맞춰 실행한다. 클라이언트마다 소켓 이벤트 수신 시각이 달라 즉시 재생하면 유저별로
   // 재생 시점이 어긋나는데, 같은 목표 시각까지 각자 기다렸다가 재생하면 동시성이 개선된다.
   // roundIndex/playScheduledAt만 의존성으로 둬서, 라운드 도중 다른 상태(정답 제출 등)
   // 갱신으로 인해 예약된 타이머가 불필요하게 취소/재설정되지 않도록 한다.
-  // Date.now()에 serverTimeOffsetMs를 더해 로컬 시계와 서버 시계의 오차를 보정한 "서버
-  // 기준 현재 시각"을 추정한다(useServerClockOffset 훅 참고).
+  // Date.now()에 serverTimeOffsetRef.current를 더해 로컬 시계와 서버 시계의 오차를
+  // 보정한 "서버 기준 현재 시각"을 추정한다(useServerClockOffset 훅 참고).
   const roundIndex = round?.roundIndex ?? null;
   const playScheduledAt = round?.playScheduledAt ?? null;
 
@@ -82,7 +91,8 @@ export function GamePlayer({
     playedRoundRef.current = roundIndex;
 
     const delayMs =
-      new Date(playScheduledAt).getTime() - (Date.now() + serverTimeOffsetMs);
+      new Date(playScheduledAt).getTime() -
+      (Date.now() + serverTimeOffsetRef.current);
     const timer = setTimeout(
       () => {
         playerRef.current?.getInternalPlayer()?.playVideo();
@@ -91,7 +101,7 @@ export function GamePlayer({
     );
 
     return () => clearTimeout(timer);
-  }, [room.gameStatus, roundIndex, playScheduledAt, serverTimeOffsetMs]);
+  }, [room.gameStatus, roundIndex, playScheduledAt]);
 
   // ready 보고는 유튜브 플레이어 인스턴스 생성(onReady)이 아니라, 초기 재생 세그먼트까지
   // 버퍼링이 끝나 즉시 재생 가능한 CUED 상태에 도달했을 때 한다. onReady만으로는 실제
