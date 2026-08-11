@@ -131,6 +131,13 @@ export function RoomGamePage() {
       ]);
     });
 
+    // room:enter 성공 시 서버가 보관 중인 최근 채팅 히스토리를 내려준다. 새로고침으로
+    // chatEntries가 초기화돼도 이걸로 복원된다(전체를 교체 — 최초 입장 시에도 다른
+    // 유저들이 미리 나눈 채팅이 있으면 함께 보인다).
+    socket.on('chat:history', (entries) => {
+      setChatEntries(entries.map((entry) => ({ id: nextEntryId(), ...entry })));
+    });
+
     socket.on('room:state', (updatedRoom) => {
       setRoom(updatedRoom);
     });

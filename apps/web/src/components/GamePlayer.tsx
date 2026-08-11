@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import YouTube from 'react-youtube';
+import YouTube, { type YouTubeEvent } from 'react-youtube';
 import { sortParticipantsByScore } from '../utils/participants';
 import type { RoomItemDto } from '../types/room';
 
@@ -70,6 +70,12 @@ export function GamePlayer({
   const playerRef = useRef<YouTube>(null);
   const playedRoundRef = useRef<number | null>(null);
   const reportedReadyRoundRef = useRef<number | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  // playScheduledAt에 도달해 실제로 재생을 "시도"한 시점부터 true. gameStatus가
+  // PLAYING으로 바뀌는 시점(재생 예약 시각보다 최대 PLAY_SCHEDULE_DELAY_SECONDS만큼
+  // 이르다)과는 다르다 — 그 사이에 수동 재생 버튼을 눌러버리면 동시 재생 취지가
+  // 깨지므로, 정확히 자동재생을 시도하는 순간에 맞춰서만 버튼을 활성화한다.
+  const [isPlayScheduleDue, setIsPlayScheduleDue] = useState(false);
   const forceSkipRemaining = useCountdownSeconds(
     round?.forceSkipAt ?? null,
     serverTimeOffsetMs,
@@ -103,6 +109,7 @@ export function GamePlayer({
     const timer = setTimeout(
       () => {
         playedRoundRef.current = roundIndex;
+        setIsPlayScheduleDue(true);
         playerRef.current?.getInternalPlayer()?.playVideo();
       },
       Math.max(0, delayMs),
@@ -140,6 +147,33 @@ export function GamePlayer({
       reportedReadyRoundRef.current = roundIndex;
       onReady();
     }
+  };
+
+  // 라운드가 바뀌면(다음 곡) 이전 곡의 재생 상태 표시가 남아있지 않도록 초기화한다.
+  useEffect(() => {
+    setIsPlaying(false);
+    setIsPlayScheduleDue(false);
+  }, [roundIndex]);
+
+  // 재생 상태를 추적해 중앙 아이콘(음표 ↔ 재생 버튼)에 반영한다. 브라우저 자동재생
+  // 정책 때문에 예약된 playVideo() 호출이 조용히 막히는 경우가 있어(특히 새로고침
+  // 직후처럼 이 페이지에서 아직 실제 클릭이 없었던 경우) 자동재생을 시도한
+  // 시점(isPlayScheduleDue)부터 아직 실제로 재생되지 않았으면 아이콘을 클릭 가능한
+  // 재생 버튼으로 보여준다 — 클릭 자체가 유저 제스처라 브라우저가 재생을 허용해준다.
+  // 실제로 재생이 시작되면(PLAYING 이벤트) 다시 원래의 음표 아이콘으로 되돌린다.
+  const handlePlayerStateChange = (event: YouTubeEvent<number>) => {
+    if (event.data === YouTube.PlayerState.PLAYING) {
+      setIsPlaying(true);
+    } else if (
+      event.data === YouTube.PlayerState.PAUSED ||
+      event.data === YouTube.PlayerState.ENDED
+    ) {
+      setIsPlaying(false);
+    }
+  };
+
+  const handlePlayClick = () => {
+    playerRef.current?.getInternalPlayer()?.playVideo();
   };
 
   // 방장이 라운드 종료(다음 라운드 대기) 상태일 때 Shift+→로 바로 다음 라운드를
@@ -238,14 +272,31 @@ export function GamePlayer({
               },
             }}
             onReady={handlePlayerReady}
+            onStateChange={handlePlayerStateChange}
           />
         )}
 
         {!isRevealedForMe && (
           <div className="absolute inset-0 flex items-center justify-center bg-purple-200">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-pink-400 text-2xl text-white shadow-lg">
-              🎵
-            </div>
+            {isPlaying ? (
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-pink-400 text-2xl text-white shadow-lg">
+                🎵
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handlePlayClick}
+                disabled={!isPlayScheduleDue}
+                aria-label="재생"
+                className={`flex h-16 w-16 items-center justify-center rounded-full text-2xl text-white shadow-lg transition ${
+                  isPlayScheduleDue
+                    ? 'cursor-pointer bg-pink-400 hover:bg-pink-500'
+                    : 'cursor-not-allowed bg-pink-300/60 text-white/70'
+                }`}
+              >
+                ▶
+              </button>
+            )}
           </div>
         )}
       </div>
