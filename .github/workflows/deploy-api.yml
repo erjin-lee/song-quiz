@@ -48,6 +48,8 @@ jobs:
         run: |
           ssh was '
             set -e
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
             cd "${{ secrets.WAS_APP_DIR }}"
             git fetch --all
             git checkout main
