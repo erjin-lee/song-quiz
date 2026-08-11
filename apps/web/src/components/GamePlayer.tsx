@@ -1,9 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import YouTube, { type YouTubeEvent } from 'react-youtube';
+import YouTube from 'react-youtube';
 import { sortParticipantsByScore } from '../utils/participants';
 import type { RoomItemDto } from '../types/room';
 
-/** onReady 이벤트가 CUED 상태까지 도달하지 못했을 때 방이 영구 정지하지 않도록 강제로 ready 처리하는 유예 시간. */
+/**
+ * onReady(플레이어/iframe 생성 완료) 이벤트가 이 시간 안에도 오지 않으면 방이 영구
+ * 정지하지 않도록 강제로 ready 처리하는 유예 시간(LOADING 중엔 스킵 수단이 없음).
+ * YouTube 플레이어의 실제 버퍼링 완료 상태(CUED 등)는 videoId를 생성자 옵션으로 바로
+ * 넘기는 이 구성에서는 안정적으로 감지되지 않아(관측 결과 CUED가 거의 발생하지 않음),
+ * 정밀하게 판별하려 하지 않고 iframe 로딩 여부만 러프하게 기준으로 삼는다.
+ */
 const READY_FALLBACK_TIMEOUT_MS = 8000;
 
 interface GamePlayerProps {
@@ -64,9 +70,6 @@ export function GamePlayer({
   const playerRef = useRef<YouTube>(null);
   const playedRoundRef = useRef<number | null>(null);
   const reportedReadyRoundRef = useRef<number | null>(null);
-  const [playbackBlockedRound, setPlaybackBlockedRound] = useState<
-    number | null
-  >(null);
   const forceSkipRemaining = useCountdownSeconds(
     round?.forceSkipAt ?? null,
     serverTimeOffsetMs,
@@ -108,14 +111,12 @@ export function GamePlayer({
     return () => clearTimeout(timer);
   }, [room.gameStatus, roundIndex, playScheduledAt, serverTimeOffsetMs]);
 
-  // ready 보고는 유튜브 플레이어 인스턴스 생성(onReady)이 아니라, 초기 재생 세그먼트까지
-  // 버퍼링이 끝나 즉시 재생 가능한 CUED 상태에 도달했을 때 한다. onReady만으로는 실제
-  // 버퍼링 완료를 보장하지 않아, 이 기준만으로는 클라이언트별 재생 시작 지연이 갈라진다.
-  // 단, 지역 차단/네트워크 문제 등으로 CUED에 영원히 도달하지 못하면 방 전체가 LOADING
-  // 상태에서 멈추므로(LOADING 중엔 스킵 수단이 없음), 안전장치로 유예 시간 후 강제로
-  // ready 처리한다. 이 fallback이 발동했다는 건 이 클라이언트의 플레이어가 실제로는
-  // 재생 불가능한 상태라는 뜻이라, playbackBlockedRound를 표시해 사용자에게 알린다
-  // (방 전체는 정상 진행되므로 조용히 막지 않고 새로고침을 안내하는 정도로 처리한다).
+  // ready 보고는 유튜브 플레이어(iframe)가 생성되면(onReady) 바로 한다. 실제 버퍼링
+  // 완료 여부까지 정밀하게 확인하려던 시도(CUED 상태 감지)는 이 컴포넌트의 플레이어
+  // 구성(videoId를 생성자 옵션으로 바로 전달)에서는 안정적으로 감지되지 않는 것으로
+  // 확인되어(관측 결과 CUED가 거의 발생하지 않음, "실패"로 오판하는 원인이었다) 걷어내고,
+  // iframe 로딩 여부만 러프하게 기준으로 삼는다. onReady 자체가 오지 않는 경우에 대비해
+  // 유예 시간 후 강제로 ready 처리하는 안전장치만 유지한다.
   useEffect(() => {
     if (room.gameStatus !== 'LOADING' || roundIndex === null) {
       return;
@@ -127,7 +128,6 @@ export function GamePlayer({
     const timer = setTimeout(() => {
       if (reportedReadyRoundRef.current !== roundIndex) {
         reportedReadyRoundRef.current = roundIndex;
-        setPlaybackBlockedRound(roundIndex);
         onReady();
       }
     }, READY_FALLBACK_TIMEOUT_MS);
@@ -135,11 +135,8 @@ export function GamePlayer({
     return () => clearTimeout(timer);
   }, [room.gameStatus, roundIndex, onReady]);
 
-  const handlePlayerStateChange = (event: YouTubeEvent<number>) => {
-    if (
-      event.data === YouTube.PlayerState.CUED &&
-      reportedReadyRoundRef.current !== roundIndex
-    ) {
+  const handlePlayerReady = () => {
+    if (reportedReadyRoundRef.current !== roundIndex) {
       reportedReadyRoundRef.current = roundIndex;
       onReady();
     }
@@ -218,7 +215,6 @@ export function GamePlayer({
   const isRevealedForMe =
     round.revealed || round.correctUserIds.includes(myUserId);
   const hasRequestedForceSkip = round.forceSkipAt !== null;
-  const isPlaybackBlockedForMe = playbackBlockedRound === round.roundIndex;
 
   return (
     <div className="flex flex-col items-center justify-center gap-4 rounded-2xl bg-gradient-to-br from-purple-100 to-purple-50 px-6 py-10">
@@ -241,7 +237,7 @@ export function GamePlayer({
                 end: round.endSec ?? undefined,
               },
             }}
-            onStateChange={handlePlayerStateChange}
+            onReady={handlePlayerReady}
           />
         )}
 
@@ -264,11 +260,6 @@ export function GamePlayer({
 
         {room.gameStatus === 'PLAYING' && (
           <div className="flex flex-col items-center gap-2">
-            {isPlaybackBlockedForMe && (
-              <p className="text-xs font-semibold text-rose-400">
-                영상을 불러오지 못했어요. 새로고침 후 다시 시도해주세요.
-              </p>
-            )}
             <p className="text-sm text-slate-500">정답을 채팅창에 입력하세요</p>
 
             {hasRequestedForceSkip ? (
