@@ -234,7 +234,10 @@ export class RoomService extends EventEmitter {
   }
 
   /** 방장이 게임을 시작한다. 첫 라운드를 준비하고 참가자들의 영상 로딩 완료를 기다린다. */
-  async startGame(roomId: string, requesterUserId: string): Promise<RoomItemDto> {
+  async startGame(
+    roomId: string,
+    requesterUserId: string,
+  ): Promise<RoomItemDto> {
     return this.withRoomLock(roomId, async () => {
       const room = await this.getRoomOrThrow(roomId);
       this.assertHost(room, requesterUserId);
@@ -285,7 +288,10 @@ export class RoomService extends EventEmitter {
   }
 
   /** 방장이 라운드 종료 후 다음 라운드로 넘어간다(또는 마지막 라운드면 게임을 종료한다). */
-  async nextRound(roomId: string, requesterUserId: string): Promise<RoomItemDto> {
+  async nextRound(
+    roomId: string,
+    requesterUserId: string,
+  ): Promise<RoomItemDto> {
     return this.withRoomLock(roomId, async () => {
       const room = await this.getRoomOrThrow(roomId);
       this.assertHost(room, requesterUserId);
@@ -422,7 +428,10 @@ export class RoomService extends EventEmitter {
    * 방장이 현재 라운드를 강제로 스킵한다. 즉시 끝내지 않고 유예 시간(3초) 후 종료되도록
    * 예약해, 그 사이 마지막으로 답을 제출할 시간을 준다.
    */
-  async forceSkip(roomId: string, requesterUserId: string): Promise<RoomItemDto> {
+  async forceSkip(
+    roomId: string,
+    requesterUserId: string,
+  ): Promise<RoomItemDto> {
     return this.withRoomLock(roomId, async () => {
       const room = await this.getRoomOrThrow(roomId);
       this.assertHost(room, requesterUserId);
@@ -653,9 +662,7 @@ export class RoomService extends EventEmitter {
   }
 
   private async getRoomIndex(): Promise<string[]> {
-    return (
-      (await this.cacheService.get<string[]>(ROOM_INDEX_CACHE_KEY)) ?? []
-    );
+    return (await this.cacheService.get<string[]>(ROOM_INDEX_CACHE_KEY)) ?? [];
   }
 
   private async addToIndex(roomId: string): Promise<void> {

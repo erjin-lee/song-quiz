@@ -292,9 +292,7 @@ describe('RoomService', () => {
       expect(afterGuestReady.gameStatus).toBe('PLAYING');
       expect(afterGuestReady.currentRound?.playScheduledAt).not.toBeNull();
       expect(
-        new Date(
-          afterGuestReady.currentRound!.playScheduledAt!,
-        ).getTime(),
+        new Date(afterGuestReady.currentRound!.playScheduledAt!).getTime(),
       ).toBeGreaterThan(Date.now());
     });
 
@@ -460,9 +458,7 @@ describe('RoomService', () => {
       );
 
       expect(afterRepeatedSkip.gameStatus).toBe('PLAYING');
-      expect(afterRepeatedSkip.currentRound?.skipUserIds).toEqual([
-        hostUserId,
-      ]);
+      expect(afterRepeatedSkip.currentRound?.skipUserIds).toEqual([hostUserId]);
     });
 
     it('제한 시간이 지나면 라운드가 자동 종료된다', async () => {

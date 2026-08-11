@@ -3,11 +3,7 @@ import { RoomParticipantDto } from './room-participant.dto';
 import { RoundPublicStateDto } from './round-public-state.dto';
 
 export type GameStatus =
-  | 'WAITING'
-  | 'LOADING'
-  | 'PLAYING'
-  | 'ROUND_ENDED'
-  | 'FINISHED';
+  'WAITING' | 'LOADING' | 'PLAYING' | 'ROUND_ENDED' | 'FINISHED';
 
 export class RoomItemDto {
   @ApiProperty({

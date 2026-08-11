@@ -11,8 +11,9 @@ import { Artist } from '../quiz/entities/artist.entity';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
 import { Quiz } from '../quiz/entities/quiz.entity';
 import { Song } from '../quiz/entities/song.entity';
-import { ScrapeAgeChartResultDto } from './dto/scrape-age-chart-result.dto';
+import { ScrapeChartResultDto } from './dto/scrape-chart-result.dto';
 import {
+  ChartType,
   MelonFetchError,
   MelonScraperClient,
   ScrapedChartArtist,
@@ -22,7 +23,7 @@ import {
 const DECADE_UNIT = 10;
 
 @Injectable()
-export class AgeChartScraperService {
+export class ChartScraperService {
   constructor(
     private readonly melonScraperClient: MelonScraperClient,
     @InjectRepository(Artist)
@@ -37,24 +38,31 @@ export class AgeChartScraperService {
     private readonly quizSongRepository: Repository<QuizSong>,
   ) {}
 
-  async scrapeAgeChart(decade: number): Promise<ScrapeAgeChartResultDto> {
-    if (decade <= 0 || decade % DECADE_UNIT !== 0) {
+  async scrapeChart(
+    type: ChartType,
+    year: number,
+  ): Promise<ScrapeChartResultDto> {
+    if (type === ChartType.AG && (year <= 0 || year % DECADE_UNIT !== 0)) {
       throw new BadRequestException(
-        `연대 값은 10년 단위여야 합니다. (decade: ${decade})`,
+        `연대별 차트는 10년 단위 연도여야 합니다. (year: ${year})`,
+      );
+    }
+    if (type === ChartType.YE && year <= 0) {
+      throw new BadRequestException(
+        `연도별 차트는 유효한 연도여야 합니다. (year: ${year})`,
       );
     }
 
     const chartSongs = await this.wrapMelonCall(() =>
-      this.melonScraperClient.fetchAgeChartSongs(String(decade)),
+      this.melonScraperClient.fetchAgeChartSongs(String(year), type),
     );
     if (chartSongs.length === 0) {
       throw new NotFoundException(
-        `멜론 연대별 차트를 찾을 수 없습니다. (decade: ${decade})`,
+        `멜론 차트를 찾을 수 없습니다. (type: ${type}, year: ${year})`,
       );
     }
 
-    const quizTtl = `${decade}년대 인기곡`;
-    const quizDesc = `${decade} ~ ${decade + DECADE_UNIT} 멜론 인기 차트 곡 입니다.`;
+    const { quizTtl, quizDesc } = this.buildQuizMeta(type, year);
     const quiz = await this.quizRepository.save(
       this.quizRepository.create({ quizTtl, quizDesc }),
     );
@@ -111,7 +119,8 @@ export class AgeChartScraperService {
     }
 
     return {
-      decade,
+      type,
+      year,
       quizId: quiz.quizId,
       quizTtl: quiz.quizTtl,
       quizDesc: quiz.quizDesc ?? quizDesc,
@@ -120,6 +129,22 @@ export class AgeChartScraperService {
       savedSongCount,
       skippedSongCount,
       savedQuizSongCount: chartSongs.length,
+    };
+  }
+
+  private buildQuizMeta(
+    type: ChartType,
+    year: number,
+  ): { quizTtl: string; quizDesc: string } {
+    if (type === ChartType.AG) {
+      return {
+        quizTtl: `${year}년대 인기곡`,
+        quizDesc: `${year} ~ ${year + DECADE_UNIT} 멜론 인기 차트 곡 입니다.`,
+      };
+    }
+    return {
+      quizTtl: `${year}년 인기곡`,
+      quizDesc: `${year} 멜론 인기 차트 곡 입니다.`,
     };
   }
 

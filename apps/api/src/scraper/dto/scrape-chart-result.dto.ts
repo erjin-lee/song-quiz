@@ -1,8 +1,15 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { ChartType } from '../melon-scraper.client';
 
-export class ScrapeAgeChartResultDto {
-  @ApiProperty({ description: '연대(10년 단위)' })
-  decade: number;
+export class ScrapeChartResultDto {
+  @ApiProperty({
+    enum: ChartType,
+    description: '차트 타입 (AG: 연대별, YE: 연도별)',
+  })
+  type: ChartType;
+
+  @ApiProperty({ description: '연도 (AG는 10년 단위, YE는 임의 연도)' })
+  year: number;
 
   @ApiProperty({ description: '생성된 퀴즈 ID' })
   quizId: string;

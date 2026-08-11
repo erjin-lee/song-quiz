@@ -11,7 +11,11 @@ const ALBUM_PAGE_SIZE = 15;
 const SONG_PAGE_SIZE = 50;
 const PAGE_FETCH_DELAY_MS = 200;
 const MAX_PAGE_ITERATIONS = 500;
-const AGE_CHART_PAGE_INDICES = [1, 2];
+
+export enum ChartType {
+  AG = 'AG',
+  YE = 'YE',
+}
 
 export interface ScrapedArtist {
   melonArtistId: string;
@@ -174,25 +178,33 @@ export class MelonScraperClient {
     return songs;
   }
 
-  async fetchAgeChartSongs(chartDate: string): Promise<ScrapedChartSong[]> {
+  async fetchAgeChartSongs(
+    chartDate: string,
+    type: ChartType,
+  ): Promise<ScrapedChartSong[]> {
     const songs: ScrapedChartSong[] = [];
 
-    for (const idx of AGE_CHART_PAGE_INDICES) {
-      const url =
-        `${MELON_BASE_URL}/chart/age/list.htm` +
-        `?idx=${idx}&chartType=AG&chartGenre=KPOP&chartDate=${chartDate}&moved=Y`;
-      const html = await this.getHtml(url);
-      const $ = cheerio.load(html);
+    const url =
+      `${MELON_BASE_URL}/chart/age/list.htm` +
+      `?idx=2&chartType=${type}&chartGenre=KPOP&chartDate=${chartDate}&moved=Y`;
+    const html = await this.getHtml(url);
+    const $ = cheerio.load(html);
 
-      $('tr.lst50').each((_, el) => {
-        const song = this.parseChartSongRow($, $(el));
-        if (song) {
-          songs.push(song);
-        }
-      });
+    $('tr.lst50').each((_, el) => {
+      const song = this.parseChartSongRow($, $(el));
+      if (song) {
+        songs.push(song);
+      }
+    });
 
-      await delay(PAGE_FETCH_DELAY_MS);
-    }
+    $('tr.lst100').each((_, el) => {
+      const song = this.parseChartSongRow($, $(el));
+      if (song) {
+        songs.push(song);
+      }
+    });
+
+    await delay(PAGE_FETCH_DELAY_MS);
 
     return songs;
   }

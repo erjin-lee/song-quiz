@@ -31,11 +31,7 @@ async function bootstrap() {
     // SwaggerModule.setup은 UI 경로(`/api-docs`)뿐 아니라 형제 경로인
     // `/api-docs-json`, `/api-docs-yaml`도 함께 노출하므로 셋 다 보호해야 한다.
     app.use(
-      [
-        `/${API_DOCS_PATH}`,
-        `/${API_DOCS_PATH}-json`,
-        `/${API_DOCS_PATH}-yaml`,
-      ],
+      [`/${API_DOCS_PATH}`, `/${API_DOCS_PATH}-json`, `/${API_DOCS_PATH}-yaml`],
       basicAuth({
         users: { [apiDocsUser]: apiDocsPassword },
         challenge: true,

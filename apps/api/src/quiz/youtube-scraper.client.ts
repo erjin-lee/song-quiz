@@ -142,7 +142,7 @@ export class YoutubeScraperClient {
       try {
         const response = await fetch(url, {
           headers: {
-            redirect: "manual",
+            redirect: 'manual',
             'User-Agent': USER_AGENT,
             'Accept-Language': 'ko-KR,ko;q=0.9',
           },
@@ -167,6 +167,8 @@ export class YoutubeScraperClient {
     this.logger.error(`유튜브 요청 최종 실패: ${url}`, lastError);
     throw lastError instanceof Error
       ? lastError
-      : new YoutubeFetchError(`유튜브 페이지 요청에 실패했습니다. (url: ${url})`);
+      : new YoutubeFetchError(
+          `유튜브 페이지 요청에 실패했습니다. (url: ${url})`,
+        );
   }
 }
