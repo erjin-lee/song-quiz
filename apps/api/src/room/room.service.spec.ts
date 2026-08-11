@@ -52,6 +52,7 @@ describe('RoomService', () => {
 
   const quizRepositoryMock = {
     findOne: jest.fn(),
+    increment: jest.fn(),
   };
   const quizArtistRepositoryMock = {
     find: jest.fn(),
@@ -119,11 +120,12 @@ describe('RoomService', () => {
     await cacheService.onModuleDestroy();
   });
 
-  async function createTestRoom(maxUserCnt = 4) {
+  async function createTestRoom(maxUserCnt = 4, speedModeEnabled = false) {
     return roomService.createRoom({
       roomTtl: '아이유 방',
       quizId: '1',
       isRandom: false,
+      speedModeEnabled,
       maxUserCnt,
       nickname: '방장',
     });
@@ -153,6 +155,7 @@ describe('RoomService', () => {
           roomTtl: '방',
           quizId: '999',
           isRandom: false,
+          speedModeEnabled: false,
           maxUserCnt: 4,
           nickname: '방장',
         }),
@@ -257,6 +260,7 @@ describe('RoomService', () => {
       await expect(
         roomService.startGame(room.roomId, guestUserId),
       ).rejects.toThrow(ForbiddenException);
+      expect(quizRepositoryMock.increment).not.toHaveBeenCalled();
     });
 
     it('게임을 시작하면 첫 라운드가 준비되고 정답 정보는 노출하지 않는다', async () => {
@@ -270,6 +274,11 @@ describe('RoomService', () => {
       expect(started.currentRound?.youtubeVideoId).toBe('video1');
       expect(started.currentRound?.revealed).toBe(false);
       expect(started.currentRound?.songNm).toBeNull();
+      expect(quizRepositoryMock.increment).toHaveBeenCalledWith(
+        { quizId: room.quizId },
+        'playCnt',
+        1,
+      );
     });
 
     it('모든 참가자가 로딩 완료를 알리면 별도 조작 없이 자동으로 재생이 시작된다', async () => {
@@ -561,6 +570,121 @@ describe('RoomService', () => {
 
       expect(finished.gameStatus).toBe('FINISHED');
       expect(finished.currentRound).toBeNull();
+    });
+  });
+
+  describe('스피드 모드', () => {
+    it('한 명만 정답을 맞혀도 6초 뒤 자동으로 정답이 공개되고, 공개 4초 뒤 자동으로 다음 라운드로 넘어간다', async () => {
+      jest.useFakeTimers();
+      try {
+        const { room, userId: hostUserId } = await createTestRoom(2, true);
+        const { userId: guestUserId } = await roomService.joinRoom(
+          room.roomId,
+          { nickname: '참가자1' },
+        );
+        await roomService.startGame(room.roomId, hostUserId);
+        await roomService.markReady(room.roomId, hostUserId);
+        await roomService.markReady(room.roomId, guestUserId);
+
+        const result = await roomService.submitChatMessage(
+          room.roomId,
+          hostUserId,
+          '노래1',
+        );
+        expect(result.action).toBe('correct');
+
+        const afterAnswer = await roomService.getRoom(room.roomId);
+        expect(afterAnswer?.gameStatus).toBe('PLAYING');
+        expect(afterAnswer?.currentRound?.revealed).toBe(false);
+        expect(afterAnswer?.currentRound?.autoRevealAt).not.toBeNull();
+
+        await jest.advanceTimersByTimeAsync(6_000);
+
+        const afterReveal = await roomService.getRoom(room.roomId);
+        expect(afterReveal?.gameStatus).toBe('ROUND_ENDED');
+        expect(afterReveal?.currentRound?.revealed).toBe(true);
+        expect(afterReveal?.currentRound?.songNm).toBe('노래1');
+        expect(afterReveal?.currentRound?.autoNextRoundAt).not.toBeNull();
+
+        await jest.advanceTimersByTimeAsync(4_000);
+
+        const afterAutoNext = await roomService.getRoom(room.roomId);
+        expect(afterAutoNext?.gameStatus).toBe('LOADING');
+        expect(afterAutoNext?.currentRound?.roundIndex).toBe(1);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('스피드 모드가 꺼져 있으면 한 명만 정답을 맞혀도 자동 공개되지 않는다', async () => {
+      jest.useFakeTimers();
+      try {
+        const { room, userId: hostUserId } = await createTestRoom(2, false);
+        const { userId: guestUserId } = await roomService.joinRoom(
+          room.roomId,
+          { nickname: '참가자1' },
+        );
+        await roomService.startGame(room.roomId, hostUserId);
+        await roomService.markReady(room.roomId, hostUserId);
+        await roomService.markReady(room.roomId, guestUserId);
+
+        await roomService.submitChatMessage(room.roomId, hostUserId, '노래1');
+
+        const afterAnswer = await roomService.getRoom(room.roomId);
+        expect(afterAnswer?.currentRound?.autoRevealAt).toBeNull();
+
+        await jest.advanceTimersByTimeAsync(6_000);
+
+        const afterWait = await roomService.getRoom(room.roomId);
+        expect(afterWait?.gameStatus).toBe('PLAYING');
+        expect(afterWait?.currentRound?.revealed).toBe(false);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('전원이 정답을 맞혀 즉시 라운드가 끝나도, 스피드 모드가 켜져 있으면 4초 뒤 자동으로 다음 라운드로 넘어간다', async () => {
+      jest.useFakeTimers();
+      try {
+        const { room, userId: hostUserId } = await createTestRoom(1, true);
+        await roomService.startGame(room.roomId, hostUserId);
+        await roomService.markReady(room.roomId, hostUserId);
+
+        await roomService.submitChatMessage(room.roomId, hostUserId, '노래1');
+
+        const afterAnswer = await roomService.getRoom(room.roomId);
+        expect(afterAnswer?.gameStatus).toBe('ROUND_ENDED');
+        expect(afterAnswer?.currentRound?.autoNextRoundAt).not.toBeNull();
+
+        await jest.advanceTimersByTimeAsync(4_000);
+
+        const afterAutoNext = await roomService.getRoom(room.roomId);
+        expect(afterAutoNext?.gameStatus).toBe('LOADING');
+        expect(afterAutoNext?.currentRound?.roundIndex).toBe(1);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('방장이 라운드를 직접 넘긴 뒤에도 다음 라운드에서 스피드 모드가 계속 정상 동작한다', async () => {
+      jest.useFakeTimers();
+      try {
+        const { room, userId: hostUserId } = await createTestRoom(1, true);
+        await roomService.startGame(room.roomId, hostUserId);
+        await roomService.markReady(room.roomId, hostUserId);
+        await roomService.submitChatMessage(room.roomId, hostUserId, '노래1');
+
+        await roomService.nextRound(room.roomId, hostUserId);
+        await roomService.markReady(room.roomId, hostUserId);
+        await roomService.submitChatMessage(room.roomId, hostUserId, '노래2');
+
+        await jest.advanceTimersByTimeAsync(4_000);
+
+        const roomAfter = await roomService.getRoom(room.roomId);
+        expect(roomAfter?.gameStatus).toBe('FINISHED');
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 });

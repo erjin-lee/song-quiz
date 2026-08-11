@@ -61,6 +61,22 @@ export class RoundPublicStateDto {
 
   @ApiProperty({
     description:
+      '스피드 모드에서 첫 정답자가 나와 정답이 자동 공개될 예정 시각(ISO). 예약 전이면 null',
+    example: null,
+    nullable: true,
+  })
+  autoRevealAt: string | null;
+
+  @ApiProperty({
+    description:
+      '스피드 모드에서 정답 공개 후 자동으로 다음 라운드로 넘어갈 예정 시각(ISO). 예약 전이면 null',
+    example: null,
+    nullable: true,
+  })
+  autoNextRoundAt: string | null;
+
+  @ApiProperty({
+    description:
       '재생을 시작해야 하는 예정 시각(ISO, 서버 기준). 아직 예약 전이면 null. ' +
       '모든 클라이언트가 각자 수신 시점과 무관하게 이 시각에 맞춰 재생을 시작해야' +
       ' 동시 재생이 가능하다.',

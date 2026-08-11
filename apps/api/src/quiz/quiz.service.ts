@@ -71,7 +71,10 @@ export class QuizService {
       }
     }
 
-    const quizzes = await qb.orderBy('quiz.crtDt', 'DESC').getMany();
+    const quizzes = await qb
+      .orderBy('quiz.playCnt', 'DESC')
+      .addOrderBy('quiz.crtDt', 'DESC')
+      .getMany();
 
     return quizzes.map((quiz) => ({
       quizId: quiz.quizId,
