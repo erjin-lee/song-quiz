@@ -20,12 +20,7 @@ interface ChatMessagePayload {
   message: string;
 }
 
-interface TimeSyncPayload {
-  clientSentAt: number;
-}
-
 interface TimeSyncResponse {
-  clientSentAt: number;
   serverTime: number;
 }
 
@@ -203,8 +198,8 @@ export class RoomGateway implements OnGatewayDisconnect {
    * ack 콜백에 응답해야 하므로 반드시 값을 반환해야 한다(반환 없으면 클라이언트가 계속 대기).
    */
   @SubscribeMessage('time:sync')
-  handleTimeSync(@MessageBody() payload: TimeSyncPayload): TimeSyncResponse {
-    return { clientSentAt: payload.clientSentAt, serverTime: Date.now() };
+  handleTimeSync(): TimeSyncResponse {
+    return { serverTime: Date.now() };
   }
 
   @SubscribeMessage('room:leave')

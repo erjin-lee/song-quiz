@@ -25,7 +25,6 @@ export interface RoomServerToClientEvents {
 }
 
 export interface TimeSyncResponse {
-  clientSentAt: number;
   serverTime: number;
 }
 

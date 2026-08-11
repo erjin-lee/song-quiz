@@ -19,7 +19,12 @@ interface GamePlayerProps {
   onShortcutEnabledChange: (enabled: boolean) => void;
 }
 
-function useCountdownSeconds(targetIso: string | null): number | null {
+// targetIso는 서버 기준 절대 시각이므로, 로컬 시계를 그대로 쓰지 않고 offsetMs로
+// 보정한 "서버 기준 현재 시각"과 비교한다(재생 예약과 동일한 보정 방식).
+function useCountdownSeconds(
+  targetIso: string | null,
+  offsetMs: number,
+): number | null {
   const [remaining, setRemaining] = useState<number | null>(null);
 
   useEffect(() => {
@@ -30,12 +35,14 @@ function useCountdownSeconds(targetIso: string | null): number | null {
 
     const target = new Date(targetIso).getTime();
     const tick = () => {
-      setRemaining(Math.max(0, Math.ceil((target - Date.now()) / 1000)));
+      setRemaining(
+        Math.max(0, Math.ceil((target - (Date.now() + offsetMs)) / 1000)),
+      );
     };
     tick();
     const interval = setInterval(tick, 250);
     return () => clearInterval(interval);
-  }, [targetIso]);
+  }, [targetIso, offsetMs]);
 
   return remaining;
 }
@@ -57,7 +64,13 @@ export function GamePlayer({
   const playerRef = useRef<YouTube>(null);
   const playedRoundRef = useRef<number | null>(null);
   const reportedReadyRoundRef = useRef<number | null>(null);
-  const forceSkipRemaining = useCountdownSeconds(round?.forceSkipAt ?? null);
+  const [playbackBlockedRound, setPlaybackBlockedRound] = useState<
+    number | null
+  >(null);
+  const forceSkipRemaining = useCountdownSeconds(
+    round?.forceSkipAt ?? null,
+    serverTimeOffsetMs,
+  );
 
   // 재생 시작은 이벤트를 받는 즉시가 아니라, 서버가 지정한 예정 시각(playScheduledAt)에
   // 맞춰 실행한다. 클라이언트마다 소켓 이벤트 수신 시각이 달라 즉시 재생하면 유저별로
@@ -100,7 +113,9 @@ export function GamePlayer({
   // 버퍼링 완료를 보장하지 않아, 이 기준만으로는 클라이언트별 재생 시작 지연이 갈라진다.
   // 단, 지역 차단/네트워크 문제 등으로 CUED에 영원히 도달하지 못하면 방 전체가 LOADING
   // 상태에서 멈추므로(LOADING 중엔 스킵 수단이 없음), 안전장치로 유예 시간 후 강제로
-  // ready 처리한다.
+  // ready 처리한다. 이 fallback이 발동했다는 건 이 클라이언트의 플레이어가 실제로는
+  // 재생 불가능한 상태라는 뜻이라, playbackBlockedRound를 표시해 사용자에게 알린다
+  // (방 전체는 정상 진행되므로 조용히 막지 않고 새로고침을 안내하는 정도로 처리한다).
   useEffect(() => {
     if (room.gameStatus !== 'LOADING' || roundIndex === null) {
       return;
@@ -112,6 +127,7 @@ export function GamePlayer({
     const timer = setTimeout(() => {
       if (reportedReadyRoundRef.current !== roundIndex) {
         reportedReadyRoundRef.current = roundIndex;
+        setPlaybackBlockedRound(roundIndex);
         onReady();
       }
     }, READY_FALLBACK_TIMEOUT_MS);
@@ -202,6 +218,7 @@ export function GamePlayer({
   const isRevealedForMe =
     round.revealed || round.correctUserIds.includes(myUserId);
   const hasRequestedForceSkip = round.forceSkipAt !== null;
+  const isPlaybackBlockedForMe = playbackBlockedRound === round.roundIndex;
 
   return (
     <div className="flex flex-col items-center justify-center gap-4 rounded-2xl bg-gradient-to-br from-purple-100 to-purple-50 px-6 py-10">
@@ -247,6 +264,11 @@ export function GamePlayer({
 
         {room.gameStatus === 'PLAYING' && (
           <div className="flex flex-col items-center gap-2">
+            {isPlaybackBlockedForMe && (
+              <p className="text-xs font-semibold text-rose-400">
+                영상을 불러오지 못했어요. 새로고침 후 다시 시도해주세요.
+              </p>
+            )}
             <p className="text-sm text-slate-500">정답을 채팅창에 입력하세요</p>
 
             {hasRequestedForceSkip ? (

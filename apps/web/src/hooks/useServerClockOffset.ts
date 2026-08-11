@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import type { RoomSocket } from '../api/socket';
 
 const SAMPLE_COUNT = 5;
-const SAMPLE_INTERVAL_MS = 150;
 /**
  * ack 응답 대기 타임아웃. 샘플링 도중 소켓이 응답 없이 끊기면(ack가 유실되면)
  * socket.io는 재전송하지 않으므로, 타임아웃 없이는 for 루프가 영구 대기해
@@ -59,31 +58,38 @@ export function useServerClockOffset(socket: RoomSocket | null): number {
     }
 
     let cancelled = false;
+    // 소켓이 아직 연결되지 않은 상태에서 syncClock()을 즉시 호출한 직후 'connect'
+    // 이벤트가 곧바로 발화하면, 두 호출이 겹쳐 5-sample 루프가 두 번 동시에 도는
+    // 문제가 있었다. 이 플래그로 이미 진행 중인 측정이 있으면 새 측정을 건너뛴다.
+    let syncInFlight = false;
 
     const syncClock = async () => {
-      const samples: ClockSample[] = [];
-      for (let i = 0; i < SAMPLE_COUNT; i++) {
+      if (syncInFlight) {
+        return;
+      }
+      syncInFlight = true;
+      try {
+        // 5개 샘플을 동시에 쏴서 최악의 경우(ack 타임아웃)에도 측정 전체가
+        // ACK_TIMEOUT_MS 근처에서 끝나도록 한다(순차 실행 시 최악 10초 이상 소요).
+        const samples = await Promise.all(
+          Array.from({ length: SAMPLE_COUNT }, () => measureOnce(socket)),
+        );
         if (cancelled) {
           return;
         }
-        samples.push(await measureOnce(socket));
-        if (i < SAMPLE_COUNT - 1) {
-          await new Promise((resolve) =>
-            setTimeout(resolve, SAMPLE_INTERVAL_MS),
-          );
+        const validSamples = samples.filter((sample) =>
+          Number.isFinite(sample.rttMs),
+        );
+        if (validSamples.length === 0) {
+          return;
         }
+        const best = validSamples.reduce((a, b) =>
+          b.rttMs < a.rttMs ? b : a,
+        );
+        setOffsetMs(best.offsetMs);
+      } finally {
+        syncInFlight = false;
       }
-      if (cancelled) {
-        return;
-      }
-      const validSamples = samples.filter((sample) =>
-        Number.isFinite(sample.rttMs),
-      );
-      if (validSamples.length === 0) {
-        return;
-      }
-      const best = validSamples.reduce((a, b) => (b.rttMs < a.rttMs ? b : a));
-      setOffsetMs(best.offsetMs);
     };
 
     void syncClock();
