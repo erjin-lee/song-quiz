@@ -8,16 +8,25 @@ export class RoundPublicStateDto {
   totalRounds: number;
 
   @ApiProperty({
-    description: '유튜브 영상 ID. 정답 유출 방지를 위해 곡 정보는 공개 전까지 숨긴다.',
+    description:
+      '유튜브 영상 ID. 정답 유출 방지를 위해 곡 정보는 공개 전까지 숨긴다.',
     example: 'pDvBiB1waBk',
     nullable: true,
   })
   youtubeVideoId: string | null;
 
-  @ApiProperty({ description: '재생 시작 위치(초)', example: 132, nullable: true })
+  @ApiProperty({
+    description: '재생 시작 위치(초)',
+    example: 132,
+    nullable: true,
+  })
   startSec: number | null;
 
-  @ApiProperty({ description: '재생 종료 위치(초)', example: 162, nullable: true })
+  @ApiProperty({
+    description: '재생 종료 위치(초)',
+    example: 162,
+    nullable: true,
+  })
   endSec: number | null;
 
   @ApiProperty({
@@ -35,7 +44,8 @@ export class RoundPublicStateDto {
   correctUserIds: string[];
 
   @ApiProperty({
-    description: '이번 라운드 스킵을 요청한 유저 ID 목록(과반이면 라운드가 종료된다)',
+    description:
+      '이번 라운드 스킵을 요청한 유저 ID 목록(과반이면 라운드가 종료된다)',
     example: [],
     type: [String],
   })

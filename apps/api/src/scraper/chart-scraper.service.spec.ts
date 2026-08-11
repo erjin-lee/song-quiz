@@ -6,11 +6,15 @@ import { Artist } from '../quiz/entities/artist.entity';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
 import { Quiz } from '../quiz/entities/quiz.entity';
 import { Song } from '../quiz/entities/song.entity';
-import { AgeChartScraperService } from './age-chart-scraper.service';
-import { MelonScraperClient, ScrapedChartSong } from './melon-scraper.client';
+import { ChartScraperService } from './chart-scraper.service';
+import {
+  ChartType,
+  MelonScraperClient,
+  ScrapedChartSong,
+} from './melon-scraper.client';
 
-describe('AgeChartScraperService', () => {
-  let service: AgeChartScraperService;
+describe('ChartScraperService', () => {
+  let service: ChartScraperService;
 
   const chartSongFixture: ScrapedChartSong[] = [
     {
@@ -101,7 +105,7 @@ describe('AgeChartScraperService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        AgeChartScraperService,
+        ChartScraperService,
         { provide: MelonScraperClient, useValue: melonScraperClientMock },
         { provide: getRepositoryToken(Artist), useValue: artistRepositoryMock },
         { provide: getRepositoryToken(Album), useValue: albumRepositoryMock },
@@ -114,26 +118,43 @@ describe('AgeChartScraperService', () => {
       ],
     }).compile();
 
-    service = module.get<AgeChartScraperService>(AgeChartScraperService);
+    service = module.get<ChartScraperService>(ChartScraperService);
   });
 
-  it('10년 단위가 아닌 연대는 요청 전에 거부한다', async () => {
-    await expect(service.scrapeAgeChart(2015)).rejects.toThrow(
+  it('10년 단위가 아닌 연대는 AG 타입 요청 전에 거부한다', async () => {
+    await expect(service.scrapeChart(ChartType.AG, 2015)).rejects.toThrow(
       BadRequestException,
     );
     expect(melonScraperClientMock.fetchAgeChartSongs).not.toHaveBeenCalled();
   });
 
+  it('유효하지 않은 연도는 YE 타입 요청 전에 거부한다', async () => {
+    await expect(service.scrapeChart(ChartType.YE, 0)).rejects.toThrow(
+      BadRequestException,
+    );
+    expect(melonScraperClientMock.fetchAgeChartSongs).not.toHaveBeenCalled();
+  });
+
+  it('YE 타입은 10년 단위가 아닌 임의의 연도도 허용한다', async () => {
+    await expect(
+      service.scrapeChart(ChartType.YE, 2023),
+    ).resolves.toMatchObject({ type: ChartType.YE, year: 2023 });
+    expect(melonScraperClientMock.fetchAgeChartSongs).toHaveBeenCalledWith(
+      '2023',
+      ChartType.YE,
+    );
+  });
+
   it('차트 결과가 없으면 404를 반환한다', async () => {
     melonScraperClientMock.fetchAgeChartSongs.mockResolvedValueOnce([]);
 
-    await expect(service.scrapeAgeChart(2010)).rejects.toThrow(
+    await expect(service.scrapeChart(ChartType.AG, 2010)).rejects.toThrow(
       NotFoundException,
     );
   });
 
   it('신규 아티스트는 멜론에서 스크래핑해 저장하고, 이미 저장된 아티스트는 재조회 없이 재사용한다', async () => {
-    await service.scrapeAgeChart(2010);
+    await service.scrapeChart(ChartType.AG, 2010);
 
     expect(melonScraperClientMock.fetchArtist).toHaveBeenCalledTimes(1);
     expect(melonScraperClientMock.fetchArtist).toHaveBeenCalledWith('ar1');
@@ -141,7 +162,7 @@ describe('AgeChartScraperService', () => {
   });
 
   it('멜론 곡 ID가 이미 존재하면 곡 저장은 건너뛰고 퀴즈 출제곡에는 포함한다', async () => {
-    const result = await service.scrapeAgeChart(2010);
+    const result = await service.scrapeChart(ChartType.AG, 2010);
 
     expect(songRepositoryMock.save).toHaveBeenCalledTimes(1);
     expect(quizSongRepositoryMock.save).toHaveBeenCalledTimes(2);
@@ -155,7 +176,7 @@ describe('AgeChartScraperService', () => {
   });
 
   it('퀴즈 제목/설명을 연대 규칙대로 생성하고, 퀴즈 출제곡을 빈 유튜브 정보로 순번대로 저장한다', async () => {
-    await service.scrapeAgeChart(2010);
+    await service.scrapeChart(ChartType.AG, 2010);
 
     expect(quizRepositoryMock.create).toHaveBeenCalledWith({
       quizTtl: '2010년대 인기곡',
@@ -177,5 +198,14 @@ describe('AgeChartScraperService', () => {
         songId: 'existing-song-2',
       }),
     );
+  });
+
+  it('퀴즈 제목/설명을 연도 규칙대로 생성한다', async () => {
+    await service.scrapeChart(ChartType.YE, 2023);
+
+    expect(quizRepositoryMock.create).toHaveBeenCalledWith({
+      quizTtl: '2023년 인기곡',
+      quizDesc: '2023 멜론 인기 차트 곡 입니다.',
+    });
   });
 });

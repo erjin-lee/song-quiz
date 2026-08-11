@@ -14,6 +14,7 @@ import {
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import { FillQuizAnswersResultDto } from './dto/fill-quiz-answers-result.dto';
 import { FillQuizYoutubeLinksResultDto } from './dto/fill-quiz-youtube-links-result.dto';
 import { GenerateQuizResultDto } from './dto/generate-quiz-result.dto';
 import {
@@ -22,6 +23,7 @@ import {
 } from './dto/get-quizzes-query.dto';
 import { QuizListItemDto } from './dto/quiz-list-item.dto';
 import { QuizSongItemDto } from './dto/quiz-song-item.dto';
+import { QuizAnswerGeneratorService } from './quiz-answer-generator.service';
 import { QuizGeneratorService } from './quiz-generator.service';
 import { QuizService } from './quiz.service';
 
@@ -31,6 +33,7 @@ export class QuizController {
   constructor(
     private readonly quizService: QuizService,
     private readonly quizGeneratorService: QuizGeneratorService,
+    private readonly quizAnswerGeneratorService: QuizAnswerGeneratorService,
   ) {}
 
   @Get()
@@ -89,5 +92,13 @@ export class QuizController {
     @Param('quizId', ParseIntPipe) quizId: number,
   ): Promise<FillQuizYoutubeLinksResultDto> {
     return this.quizGeneratorService.fillYoutubeLinks(String(quizId));
+  }
+
+  @Post('answers/fill')
+  @ApiOperation({
+    summary: '정답이 없고 유튜브 링크는 있는 전체 출제곡에 GPT로 정답 채우기',
+  })
+  fillAnswers(): Promise<FillQuizAnswersResultDto> {
+    return this.quizAnswerGeneratorService.fillAnswers();
   }
 }

@@ -90,10 +90,7 @@ export class RoomGateway implements OnGatewayDisconnect {
 
     // 유예 시간 안에 재연결한 경우(새로고침 등)는 예약된 퇴장 처리를 취소한다.
     // 이 경우 참가자 레코드가 그대로 유지되므로 "입장했습니다" 재안내도 생략한다.
-    const isReconnect = this.cancelPendingLeave(
-      payload.roomId,
-      payload.userId,
-    );
+    const isReconnect = this.cancelPendingLeave(payload.roomId, payload.userId);
 
     await client.join(payload.roomId);
     this.socketMemberships.set(client.id, {
@@ -311,9 +308,7 @@ export class RoomGateway implements OnGatewayDisconnect {
   }
 
   /** 참가자를 실제로 방에서 제거하고 퇴장 사실을 알린다. */
-  private async removeParticipant(
-    membership: SocketMembership,
-  ): Promise<void> {
+  private async removeParticipant(membership: SocketMembership): Promise<void> {
     try {
       await this.roomService.leaveRoom(membership.roomId, membership.userId);
       this.broadcastSystemMessage(

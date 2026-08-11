@@ -2,7 +2,10 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, Repository } from 'typeorm';
 import { CacheService } from '../cache/cache.service';
-import { GetQuizzesQueryDto, QuizSearchType } from './dto/get-quizzes-query.dto';
+import {
+  GetQuizzesQueryDto,
+  QuizSearchType,
+} from './dto/get-quizzes-query.dto';
 import { QuizListItemDto } from './dto/quiz-list-item.dto';
 import { QuizSongItemDto } from './dto/quiz-song-item.dto';
 import { QuizArtist } from './entities/quiz-artist.entity';
@@ -44,12 +47,11 @@ export class QuizService {
     if (keyword) {
       const likeKeyword = `%${keyword}%`;
 
-      if (searchType === QuizSearchType.ARTIST || searchType === QuizSearchType.ALL) {
-        qb.leftJoin(
-          QuizArtist,
-          'quizArtist',
-          'quizArtist.quizId = quiz.quizId',
-        )
+      if (
+        searchType === QuizSearchType.ARTIST ||
+        searchType === QuizSearchType.ALL
+      ) {
+        qb.leftJoin(QuizArtist, 'quizArtist', 'quizArtist.quizId = quiz.quizId')
           .leftJoin('quizArtist.artist', 'artist')
           .distinct(true);
       }

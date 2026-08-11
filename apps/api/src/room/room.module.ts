@@ -9,9 +9,7 @@ import { RoomGateway } from './room.gateway';
 import { RoomService } from './room.service';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Quiz, QuizArtist, QuizSong, QuizAnswer]),
-  ],
+  imports: [TypeOrmModule.forFeature([Quiz, QuizArtist, QuizSong, QuizAnswer])],
   controllers: [RoomController],
   providers: [RoomService, RoomGateway],
 })

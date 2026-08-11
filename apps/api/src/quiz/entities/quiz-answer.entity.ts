@@ -22,6 +22,20 @@ export class QuizAnswer {
   @Column({ name: 'ANSWER_TXT', type: 'varchar', length: 300 })
   answerTxt: string;
 
+  @Column({
+    name: 'ANSWER_TYPE',
+    type: 'varchar',
+    length: 12,
+    nullable: true,
+  })
+  answerType: string | null;
+
+  @Column({ name: 'CONFIDENCE', type: 'varchar', length: 8, nullable: true })
+  confidence: string | null;
+
+  @Column({ name: 'IS_ACTIVE', type: 'varchar', length: 1, default: 'Y' })
+  isActive: string;
+
   @Column({ name: 'CRT_DT', type: 'datetime' })
   crtDt: Date;
 
