@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import YouTube from 'react-youtube';
+import YouTube, { type YouTubeEvent } from 'react-youtube';
 import { sortParticipantsByScore } from '../utils/participants';
 import type { RoomItemDto } from '../types/room';
+
+/** onReady 이벤트가 CUED 상태까지 도달하지 못했을 때 방이 영구 정지하지 않도록 강제로 ready 처리하는 유예 시간. */
+const READY_FALLBACK_TIMEOUT_MS = 8000;
 
 interface GamePlayerProps {
   room: RoomItemDto;
   myUserId: string;
+  serverTimeOffsetMs: number;
   onReady: () => void;
   onStartGame: () => void;
   onNextRound: () => void;
@@ -15,7 +19,12 @@ interface GamePlayerProps {
   onShortcutEnabledChange: (enabled: boolean) => void;
 }
 
-function useCountdownSeconds(targetIso: string | null): number | null {
+// targetIso는 서버 기준 절대 시각이므로, 로컬 시계를 그대로 쓰지 않고 offsetMs로
+// 보정한 "서버 기준 현재 시각"과 비교한다(재생 예약과 동일한 보정 방식).
+function useCountdownSeconds(
+  targetIso: string | null,
+  offsetMs: number,
+): number | null {
   const [remaining, setRemaining] = useState<number | null>(null);
 
   useEffect(() => {
@@ -26,12 +35,14 @@ function useCountdownSeconds(targetIso: string | null): number | null {
 
     const target = new Date(targetIso).getTime();
     const tick = () => {
-      setRemaining(Math.max(0, Math.ceil((target - Date.now()) / 1000)));
+      setRemaining(
+        Math.max(0, Math.ceil((target - (Date.now() + offsetMs)) / 1000)),
+      );
     };
     tick();
     const interval = setInterval(tick, 250);
     return () => clearInterval(interval);
-  }, [targetIso]);
+  }, [targetIso, offsetMs]);
 
   return remaining;
 }
@@ -39,6 +50,7 @@ function useCountdownSeconds(targetIso: string | null): number | null {
 export function GamePlayer({
   room,
   myUserId,
+  serverTimeOffsetMs,
   onReady,
   onStartGame,
   onNextRound,
@@ -51,13 +63,25 @@ export function GamePlayer({
   const round = room.currentRound;
   const playerRef = useRef<YouTube>(null);
   const playedRoundRef = useRef<number | null>(null);
-  const forceSkipRemaining = useCountdownSeconds(round?.forceSkipAt ?? null);
+  const reportedReadyRoundRef = useRef<number | null>(null);
+  const [playbackBlockedRound, setPlaybackBlockedRound] = useState<
+    number | null
+  >(null);
+  const forceSkipRemaining = useCountdownSeconds(
+    round?.forceSkipAt ?? null,
+    serverTimeOffsetMs,
+  );
 
   // 재생 시작은 이벤트를 받는 즉시가 아니라, 서버가 지정한 예정 시각(playScheduledAt)에
   // 맞춰 실행한다. 클라이언트마다 소켓 이벤트 수신 시각이 달라 즉시 재생하면 유저별로
   // 재생 시점이 어긋나는데, 같은 목표 시각까지 각자 기다렸다가 재생하면 동시성이 개선된다.
-  // roundIndex/playScheduledAt만 의존성으로 둬서, 라운드 도중 다른 상태(정답 제출 등)
-  // 갱신으로 인해 예약된 타이머가 불필요하게 취소/재설정되지 않도록 한다.
+  // Date.now()에 serverTimeOffsetMs를 더해 로컬 시계와 서버 시계의 오차를 보정한 "서버
+  // 기준 현재 시각"을 추정한다(useServerClockOffset 훅 참고). offsetMs는 소켓 연결 이후
+  // 비동기로 측정/갱신되므로 이 effect의 의존성에 포함시켜, 처음 스케줄링 시점에 아직
+  // 측정 전(0)이었더라도 실제 offset이 도착하면 다시 정확한 지연으로 재예약되게 한다.
+  // playedRoundRef는 "예약한 라운드"가 아니라 "실제로 재생을 시작한 라운드"를 기록해,
+  // 재생 전까지는 offset이 갱신될 때마다 안전하게 재예약되고 재생 후에는 더 이상
+  // (offset이 또 바뀌어도) 같은 영상을 다시 재생하지 않도록 한다.
   const roundIndex = round?.roundIndex ?? null;
   const playScheduledAt = round?.playScheduledAt ?? null;
 
@@ -71,18 +95,55 @@ export function GamePlayer({
       return;
     }
 
-    playedRoundRef.current = roundIndex;
-
-    const delayMs = new Date(playScheduledAt).getTime() - Date.now();
+    const delayMs =
+      new Date(playScheduledAt).getTime() - (Date.now() + serverTimeOffsetMs);
     const timer = setTimeout(
       () => {
+        playedRoundRef.current = roundIndex;
         playerRef.current?.getInternalPlayer()?.playVideo();
       },
       Math.max(0, delayMs),
     );
 
     return () => clearTimeout(timer);
-  }, [room.gameStatus, roundIndex, playScheduledAt]);
+  }, [room.gameStatus, roundIndex, playScheduledAt, serverTimeOffsetMs]);
+
+  // ready 보고는 유튜브 플레이어 인스턴스 생성(onReady)이 아니라, 초기 재생 세그먼트까지
+  // 버퍼링이 끝나 즉시 재생 가능한 CUED 상태에 도달했을 때 한다. onReady만으로는 실제
+  // 버퍼링 완료를 보장하지 않아, 이 기준만으로는 클라이언트별 재생 시작 지연이 갈라진다.
+  // 단, 지역 차단/네트워크 문제 등으로 CUED에 영원히 도달하지 못하면 방 전체가 LOADING
+  // 상태에서 멈추므로(LOADING 중엔 스킵 수단이 없음), 안전장치로 유예 시간 후 강제로
+  // ready 처리한다. 이 fallback이 발동했다는 건 이 클라이언트의 플레이어가 실제로는
+  // 재생 불가능한 상태라는 뜻이라, playbackBlockedRound를 표시해 사용자에게 알린다
+  // (방 전체는 정상 진행되므로 조용히 막지 않고 새로고침을 안내하는 정도로 처리한다).
+  useEffect(() => {
+    if (room.gameStatus !== 'LOADING' || roundIndex === null) {
+      return;
+    }
+    if (reportedReadyRoundRef.current === roundIndex) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      if (reportedReadyRoundRef.current !== roundIndex) {
+        reportedReadyRoundRef.current = roundIndex;
+        setPlaybackBlockedRound(roundIndex);
+        onReady();
+      }
+    }, READY_FALLBACK_TIMEOUT_MS);
+
+    return () => clearTimeout(timer);
+  }, [room.gameStatus, roundIndex, onReady]);
+
+  const handlePlayerStateChange = (event: YouTubeEvent<number>) => {
+    if (
+      event.data === YouTube.PlayerState.CUED &&
+      reportedReadyRoundRef.current !== roundIndex
+    ) {
+      reportedReadyRoundRef.current = roundIndex;
+      onReady();
+    }
+  };
 
   // 방장이 라운드 종료(다음 라운드 대기) 상태일 때 Shift+→로 바로 다음 라운드를
   // 진행할 수 있게 한다. 화살표 키는 문자 입력/IME 조합과 무관해 채팅 입력창에
@@ -157,6 +218,7 @@ export function GamePlayer({
   const isRevealedForMe =
     round.revealed || round.correctUserIds.includes(myUserId);
   const hasRequestedForceSkip = round.forceSkipAt !== null;
+  const isPlaybackBlockedForMe = playbackBlockedRound === round.roundIndex;
 
   return (
     <div className="flex flex-col items-center justify-center gap-4 rounded-2xl bg-gradient-to-br from-purple-100 to-purple-50 px-6 py-10">
@@ -179,7 +241,7 @@ export function GamePlayer({
                 end: round.endSec ?? undefined,
               },
             }}
-            onReady={onReady}
+            onStateChange={handlePlayerStateChange}
           />
         )}
 
@@ -202,6 +264,11 @@ export function GamePlayer({
 
         {room.gameStatus === 'PLAYING' && (
           <div className="flex flex-col items-center gap-2">
+            {isPlaybackBlockedForMe && (
+              <p className="text-xs font-semibold text-rose-400">
+                영상을 불러오지 못했어요. 새로고침 후 다시 시도해주세요.
+              </p>
+            )}
             <p className="text-sm text-slate-500">정답을 채팅창에 입력하세요</p>
 
             {hasRequestedForceSkip ? (

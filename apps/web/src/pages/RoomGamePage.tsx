@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Logo } from '../components/Logo';
 import { ParticipantList } from '../components/ParticipantList';
@@ -11,6 +11,7 @@ import {
 import { getRoomById, leaveRoom } from '../api/room';
 import { getQuizSongCount } from '../api/quiz';
 import { createRoomSocket, type RoomSocket } from '../api/socket';
+import { useServerClockOffset } from '../hooks/useServerClockOffset';
 import {
   clearRoomSession,
   loadRoomSession,
@@ -41,8 +42,9 @@ export function RoomGamePage() {
   const [songCount, setSongCount] = useState<number | null>(null);
   const [nextRoundShortcutEnabled, setNextRoundShortcutEnabled] =
     useState(true);
-  const socketRef = useRef<RoomSocket | null>(null);
   const chatPanelRef = useRef<ChatPanelHandle>(null);
+  const [socket, setSocket] = useState<RoomSocket | null>(null);
+  const serverTimeOffsetMs = useServerClockOffset(socket);
 
   // 방 상태를 서버에서 최신으로 확인/복구한다. 새로고침으로 location.state가
   // 사라진 경우 로컬스토리지에 저장해둔 { roomId, userId }로 이어서 입장한다.
@@ -108,7 +110,7 @@ export function RoomGamePage() {
     }
 
     const socket = createRoomSocket();
-    socketRef.current = socket;
+    setSocket(socket);
 
     socket.on('chat:message', (payload) => {
       setChatEntries((prev) => [
@@ -145,7 +147,7 @@ export function RoomGamePage() {
 
     return () => {
       socket.disconnect();
-      socketRef.current = null;
+      setSocket(null);
     };
   }, [roomId, userId]);
 
@@ -159,6 +161,56 @@ export function RoomGamePage() {
       .catch(() => setSongCount(null));
   }, [quizId]);
 
+  // 아래 핸들러들은 GamePlayer 내부 effect의 의존성으로 전달된다(onReady는 LOADING
+  // 무한정지 방지용 fallback 타이머, onNextRound는 Shift+→ 단축키 리스너). 매 렌더마다
+  // 새 함수를 만들면 그 effect들이 room:state 브로드캐스트가 올 때마다 불필요하게
+  // 재실행/재설정된다(예: fallback 타이머가 계속 리셋되어 결코 발화하지 않는 문제).
+  // socket이 실제로 바뀔 때만 참조가 바뀌도록 useCallback으로 안정화한다.
+  // handleLeave는 room/userId를 참조하지만, Hooks 규칙상 아래 얼리 리턴보다 먼저
+  // 선언해야 하므로 내부에서 null을 다시 확인한다(실제로는 얼리 리턴 이후에만 렌더되는
+  // JSX에서 호출되므로 항상 non-null이다).
+  const handleLeave = useCallback(async () => {
+    if (!room || !userId) {
+      return;
+    }
+    try {
+      await leaveRoom(room.roomId, userId);
+    } finally {
+      clearRoomSession();
+      navigate('/rooms', { replace: true });
+    }
+  }, [room, userId, navigate]);
+
+  const handleSendChat = useCallback(
+    (message: string) => {
+      socket?.emit('chat:message', { message });
+    },
+    [socket],
+  );
+
+  const handleStartGame = useCallback(() => {
+    socket?.emit('game:start');
+  }, [socket]);
+
+  const handleGameReady = useCallback(() => {
+    socket?.emit('game:ready');
+  }, [socket]);
+
+  const handleNextRound = useCallback(() => {
+    socket?.emit('game:next-round');
+    // 단축키(Shift+N) 입력이 채팅창에 문자로 반영됐을 가능성에 대비해 초기화한다.
+    chatPanelRef.current?.clearDraft();
+    chatPanelRef.current?.focus();
+  }, [socket]);
+
+  const handleSkip = useCallback(() => {
+    socket?.emit('game:skip');
+  }, [socket]);
+
+  const handleForceSkip = useCallback(() => {
+    socket?.emit('game:force-skip');
+  }, [socket]);
+
   if (!room || !userId) {
     return (
       <div className="flex min-h-screen items-center justify-center text-sm text-slate-400">
@@ -166,42 +218,6 @@ export function RoomGamePage() {
       </div>
     );
   }
-
-  const handleLeave = async () => {
-    try {
-      await leaveRoom(room.roomId, userId);
-    } finally {
-      clearRoomSession();
-      navigate('/rooms', { replace: true });
-    }
-  };
-
-  const handleSendChat = (message: string) => {
-    socketRef.current?.emit('chat:message', { message });
-  };
-
-  const handleStartGame = () => {
-    socketRef.current?.emit('game:start');
-  };
-
-  const handleGameReady = () => {
-    socketRef.current?.emit('game:ready');
-  };
-
-  const handleNextRound = () => {
-    socketRef.current?.emit('game:next-round');
-    // 단축키(Shift+N) 입력이 채팅창에 문자로 반영됐을 가능성에 대비해 초기화한다.
-    chatPanelRef.current?.clearDraft();
-    chatPanelRef.current?.focus();
-  };
-
-  const handleSkip = () => {
-    socketRef.current?.emit('game:skip');
-  };
-
-  const handleForceSkip = () => {
-    socketRef.current?.emit('game:force-skip');
-  };
 
   const isNextRoundShortcutActive =
     room.hostUserId === userId &&
@@ -250,6 +266,7 @@ export function RoomGamePage() {
             <GamePlayer
               room={room}
               myUserId={userId}
+              serverTimeOffsetMs={serverTimeOffsetMs}
               onStartGame={handleStartGame}
               onReady={handleGameReady}
               onNextRound={handleNextRound}
