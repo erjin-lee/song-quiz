@@ -20,6 +20,15 @@ interface ChatMessagePayload {
   message: string;
 }
 
+interface TimeSyncPayload {
+  clientSentAt: number;
+}
+
+interface TimeSyncResponse {
+  clientSentAt: number;
+  serverTime: number;
+}
+
 interface SocketMembership {
   roomId: string;
   userId: string;
@@ -187,6 +196,15 @@ export class RoomGateway implements OnGatewayDisconnect {
     } catch (err) {
       client.emit('room:error', { message: (err as Error).message });
     }
+  }
+
+  /**
+   * 클라이언트-서버 clock offset 측정용 ping-pong. 방 상태와 무관해 락을 타지 않는다.
+   * ack 콜백에 응답해야 하므로 반드시 값을 반환해야 한다(반환 없으면 클라이언트가 계속 대기).
+   */
+  @SubscribeMessage('time:sync')
+  handleTimeSync(@MessageBody() payload: TimeSyncPayload): TimeSyncResponse {
+    return { clientSentAt: payload.clientSentAt, serverTime: Date.now() };
   }
 
   @SubscribeMessage('room:leave')

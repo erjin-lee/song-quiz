@@ -24,6 +24,11 @@ export interface RoomServerToClientEvents {
   'room:state': (payload: RoomItemDto) => void;
 }
 
+export interface TimeSyncResponse {
+  clientSentAt: number;
+  serverTime: number;
+}
+
 export interface RoomClientToServerEvents {
   'room:enter': (payload: { roomId: string; userId: string }) => void;
   'chat:message': (payload: { message: string }) => void;
@@ -33,6 +38,10 @@ export interface RoomClientToServerEvents {
   'game:next-round': () => void;
   'game:skip': () => void;
   'game:force-skip': () => void;
+  'time:sync': (
+    payload: { clientSentAt: number },
+    callback: (response: TimeSyncResponse) => void,
+  ) => void;
 }
 
 export type RoomSocket = Socket<RoomServerToClientEvents, RoomClientToServerEvents>;

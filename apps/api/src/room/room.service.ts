@@ -34,8 +34,10 @@ const FORCE_SKIP_DELAY_SECONDS = 3;
  * 재생 시작 신호를 보낸 뒤 실제로 재생을 시작하기까지 주는 유예 시간.
  * 클라이언트마다 소켓 이벤트 수신 시각이 달라 즉시 재생하면 동시 재생이 어긋나므로,
  * 모두가 같은 미래 시각(now + 이 값)에 맞춰 재생을 시작하도록 예약한다.
+ * 클라이언트가 clock offset을 보정해 재생 시각을 맞추므로, 소켓 전달 지연 편차만
+ * 흡수하면 되는 짧은 값(1.5초)으로 충분하다.
  */
-const PLAY_SCHEDULE_DELAY_SECONDS = 3;
+const PLAY_SCHEDULE_DELAY_SECONDS = 1.5;
 
 export interface ChatSubmissionResult {
   action: 'broadcast' | 'blocked' | 'correct';

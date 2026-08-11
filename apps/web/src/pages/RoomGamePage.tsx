@@ -11,6 +11,7 @@ import {
 import { getRoomById, leaveRoom } from '../api/room';
 import { getQuizSongCount } from '../api/quiz';
 import { createRoomSocket, type RoomSocket } from '../api/socket';
+import { useServerClockOffset } from '../hooks/useServerClockOffset';
 import {
   clearRoomSession,
   loadRoomSession,
@@ -43,6 +44,8 @@ export function RoomGamePage() {
     useState(true);
   const socketRef = useRef<RoomSocket | null>(null);
   const chatPanelRef = useRef<ChatPanelHandle>(null);
+  const [socket, setSocket] = useState<RoomSocket | null>(null);
+  const serverTimeOffsetMs = useServerClockOffset(socket);
 
   // 방 상태를 서버에서 최신으로 확인/복구한다. 새로고침으로 location.state가
   // 사라진 경우 로컬스토리지에 저장해둔 { roomId, userId }로 이어서 입장한다.
@@ -109,6 +112,7 @@ export function RoomGamePage() {
 
     const socket = createRoomSocket();
     socketRef.current = socket;
+    setSocket(socket);
 
     socket.on('chat:message', (payload) => {
       setChatEntries((prev) => [
@@ -146,6 +150,7 @@ export function RoomGamePage() {
     return () => {
       socket.disconnect();
       socketRef.current = null;
+      setSocket(null);
     };
   }, [roomId, userId]);
 
@@ -250,6 +255,7 @@ export function RoomGamePage() {
             <GamePlayer
               room={room}
               myUserId={userId}
+              serverTimeOffsetMs={serverTimeOffsetMs}
               onStartGame={handleStartGame}
               onReady={handleGameReady}
               onNextRound={handleNextRound}

@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import YouTube from 'react-youtube';
+import YouTube, { type YouTubeEvent } from 'react-youtube';
 import { sortParticipantsByScore } from '../utils/participants';
 import type { RoomItemDto } from '../types/room';
+
+/** onReady 이벤트가 CUED 상태까지 도달하지 못했을 때 방이 영구 정지하지 않도록 강제로 ready 처리하는 유예 시간. */
+const READY_FALLBACK_TIMEOUT_MS = 8000;
 
 interface GamePlayerProps {
   room: RoomItemDto;
   myUserId: string;
+  serverTimeOffsetMs: number;
   onReady: () => void;
   onStartGame: () => void;
   onNextRound: () => void;
@@ -39,6 +43,7 @@ function useCountdownSeconds(targetIso: string | null): number | null {
 export function GamePlayer({
   room,
   myUserId,
+  serverTimeOffsetMs,
   onReady,
   onStartGame,
   onNextRound,
@@ -51,6 +56,7 @@ export function GamePlayer({
   const round = room.currentRound;
   const playerRef = useRef<YouTube>(null);
   const playedRoundRef = useRef<number | null>(null);
+  const reportedReadyRoundRef = useRef<number | null>(null);
   const forceSkipRemaining = useCountdownSeconds(round?.forceSkipAt ?? null);
 
   // 재생 시작은 이벤트를 받는 즉시가 아니라, 서버가 지정한 예정 시각(playScheduledAt)에
@@ -58,6 +64,8 @@ export function GamePlayer({
   // 재생 시점이 어긋나는데, 같은 목표 시각까지 각자 기다렸다가 재생하면 동시성이 개선된다.
   // roundIndex/playScheduledAt만 의존성으로 둬서, 라운드 도중 다른 상태(정답 제출 등)
   // 갱신으로 인해 예약된 타이머가 불필요하게 취소/재설정되지 않도록 한다.
+  // Date.now()에 serverTimeOffsetMs를 더해 로컬 시계와 서버 시계의 오차를 보정한 "서버
+  // 기준 현재 시각"을 추정한다(useServerClockOffset 훅 참고).
   const roundIndex = round?.roundIndex ?? null;
   const playScheduledAt = round?.playScheduledAt ?? null;
 
@@ -73,7 +81,8 @@ export function GamePlayer({
 
     playedRoundRef.current = roundIndex;
 
-    const delayMs = new Date(playScheduledAt).getTime() - Date.now();
+    const delayMs =
+      new Date(playScheduledAt).getTime() - (Date.now() + serverTimeOffsetMs);
     const timer = setTimeout(
       () => {
         playerRef.current?.getInternalPlayer()?.playVideo();
@@ -82,7 +91,41 @@ export function GamePlayer({
     );
 
     return () => clearTimeout(timer);
-  }, [room.gameStatus, roundIndex, playScheduledAt]);
+  }, [room.gameStatus, roundIndex, playScheduledAt, serverTimeOffsetMs]);
+
+  // ready 보고는 유튜브 플레이어 인스턴스 생성(onReady)이 아니라, 초기 재생 세그먼트까지
+  // 버퍼링이 끝나 즉시 재생 가능한 CUED 상태에 도달했을 때 한다. onReady만으로는 실제
+  // 버퍼링 완료를 보장하지 않아, 이 기준만으로는 클라이언트별 재생 시작 지연이 갈라진다.
+  // 단, 지역 차단/네트워크 문제 등으로 CUED에 영원히 도달하지 못하면 방 전체가 LOADING
+  // 상태에서 멈추므로(LOADING 중엔 스킵 수단이 없음), 안전장치로 유예 시간 후 강제로
+  // ready 처리한다.
+  useEffect(() => {
+    if (room.gameStatus !== 'LOADING' || roundIndex === null) {
+      return;
+    }
+    if (reportedReadyRoundRef.current === roundIndex) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      if (reportedReadyRoundRef.current !== roundIndex) {
+        reportedReadyRoundRef.current = roundIndex;
+        onReady();
+      }
+    }, READY_FALLBACK_TIMEOUT_MS);
+
+    return () => clearTimeout(timer);
+  }, [room.gameStatus, roundIndex, onReady]);
+
+  const handlePlayerStateChange = (event: YouTubeEvent<number>) => {
+    if (
+      event.data === YouTube.PlayerState.CUED &&
+      reportedReadyRoundRef.current !== roundIndex
+    ) {
+      reportedReadyRoundRef.current = roundIndex;
+      onReady();
+    }
+  };
 
   // 방장이 라운드 종료(다음 라운드 대기) 상태일 때 Shift+→로 바로 다음 라운드를
   // 진행할 수 있게 한다. 화살표 키는 문자 입력/IME 조합과 무관해 채팅 입력창에
@@ -179,7 +222,7 @@ export function GamePlayer({
                 end: round.endSec ?? undefined,
               },
             }}
-            onReady={onReady}
+            onStateChange={handlePlayerStateChange}
           />
         )}
 
