@@ -26,6 +26,7 @@ describe('QuizService', () => {
     leftJoin: jest.Mock;
     distinct: jest.Mock;
     orderBy: jest.Mock;
+    addOrderBy: jest.Mock;
     getMany: jest.Mock;
   } = {
     where: jest.fn(),
@@ -33,6 +34,7 @@ describe('QuizService', () => {
     leftJoin: jest.fn(),
     distinct: jest.fn(),
     orderBy: jest.fn(),
+    addOrderBy: jest.fn(),
     getMany: jest.fn(),
   };
   queryBuilderMock.where.mockReturnValue(queryBuilderMock);
@@ -40,6 +42,7 @@ describe('QuizService', () => {
   queryBuilderMock.leftJoin.mockReturnValue(queryBuilderMock);
   queryBuilderMock.distinct.mockReturnValue(queryBuilderMock);
   queryBuilderMock.orderBy.mockReturnValue(queryBuilderMock);
+  queryBuilderMock.addOrderBy.mockReturnValue(queryBuilderMock);
 
   const quizRepositoryMock = {
     createQueryBuilder: jest.fn().mockReturnValue(queryBuilderMock),
@@ -54,6 +57,7 @@ describe('QuizService', () => {
     queryBuilderMock.leftJoin.mockReturnValue(queryBuilderMock);
     queryBuilderMock.distinct.mockReturnValue(queryBuilderMock);
     queryBuilderMock.orderBy.mockReturnValue(queryBuilderMock);
+    queryBuilderMock.addOrderBy.mockReturnValue(queryBuilderMock);
     queryBuilderMock.getMany.mockResolvedValue(quizListFixture);
     quizRepositoryMock.createQueryBuilder.mockClear();
 
@@ -89,6 +93,19 @@ describe('QuizService', () => {
     ]);
     expect(second).toEqual(first);
     expect(quizRepositoryMock.createQueryBuilder).toHaveBeenCalledTimes(1);
+  });
+
+  it('플레이 횟수가 높은 순으로 정렬하고, 동점이면 최신순으로 정렬한다', async () => {
+    await quizService.getQuizzes({});
+
+    expect(queryBuilderMock.orderBy).toHaveBeenCalledWith(
+      'quiz.playCnt',
+      'DESC',
+    );
+    expect(queryBuilderMock.addOrderBy).toHaveBeenCalledWith(
+      'quiz.crtDt',
+      'DESC',
+    );
   });
 
   it('검색 조건이 다르면 캐시를 공유하지 않고 다시 조회한다', async () => {

@@ -40,6 +40,10 @@ const FORCE_SKIP_DELAY_SECONDS = 3;
 const PLAY_SCHEDULE_DELAY_SECONDS = 1.8;
 /** roomId별로 보관하는 채팅 히스토리 최대 개수. 초과분은 오래된 것부터 버린다. */
 const CHAT_HISTORY_MAX_ENTRIES = 100;
+/** 스피드 모드에서 첫 정답자가 나온 뒤 정답을 자동 공개하기까지의 유예 시간. */
+const SPEED_MODE_REVEAL_DELAY_SECONDS = 6;
+/** 스피드 모드에서 정답 공개 후 다음 라운드로 자동 전환되기까지의 유예 시간. */
+const SPEED_MODE_NEXT_ROUND_DELAY_SECONDS = 4;
 
 export interface ChatSubmissionResult {
   action: 'broadcast' | 'blocked' | 'correct';
@@ -88,6 +92,12 @@ export class RoomService extends EventEmitter {
   private readonly currentReveal = new Map<string, RoundRevealInfo>();
   /** roomId -> 라운드 제한시간 타이머 */
   private readonly roundTimers = new Map<string, NodeJS.Timeout>();
+  /**
+   * roomId -> 스피드 모드 타이머(정답 자동 공개 또는 공개 후 자동 다음 라운드).
+   * 두 단계가 순차적으로만 일어나 슬롯 하나를 재사용하며, 라운드 제한시간용
+   * `roundTimers`와는 별도로 관리해 서로의 예약을 취소하지 않는다.
+   */
+  private readonly speedModeTimers = new Map<string, NodeJS.Timeout>();
   /** roomId -> 최근 채팅/시스템 메시지 히스토리(재접속 시 복원용, 최대 CHAT_HISTORY_MAX_ENTRIES개). */
   private readonly chatHistory = new Map<string, ChatHistoryEntry[]>();
 
@@ -144,6 +154,7 @@ export class RoomService extends EventEmitter {
       atstIds: quizArtists.map((quizArtist) => quizArtist.atstId),
       atstNms: quizArtists.map((quizArtist) => quizArtist.artist.atstNm),
       isRandom: dto.isRandom,
+      speedModeEnabled: dto.speedModeEnabled,
       maxUserCnt: dto.maxUserCnt,
       curUserCnt: 1,
       hostUserId,
@@ -251,6 +262,12 @@ export class RoomService extends EventEmitter {
         throw new NotFoundException('퀴즈에 출제곡이 없습니다.');
       }
 
+      await this.quizRepository.increment(
+        { quizId: room.quizId },
+        'playCnt',
+        1,
+      );
+
       this.songOrders.set(roomId, songOrder);
       room.gameStatus = 'LOADING';
       room.currentRound = await this.prepareRoundData(
@@ -300,24 +317,8 @@ export class RoomService extends EventEmitter {
         throw new ConflictException('아직 라운드가 끝나지 않았습니다.');
       }
 
-      const songOrder = this.songOrders.get(roomId) ?? [];
-      const nextIndex = (room.currentRound?.roundIndex ?? -1) + 1;
-
-      if (nextIndex >= songOrder.length) {
-        room.gameStatus = 'FINISHED';
-        room.currentRound = null;
-        this.songOrders.delete(roomId);
-        this.currentAnswers.delete(roomId);
-        this.currentReveal.delete(roomId);
-      } else {
-        room.gameStatus = 'LOADING';
-        room.currentRound = await this.prepareRoundData(
-          roomId,
-          songOrder[nextIndex],
-          nextIndex,
-          songOrder.length,
-        );
-      }
+      this.clearSpeedModeTimer(roomId);
+      await this.advanceToNextRound(room);
 
       await this.saveRoom(room);
       this.emit('room-updated', room);
@@ -383,6 +384,15 @@ export class RoomService extends EventEmitter {
       );
       if (allAnswered) {
         this.finalizeRoundEnd(room);
+      } else if (room.speedModeEnabled && round.correctUserIds.length === 1) {
+        round.autoRevealAt = new Date(
+          Date.now() + SPEED_MODE_REVEAL_DELAY_SECONDS * 1000,
+        ).toISOString();
+        this.scheduleSpeedModeTimer(
+          roomId,
+          SPEED_MODE_REVEAL_DELAY_SECONDS,
+          () => this.handleSpeedModeReveal(roomId),
+        );
       }
 
       await this.saveRoom(room);
@@ -516,6 +526,11 @@ export class RoomService extends EventEmitter {
     return round.skipUserIds.length >= majorityThreshold;
   }
 
+  /**
+   * 라운드를 종료(정답 공개)한다. 타임아웃/강제스킵/스킵과반/전원정답 등 어떤 경로로
+   * 호출되든 이 함수 하나로 모이므로, 스피드 모드의 "공개 후 자동 다음 라운드" 예약도
+   * 여기서 일괄 처리한다.
+   */
   private finalizeRoundEnd(room: RoomItemDto): void {
     this.clearRoundTimer(room.roomId);
     if (!room.currentRound) {
@@ -527,6 +542,94 @@ export class RoomService extends EventEmitter {
     room.currentRound.atstNm = reveal?.atstNm ?? null;
     room.currentRound.albmNm = reveal?.albmNm ?? null;
     room.gameStatus = 'ROUND_ENDED';
+
+    if (room.speedModeEnabled) {
+      const roomId = room.roomId;
+      room.currentRound.autoNextRoundAt = new Date(
+        Date.now() + SPEED_MODE_NEXT_ROUND_DELAY_SECONDS * 1000,
+      ).toISOString();
+      this.scheduleSpeedModeTimer(
+        roomId,
+        SPEED_MODE_NEXT_ROUND_DELAY_SECONDS,
+        () => this.handleAutoNextRound(roomId),
+      );
+    }
+  }
+
+  private scheduleSpeedModeTimer(
+    roomId: string,
+    delaySeconds: number,
+    onFire: () => void,
+  ): void {
+    this.clearSpeedModeTimer(roomId);
+    const timer = setTimeout(onFire, delaySeconds * 1000);
+    timer.unref();
+    this.speedModeTimers.set(roomId, timer);
+  }
+
+  private clearSpeedModeTimer(roomId: string): void {
+    const timer = this.speedModeTimers.get(roomId);
+    if (timer) {
+      clearTimeout(timer);
+      this.speedModeTimers.delete(roomId);
+    }
+  }
+
+  /** 스피드 모드: 첫 정답자가 나온 뒤 예약된 시간이 지나면 아직 전원이 못 맞췄어도 정답을 공개한다. */
+  private async handleSpeedModeReveal(roomId: string): Promise<void> {
+    await this.withRoomLock(roomId, async () => {
+      const room = await this.getRoom(roomId);
+      if (!room || room.gameStatus !== 'PLAYING') {
+        return;
+      }
+      this.finalizeRoundEnd(room);
+      await this.saveRoom(room);
+      this.emit('room-updated', room);
+    }).catch((err) => {
+      this.logger.error(
+        `스피드 모드 정답 자동 공개 처리 실패(roomId: ${roomId}): ${(err as Error).message}`,
+      );
+    });
+  }
+
+  /** 스피드 모드: 정답 공개 후 예약된 시간이 지나면 방장 조작 없이 자동으로 다음 라운드로 넘어간다. */
+  private async handleAutoNextRound(roomId: string): Promise<void> {
+    await this.withRoomLock(roomId, async () => {
+      const room = await this.getRoom(roomId);
+      if (!room || room.gameStatus !== 'ROUND_ENDED') {
+        return;
+      }
+      await this.advanceToNextRound(room);
+      await this.saveRoom(room);
+      this.emit('room-updated', room);
+    }).catch((err) => {
+      this.logger.error(
+        `스피드 모드 자동 다음 라운드 처리 실패(roomId: ${roomId}): ${(err as Error).message}`,
+      );
+    });
+  }
+
+  /** 다음 라운드를 준비하거나(있으면) 게임을 종료한다(없으면). room 객체를 직접 변경한다. */
+  private async advanceToNextRound(room: RoomItemDto): Promise<void> {
+    const roomId = room.roomId;
+    const songOrder = this.songOrders.get(roomId) ?? [];
+    const nextIndex = (room.currentRound?.roundIndex ?? -1) + 1;
+
+    if (nextIndex >= songOrder.length) {
+      room.gameStatus = 'FINISHED';
+      room.currentRound = null;
+      this.songOrders.delete(roomId);
+      this.currentAnswers.delete(roomId);
+      this.currentReveal.delete(roomId);
+    } else {
+      room.gameStatus = 'LOADING';
+      room.currentRound = await this.prepareRoundData(
+        roomId,
+        songOrder[nextIndex],
+        nextIndex,
+        songOrder.length,
+      );
+    }
   }
 
   private scheduleRoundTimer(roomId: string, delaySeconds: number): void {
@@ -623,6 +726,8 @@ export class RoomService extends EventEmitter {
       correctUserIds: [],
       skipUserIds: [],
       forceSkipAt: null,
+      autoRevealAt: null,
+      autoNextRoundAt: null,
       playScheduledAt: null,
       revealed: false,
       songNm: null,
@@ -651,6 +756,7 @@ export class RoomService extends EventEmitter {
     await this.cacheService.del(this.roomKey(roomId));
     await this.removeFromIndex(roomId);
     this.clearRoundTimer(roomId);
+    this.clearSpeedModeTimer(roomId);
     this.songOrders.delete(roomId);
     this.currentAnswers.delete(roomId);
     this.currentReveal.delete(roomId);

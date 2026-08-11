@@ -38,6 +38,13 @@ export class RoomItemDto {
   @ApiProperty({ description: '출제곡 랜덤 여부', example: false })
   isRandom: boolean;
 
+  @ApiProperty({
+    description:
+      '스피드 모드 여부. 켜면 한 명이라도 정답을 맞히면 6초 뒤 자동으로 정답을 공개하고, 공개 4초 뒤 자동으로 다음 라운드로 진행한다.',
+    example: false,
+  })
+  speedModeEnabled: boolean;
+
   @ApiProperty({ description: '최대 인원', example: 8 })
   maxUserCnt: number;
 

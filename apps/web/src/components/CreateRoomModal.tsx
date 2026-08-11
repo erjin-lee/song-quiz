@@ -5,6 +5,7 @@ export interface CreateRoomFormValues {
   roomTtl: string;
   quizId: string;
   isRandom: boolean;
+  speedModeEnabled: boolean;
   maxUserCnt: number;
 }
 
@@ -26,13 +27,20 @@ export function CreateRoomModal({
   const [roomTtl, setRoomTtl] = useState('');
   const [quizId, setQuizId] = useState(quizzes[0]?.quizId ?? '');
   const [maxUserCnt, setMaxUserCnt] = useState(8);
+  const [speedModeEnabled, setSpeedModeEnabled] = useState(false);
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     if (!roomTtl.trim() || !quizId) {
       return;
     }
-    onSubmit({ roomTtl: roomTtl.trim(), quizId, isRandom: true, maxUserCnt });
+    onSubmit({
+      roomTtl: roomTtl.trim(),
+      quizId,
+      isRandom: true,
+      speedModeEnabled,
+      maxUserCnt,
+    });
   };
 
   return (
@@ -77,6 +85,22 @@ export function CreateRoomModal({
               onChange={(event) => setMaxUserCnt(Number(event.target.value))}
               className="rounded-xl border border-slate-200 px-4 py-2.5 outline-none focus:border-purple-300"
             />
+          </label>
+
+          <label className="flex items-start gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={speedModeEnabled}
+              onChange={(event) => setSpeedModeEnabled(event.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-purple-500 focus:ring-purple-300"
+            />
+            <span>
+              스피드 모드
+              <span className="block text-xs text-slate-400">
+                한 명이라도 정답을 맞히면 6초 뒤 정답이 공개되고, 4초 뒤
+                자동으로 다음 라운드로 넘어갑니다.
+              </span>
+            </span>
           </label>
 
           {errorMessage && (
