@@ -472,8 +472,8 @@ describe('RoomService', () => {
         await roomService.startGame(room.roomId, hostUserId);
         await roomService.markReady(room.roomId, hostUserId);
 
-        // 라운드 제한시간(30초) + 재생 예약 유예시간(1.5초)
-        await jest.advanceTimersByTimeAsync(31_500);
+        // 라운드 제한시간(30초) + 재생 예약 유예시간(1.8초)
+        await jest.advanceTimersByTimeAsync(31_800);
 
         const roomAfter = await roomService.getRoom(room.roomId);
         expect(roomAfter?.gameStatus).toBe('ROUND_ENDED');
