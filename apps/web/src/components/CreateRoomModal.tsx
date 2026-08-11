@@ -1,5 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import type { QuizListItemDto } from '../types/quiz';
+import { RoomActionOverlay } from './RoomActionOverlay';
+
+const CREATE_AD_DELAY_MS = 3000;
 
 export interface CreateRoomFormValues {
   roomTtl: string;
@@ -28,20 +31,29 @@ export function CreateRoomModal({
   const [quizId, setQuizId] = useState(quizzes[0]?.quizId ?? '');
   const [maxUserCnt, setMaxUserCnt] = useState(8);
   const [speedModeEnabled, setSpeedModeEnabled] = useState(false);
+  const [isPreparingAd, setIsPreparingAd] = useState(false);
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     if (!roomTtl.trim() || !quizId) {
       return;
     }
-    onSubmit({
-      roomTtl: roomTtl.trim(),
-      quizId,
-      isRandom: true,
-      speedModeEnabled,
-      maxUserCnt,
-    });
+    setIsPreparingAd(true);
+    setTimeout(() => {
+      setIsPreparingAd(false);
+      onSubmit({
+        roomTtl: roomTtl.trim(),
+        quizId,
+        isRandom: true,
+        speedModeEnabled,
+        maxUserCnt,
+      });
+    }, CREATE_AD_DELAY_MS);
   };
+
+  if (isPreparingAd) {
+    return <RoomActionOverlay message="방을 생성하는 중입니다..." />;
+  }
 
   return (
     <div className="fixed inset-0 z-10 flex items-center justify-center bg-slate-900/40 px-4">
