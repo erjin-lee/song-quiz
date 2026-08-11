@@ -35,7 +35,7 @@ const FORCE_SKIP_DELAY_SECONDS = 3;
  * 클라이언트마다 소켓 이벤트 수신 시각이 달라 즉시 재생하면 동시 재생이 어긋나므로,
  * 모두가 같은 미래 시각(now + 이 값)에 맞춰 재생을 시작하도록 예약한다.
  */
-const PLAY_SCHEDULE_DELAY_SECONDS = 1;
+const PLAY_SCHEDULE_DELAY_SECONDS = 3;
 
 export interface ChatSubmissionResult {
   action: 'broadcast' | 'blocked' | 'correct';
