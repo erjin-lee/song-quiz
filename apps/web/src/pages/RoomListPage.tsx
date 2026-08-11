@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AdBanner } from '../components/AdBanner';
 import { Logo } from '../components/Logo';
+import { RoomActionOverlay } from '../components/RoomActionOverlay';
 import { RoomCard } from '../components/RoomCard';
 import {
   CreateRoomModal,
@@ -16,6 +17,7 @@ import type { QuizListItemDto } from '../types/quiz';
 import type { RoomItemDto } from '../types/room';
 
 const ROOM_LIST_POLL_MS = 5000;
+const JOIN_AD_DELAY_MS = 3000;
 
 export function RoomListPage() {
   const { nickname } = useSession();
@@ -27,6 +29,7 @@ export function RoomListPage() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [joiningRoomId, setJoiningRoomId] = useState<string | null>(null);
+  const [isJoinPreparingAd, setIsJoinPreparingAd] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -87,22 +90,26 @@ export function RoomListPage() {
     }
   };
 
-  const handleJoin = async (roomId: string) => {
+  const handleJoin = (roomId: string) => {
     setJoiningRoomId(roomId);
     setListError(null);
-    try {
-      const result = await joinRoom(roomId, { nickname });
-      saveRoomSession({ roomId, userId: result.userId });
-      navigate(`/rooms/${roomId}`, {
-        state: { room: result.room, userId: result.userId },
-      });
-    } catch (err) {
-      setListError(
-        err instanceof ApiError ? err.message : '방 입장에 실패했습니다.',
-      );
-    } finally {
-      setJoiningRoomId(null);
-    }
+    setIsJoinPreparingAd(true);
+    setTimeout(async () => {
+      setIsJoinPreparingAd(false);
+      try {
+        const result = await joinRoom(roomId, { nickname });
+        saveRoomSession({ roomId, userId: result.userId });
+        navigate(`/rooms/${roomId}`, {
+          state: { room: result.room, userId: result.userId },
+        });
+      } catch (err) {
+        setListError(
+          err instanceof ApiError ? err.message : '방 입장에 실패했습니다.',
+        );
+      } finally {
+        setJoiningRoomId(null);
+      }
+    }, JOIN_AD_DELAY_MS);
   };
 
   return (
@@ -159,6 +166,10 @@ export function RoomListPage() {
           onSubmit={handleCreate}
           onClose={() => setCreateModalOpen(false)}
         />
+      )}
+
+      {isJoinPreparingAd && (
+        <RoomActionOverlay message="방에 입장하는 중입니다..." />
       )}
     </div>
   );

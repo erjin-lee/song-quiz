@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { AdBanner } from '../components/AdBanner';
 import { Logo } from '../components/Logo';
 import { ParticipantList } from '../components/ParticipantList';
 import { GamePlayer } from '../components/GamePlayer';
@@ -254,14 +253,6 @@ export function RoomGamePage() {
         <div className="flex items-center justify-between rounded-2xl bg-white px-5 py-3 text-sm text-slate-500 shadow-sm">
           <span>{room.quizTtl}</span>
           <span>{songCount !== null ? `총 출제곡 ${songCount}곡` : ''}</span>
-        </div>
-
-        <div className="flex justify-center">
-          <AdBanner
-            unitId={"DAN-u5RBfdl0nhCmMwD0"}
-            width={320}
-            height={250}
-          />
         </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_1fr]">
