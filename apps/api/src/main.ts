@@ -4,6 +4,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import * as basicAuth from 'express-basic-auth';
 import { AppModule } from './app/app.module';
 
 setDefaultResultOrder('ipv4first');
@@ -15,6 +16,18 @@ async function bootstrap() {
   });
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
   app.useWebSocketAdapter(new IoAdapter(app));
+
+  const apiDocsUser = process.env.API_DOCS_USER;
+  const apiDocsPassword = process.env.API_DOCS_PASSWORD;
+  if (apiDocsUser && apiDocsPassword) {
+    app.use(
+      '/api-docs',
+      basicAuth({
+        users: { [apiDocsUser]: apiDocsPassword },
+        challenge: true,
+      }),
+    );
+  }
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('API')
