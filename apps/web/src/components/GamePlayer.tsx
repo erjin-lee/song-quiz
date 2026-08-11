@@ -97,14 +97,11 @@ export function GamePlayer({
     ) {
       return;
     }
-    console.log(serverTimeOffsetMs);
-    console.log(playScheduledAt);
 
     const delayMs =
       new Date(playScheduledAt).getTime() - (Date.now() + serverTimeOffsetMs);
     const timer = setTimeout(
       () => {
-        console.log(new Date().toISOString());
         playedRoundRef.current = roundIndex;
         playerRef.current?.getInternalPlayer()?.playVideo();
       },
