@@ -80,6 +80,15 @@ export function GamePlayer({
     round?.forceSkipAt ?? null,
     serverTimeOffsetMs,
   );
+  // 스피드 모드: 첫 정답자가 나오면 자동 공개까지, 공개 후에는 자동 다음 라운드까지 남은 시간.
+  const autoRevealRemaining = useCountdownSeconds(
+    round?.autoRevealAt ?? null,
+    serverTimeOffsetMs,
+  );
+  const autoNextRoundRemaining = useCountdownSeconds(
+    round?.autoNextRoundAt ?? null,
+    serverTimeOffsetMs,
+  );
 
   // 재생 시작은 이벤트를 받는 즉시가 아니라, 서버가 지정한 예정 시각(playScheduledAt)에
   // 맞춰 실행한다. 클라이언트마다 소켓 이벤트 수신 시각이 달라 즉시 재생하면 유저별로
@@ -249,6 +258,7 @@ export function GamePlayer({
   const isRevealedForMe =
     round.revealed || round.correctUserIds.includes(myUserId);
   const hasRequestedForceSkip = round.forceSkipAt !== null;
+  const hasAutoReveal = round.autoRevealAt !== null;
 
   return (
     <div className="flex flex-col items-center justify-center gap-4 rounded-2xl bg-gradient-to-br from-purple-100 to-purple-50 px-6 py-10">
@@ -317,6 +327,11 @@ export function GamePlayer({
               <p className="text-xs font-semibold text-rose-400">
                 {forceSkipRemaining ?? 0}초 후 라운드가 종료돼요
               </p>
+            ) : hasAutoReveal ? (
+              <p className="text-xs font-semibold text-pink-500">
+                누군가 정답을 맞혔어요! {autoRevealRemaining ?? 0}초 후 정답이
+                공개돼요
+              </p>
             ) : (
               <div className="flex items-center gap-2">
                 <button
@@ -351,6 +366,12 @@ export function GamePlayer({
             <p className="text-sm font-semibold text-slate-700">
               정답은 &quot;{round.songNm}&quot;({round.atstNm})였습니다!
             </p>
+            {round.autoNextRoundAt && (
+              <p className="text-xs font-semibold text-purple-400">
+                {autoNextRoundRemaining ?? 0}초 후 다음 라운드로 자동
+                진행돼요
+              </p>
+            )}
             {isHost && (
               <>
                 <button
