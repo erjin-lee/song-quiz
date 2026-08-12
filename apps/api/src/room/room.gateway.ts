@@ -24,6 +24,12 @@ interface TimeSyncResponse {
   serverTime: number;
 }
 
+export interface InquiryResultPayload {
+  inquiryId: string;
+  status: 'REJECTED' | 'COMPLETED';
+  message: string;
+}
+
 interface SocketMembership {
   roomId: string;
   userId: string;
@@ -93,6 +99,7 @@ export class RoomGateway implements OnGatewayDisconnect {
     const isReconnect = this.cancelPendingLeave(payload.roomId, payload.userId);
 
     await client.join(payload.roomId);
+    await client.join(this.userChannel(payload.userId));
     this.socketMemberships.set(client.id, {
       roomId: payload.roomId,
       userId: payload.userId,
@@ -280,6 +287,16 @@ export class RoomGateway implements OnGatewayDisconnect {
 
   private membershipKey(roomId: string, userId: string): string {
     return `${roomId}:${userId}`;
+  }
+
+  /** 유저별 개인 알림 채널(방 전체 브로드캐스트가 아닌 특정 유저 타겟팅용). */
+  private userChannel(userId: string): string {
+    return `user:${userId}`;
+  }
+
+  /** 문의(SQ_INQUIRY) 처리 결과를 제출한 유저에게만 전달한다. */
+  emitInquiryResult(userId: string, payload: InquiryResultPayload): void {
+    this.server?.to(this.userChannel(userId)).emit('inquiry:result', payload);
   }
 
   /** 예약된 퇴장 타이머가 있으면 취소한다. 실제로 취소했으면 true(재연결 상황)를 반환한다. */

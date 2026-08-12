@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Logo } from '../components/Logo';
 import { ParticipantList } from '../components/ParticipantList';
 import { GamePlayer } from '../components/GamePlayer';
+import { InquiryModal } from '../components/InquiryModal';
 import {
   ChatPanel,
   type ChatEntry,
@@ -49,6 +50,7 @@ export function RoomGamePage() {
   const [songCount, setSongCount] = useState<number | null>(null);
   const [nextRoundShortcutEnabled, setNextRoundShortcutEnabled] =
     useState(true);
+  const [inquiryModalOpen, setInquiryModalOpen] = useState(false);
   const chatPanelRef = useRef<ChatPanelHandle>(null);
   const [socket, setSocket] = useState<RoomSocket | null>(null);
   const serverTimeOffsetMs = useServerClockOffset(socket);
@@ -164,6 +166,17 @@ export function RoomGamePage() {
       ]);
     });
 
+    socket.on('inquiry:result', (payload) => {
+      setChatEntries((prev) => [
+        ...prev,
+        {
+          id: nextEntryId(),
+          type: 'system',
+          message: `[문의 결과] ${payload.message}`,
+        },
+      ]);
+    });
+
     // 동시 재생 디버깅용: 닉네임에 DEBUG_USER가 포함된 유저는 이 소켓이 받는 모든
     // 이벤트를 채팅으로도 발송해, 여러 클라이언트의 이벤트 수신 시점을 방 채팅
     // 로그(sentAt 타임스탬프 포함)로 비교할 수 있게 한다. chat:message는 이 로직이
@@ -274,6 +287,17 @@ export function RoomGamePage() {
     socket?.emit('game:force-skip');
   }, [socket]);
 
+  const handleOpenInquiry = useCallback(() => {
+    setInquiryModalOpen(true);
+  }, []);
+
+  const handleInquirySubmitted = useCallback((message: string) => {
+    setChatEntries((prev) => [
+      ...prev,
+      { id: nextEntryId(), type: 'system', message },
+    ]);
+  }, []);
+
   // 동시 재생 디버깅용: 이 클라이언트가 실제로 playVideo()를 호출한 시점(예약
   // 시각과의 오차 포함)을 채팅으로 발송한다. DEBUG_USER가 아니면 아무것도 하지 않는다.
   const handlePlaybackTriggered = useCallback(
@@ -364,6 +388,7 @@ export function RoomGamePage() {
               onNextRound={handleNextRound}
               onSkip={handleSkip}
               onForceSkip={handleForceSkip}
+              onOpenInquiry={handleOpenInquiry}
               onPlaybackTriggered={handlePlaybackTriggered}
               onPlaybackStarted={handlePlaybackStarted}
               shortcutEnabled={nextRoundShortcutEnabled}
@@ -381,6 +406,18 @@ export function RoomGamePage() {
           </main>
         </div>
       </div>
+
+      {inquiryModalOpen && room.currentRound?.quizSongId && (
+        <InquiryModal
+          quizSongId={room.currentRound.quizSongId}
+          songNm={room.currentRound.songNm ?? ''}
+          atstNm={room.currentRound.atstNm ?? ''}
+          roomId={room.roomId}
+          userId={userId}
+          onClose={() => setInquiryModalOpen(false)}
+          onSubmitted={handleInquirySubmitted}
+        />
+      )}
     </div>
   );
 }

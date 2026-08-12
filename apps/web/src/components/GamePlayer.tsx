@@ -66,6 +66,7 @@ interface GamePlayerProps {
   onNextRound: () => void;
   onSkip: () => void;
   onForceSkip: () => void;
+  onOpenInquiry: () => void;
   shortcutEnabled: boolean;
   onShortcutEnabledChange: (enabled: boolean) => void;
   /** 동시 재생 디버깅용: 실제로 playVideo()를 호출한 시점마다 호출된다(선택). */
@@ -111,6 +112,7 @@ export function GamePlayer({
   onNextRound,
   onSkip,
   onForceSkip,
+  onOpenInquiry,
   shortcutEnabled,
   onShortcutEnabledChange,
   onPlaybackTriggered,
@@ -539,6 +541,15 @@ export function GamePlayer({
             <p className="text-sm font-semibold text-slate-700">
               정답은 &quot;{round.songNm}&quot;({round.atstNm})였습니다!
             </p>
+            {round.quizSongId && (
+              <button
+                type="button"
+                onClick={onOpenInquiry}
+                className="rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-500 transition hover:bg-slate-50"
+              >
+                ⚑ 문제 수정 요청
+              </button>
+            )}
             {round.autoNextRoundAt && (
               <p className="text-xs font-semibold text-purple-400">
                 {autoNextRoundRemaining ?? 0}초 후 다음 라운드로 자동

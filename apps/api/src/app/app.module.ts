@@ -4,6 +4,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { CacheModule } from '../cache/cache.module';
 import { ConfigModule } from '../config/config.module';
+import { InquiryModule } from '../inquiry/inquiry.module';
 import { QuizModule } from '../quiz/quiz.module';
 import { RoomModule } from '../room/room.module';
 import { ScraperModule } from '../scraper/scraper.module';
@@ -22,6 +23,7 @@ import { ScraperModule } from '../scraper/scraper.module';
     }),
     CacheModule,
     ConfigModule,
+    InquiryModule,
     QuizModule,
     RoomModule,
     ScraperModule,

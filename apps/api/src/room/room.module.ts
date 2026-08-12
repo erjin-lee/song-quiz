@@ -12,5 +12,6 @@ import { RoomService } from './room.service';
   imports: [TypeOrmModule.forFeature([Quiz, QuizArtist, QuizSong, QuizAnswer])],
   controllers: [RoomController],
   providers: [RoomService, RoomGateway],
+  exports: [RoomGateway],
 })
 export class RoomModule {}

@@ -17,6 +17,12 @@ export interface RoomErrorEvent {
   message: string;
 }
 
+export interface InquiryResultEvent {
+  inquiryId: string;
+  status: 'REJECTED' | 'COMPLETED';
+  message: string;
+}
+
 export interface ChatHistoryEntry {
   type: 'message' | 'system';
   nickname?: string;
@@ -30,6 +36,7 @@ export interface RoomServerToClientEvents {
   'chat:history': (payload: ChatHistoryEntry[]) => void;
   'room:error': (payload: RoomErrorEvent) => void;
   'room:state': (payload: RoomItemDto) => void;
+  'inquiry:result': (payload: InquiryResultEvent) => void;
 }
 
 export interface TimeSyncResponse {

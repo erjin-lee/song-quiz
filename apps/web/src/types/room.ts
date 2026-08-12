@@ -31,6 +31,8 @@ export interface RoundPublicStateDto {
   songNm: string | null;
   atstNm: string | null;
   albmNm: string | null;
+  /** 정답 공개 전에는 null, 라운드 종료 후 문의 접수용 quizSongId 공개 */
+  quizSongId: string | null;
 }
 
 export interface RoomItemDto {
