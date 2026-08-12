@@ -22,7 +22,10 @@ import { sortParticipantsByScore } from '../utils/participants';
 import { playCorrectAnswerSound } from '../utils/sound';
 import { isDebugUser, truncateForDebugChat } from '../utils/debugUser';
 import type { RoomItemDto } from '../types/room';
-import type { PlaybackTriggeredDetails } from '../components/GamePlayer';
+import type {
+  PlaybackStartedDetails,
+  PlaybackTriggeredDetails,
+} from '../components/GamePlayer';
 
 interface LocationState {
   room: RoomItemDto;
@@ -285,6 +288,20 @@ export function RoomGamePage() {
     [socket, nickname],
   );
 
+  // 동시 재생 디버깅용: 유튜브 플레이어가 실제로 PLAYING 상태가 된 시점(버퍼링 등
+  // 재생 파이프라인 지연 포함)을 채팅으로 발송한다. DEBUG_USER가 아니면 아무것도 하지 않는다.
+  const handlePlaybackStarted = useCallback(
+    (details: PlaybackStartedDetails) => {
+      if (!isDebugUser(nickname)) {
+        return;
+      }
+      socket?.emit('chat:message', {
+        message: `[DEBUG] playback-started roundIndex=${details.roundIndex} scheduledAt=${details.scheduledAt} actualAt=${details.actualAt} deltaMs=${details.deltaMs} commandToStartMs=${details.commandToStartMs}`,
+      });
+    },
+    [socket, nickname],
+  );
+
   if (!room || !userId) {
     return (
       <div className="flex min-h-screen items-center justify-center text-sm text-slate-400">
@@ -348,6 +365,7 @@ export function RoomGamePage() {
               onSkip={handleSkip}
               onForceSkip={handleForceSkip}
               onPlaybackTriggered={handlePlaybackTriggered}
+              onPlaybackStarted={handlePlaybackStarted}
               shortcutEnabled={nextRoundShortcutEnabled}
               onShortcutEnabledChange={setNextRoundShortcutEnabled}
             />
