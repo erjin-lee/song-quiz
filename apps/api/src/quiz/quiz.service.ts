@@ -85,6 +85,18 @@ export class QuizService {
     }));
   }
 
+  /** 정답 등 스포일러가 담긴 필드 없이 출제곡 개수만 반환한다. */
+  async getQuizSongCount(quizId: string): Promise<number> {
+    const quiz = await this.quizRepository.findOne({ where: { quizId } });
+    if (!quiz) {
+      throw new NotFoundException(
+        `퀴즈를 찾을 수 없습니다. (quizId: ${quizId})`,
+      );
+    }
+
+    return this.quizSongRepository.count({ where: { quizId } });
+  }
+
   async getQuizSongs(quizId: string): Promise<QuizSongItemDto[]> {
     const quiz = await this.quizRepository.findOne({ where: { quizId } });
     if (!quiz) {

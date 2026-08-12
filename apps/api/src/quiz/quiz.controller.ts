@@ -22,6 +22,7 @@ import {
   QuizSearchType,
 } from './dto/get-quizzes-query.dto';
 import { QuizListItemDto } from './dto/quiz-list-item.dto';
+import { QuizSongCountDto } from './dto/quiz-song-count.dto';
 import { QuizSongItemDto } from './dto/quiz-song-item.dto';
 import { QuizAnswerGeneratorService } from './quiz-answer-generator.service';
 import { QuizGeneratorService } from './quiz-generator.service';
@@ -57,6 +58,20 @@ export class QuizController {
   })
   getQuizzes(@Query() query: GetQuizzesQueryDto): Promise<QuizListItemDto[]> {
     return this.quizService.getQuizzes(query);
+  }
+
+  @Get(':quizId/songs/count')
+  @ApiOperation({
+    summary: '퀴즈별 출제곡 개수 조회(정답 등 스포일러 필드는 포함하지 않음)',
+  })
+  @ApiParam({ name: 'quizId', description: '퀴즈 ID', type: Number })
+  @ApiOkResponse({ description: '퀴즈 출제곡 개수', type: QuizSongCountDto })
+  @ApiNotFoundResponse({ description: '퀴즈를 찾을 수 없음' })
+  async getQuizSongCount(
+    @Param('quizId', ParseIntPipe) quizId: number,
+  ): Promise<QuizSongCountDto> {
+    const count = await this.quizService.getQuizSongCount(String(quizId));
+    return { count };
   }
 
   @Get(':quizId/songs')
