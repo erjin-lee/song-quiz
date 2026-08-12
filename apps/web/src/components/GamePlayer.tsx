@@ -19,13 +19,21 @@ const READY_FALLBACK_TIMEOUT_MS = 8000;
  * 예정 시각 이전에 한 번 재생을 태워두면 예정 시각의 재생 재개 지연을 크게 줄일 수 있다.
  */
 const PREBUFFER_LEAD_MS = 1200;
+const DEFAULT_PREBUFFER_PLAY_MS = 500;
+
 /**
  * 프리버퍼링 중 실제로 재생 상태를 유지하는 시간(버퍼링을 유도하기 위한 최소 시간).
  * 모바일 환경에서는 네트워크 상태에 따라 300ms 안에 버퍼링이 충분히 끝나지 않는
  * 경우가 있어(그 상태에서 예정 시각에 재생을 재개하면 소리가 잠깐 끊기는 문제로
- * 관측됨) 여유를 두고 500ms로 설정한다.
+ * 관측됨) 여유를 두고 기본값을 500ms로 둔다. 환경별로 다시 튜닝할 수 있도록
+ * VITE_PREBUFFER_PLAY_MS로 오버라이드할 수 있게 하며, 값이 없거나 잘못되면
+ * 기본값을 쓴다.
  */
-const PREBUFFER_PLAY_MS = 500;
+const envPrebufferPlayMs = Number(import.meta.env.VITE_PREBUFFER_PLAY_MS);
+const PREBUFFER_PLAY_MS =
+  Number.isFinite(envPrebufferPlayMs) && envPrebufferPlayMs >= 0
+    ? envPrebufferPlayMs
+    : DEFAULT_PREBUFFER_PLAY_MS;
 
 export interface PlaybackTriggeredDetails {
   roundIndex: number;

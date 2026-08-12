@@ -11,6 +11,7 @@ import { QuizSongItemDto } from './dto/quiz-song-item.dto';
 import { QuizArtist } from './entities/quiz-artist.entity';
 import { Quiz } from './entities/quiz.entity';
 import { QuizSong } from './entities/quiz-song.entity';
+import { shiftYoutubeUrlStartSecEarlier } from './youtube-url.util';
 
 const QUIZ_LIST_CACHE_TTL_SECONDS = 60;
 
@@ -123,7 +124,7 @@ export class QuizService {
       songNm: quizSong.song.songNm,
       atstNm: quizSong.song.artist.atstNm,
       albmNm: quizSong.song.album.albmNm,
-      youtubeUrl: quizSong.youtubeUrl,
+      youtubeUrl: shiftYoutubeUrlStartSecEarlier(quizSong.youtubeUrl),
       youtubeVideoId: quizSong.youtubeVideoId,
       startSec: quizSong.startSec,
       endSec: quizSong.endSec,
