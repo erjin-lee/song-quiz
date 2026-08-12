@@ -12,6 +12,16 @@ import type { RoomItemDto } from '../types/room';
  */
 const READY_FALLBACK_TIMEOUT_MS = 8000;
 
+/**
+ * 재생 예정 시각(playScheduledAt)보다 이만큼 앞서 음소거 상태로 짧게 재생을
+ * 시도해("프리버퍼링") 버퍼링/디코더 초기화를 미리 끝내둔다. 관측 결과 playVideo()
+ * 호출부터 실제 PLAYING 전환까지의 지연(수백 ms) 대부분이 최초 버퍼링 비용이라,
+ * 예정 시각 이전에 한 번 재생을 태워두면 예정 시각의 재생 재개 지연을 크게 줄일 수 있다.
+ */
+const PREBUFFER_LEAD_MS = 1200;
+/** 프리버퍼링 중 실제로 재생 상태를 유지하는 시간(버퍼링을 유도하기 위한 최소 시간). */
+const PREBUFFER_PLAY_MS = 300;
+
 export interface PlaybackTriggeredDetails {
   roundIndex: number;
   /** 서버가 지정한 재생 예정 시각(ISO) */
@@ -20,6 +30,18 @@ export interface PlaybackTriggeredDetails {
   actualAt: string;
   /** actualAt - scheduledAt (ms). 0보다 크면 예정 시각보다 늦게 재생을 시도한 것이다. */
   deltaMs: number;
+}
+
+export interface PlaybackStartedDetails {
+  roundIndex: number;
+  /** 서버가 지정한 재생 예정 시각(ISO) */
+  scheduledAt: string | null;
+  /** 유튜브 플레이어가 실제로 PLAYING 상태가 된, 서버 기준 보정 시각(ISO) */
+  actualAt: string;
+  /** actualAt - scheduledAt (ms). null이면 scheduledAt을 알 수 없는 경우다. */
+  deltaMs: number | null;
+  /** actualAt - playVideo() 호출 시각 (ms). 버퍼링/네트워크 등으로 인한 순수 재생 지연이다. null이면 같은 라운드의 호출 시각을 알 수 없는 경우다. */
+  commandToStartMs: number | null;
 }
 
 interface GamePlayerProps {
@@ -35,6 +57,8 @@ interface GamePlayerProps {
   onShortcutEnabledChange: (enabled: boolean) => void;
   /** 동시 재생 디버깅용: 실제로 playVideo()를 호출한 시점마다 호출된다(선택). */
   onPlaybackTriggered?: (details: PlaybackTriggeredDetails) => void;
+  /** 동시 재생 디버깅용: 유튜브 플레이어가 실제로 PLAYING 상태가 된 시점마다 호출된다(라운드당 1회, 선택). */
+  onPlaybackStarted?: (details: PlaybackStartedDetails) => void;
 }
 
 // targetIso는 서버 기준 절대 시각이므로, 로컬 시계를 그대로 쓰지 않고 offsetMs로
@@ -77,12 +101,28 @@ export function GamePlayer({
   shortcutEnabled,
   onShortcutEnabledChange,
   onPlaybackTriggered,
+  onPlaybackStarted,
 }: GamePlayerProps) {
   const isHost = room.hostUserId === myUserId;
   const round = room.currentRound;
   const playerRef = useRef<YouTube>(null);
   const playedRoundRef = useRef<number | null>(null);
   const reportedReadyRoundRef = useRef<number | null>(null);
+  // 동시 재생 디버깅용: playVideo()를 호출한 라운드/시각을 기억해뒀다가, 실제로
+  // PLAYING 상태가 됐을 때 "명령 시점 → 실제 재생 시점" 지연을 계산하는 데 쓴다.
+  const playbackCommandAtMsRef = useRef<{
+    roundIndex: number;
+    atMs: number;
+  } | null>(null);
+  const playbackStartReportedRoundRef = useRef<number | null>(null);
+  // 프리버퍼링(음소거 재생→일시정지)을 이미 시도한 라운드를 기록해 중복 실행을 막는다.
+  const prebufferedRoundRef = useRef<number | null>(null);
+  // 프리버퍼링 중 "일시정지+위치복원+음소거해제"를 실행할 내부 타이머. 라운드 전환/
+  // 언마운트 시 정리해야 하고, 이 타이머가 실제 재생(playedRoundRef)보다 늦게 발동하는
+  // 경쟁 상태를 막기 위해 발동 시점에 playedRoundRef를 다시 확인한다.
+  const prebufferPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const [isPlaying, setIsPlaying] = useState(false);
   // playScheduledAt에 도달해 실제로 재생을 "시도"한 시점부터 true. gameStatus가
   // PLAYING으로 바뀌는 시점(재생 예약 시각보다 최대 PLAY_SCHEDULE_DELAY_SECONDS만큼
@@ -115,6 +155,63 @@ export function GamePlayer({
   // (offset이 또 바뀌어도) 같은 영상을 다시 재생하지 않도록 한다.
   const roundIndex = round?.roundIndex ?? null;
   const playScheduledAt = round?.playScheduledAt ?? null;
+  const startSec = round?.startSec ?? null;
+
+  // 예정 시각보다 PREBUFFER_LEAD_MS만큼 앞서 음소거 상태로 짧게 재생→일시정지해
+  // 버퍼링을 미리 끝내둔다. 재생 재개(unMute 후 실제 재생 타이머의 playVideo())는
+  // 아래의 "실제 재생" effect가 그대로 담당한다 — 이 effect는 그 전 단계 준비만 한다.
+  useEffect(() => {
+    if (
+      room.gameStatus !== 'PLAYING' ||
+      roundIndex === null ||
+      !playScheduledAt ||
+      prebufferedRoundRef.current === roundIndex ||
+      playedRoundRef.current === roundIndex
+    ) {
+      return;
+    }
+
+    const prebufferDelayMs =
+      new Date(playScheduledAt).getTime() -
+      PREBUFFER_LEAD_MS -
+      (Date.now() + serverTimeOffsetMs);
+
+    const startTimer = setTimeout(
+      () => {
+        prebufferedRoundRef.current = roundIndex;
+        const player = playerRef.current?.getInternalPlayer();
+        if (!player) {
+          return;
+        }
+
+        player.mute();
+        player.playVideo();
+
+        prebufferPauseTimerRef.current = setTimeout(() => {
+          prebufferPauseTimerRef.current = null;
+          // 이 사이 실제 재생 타이머가 이미 발동해버렸다면(느린 네트워크 등으로
+          // 프리버퍼링 자체가 예정 시각에 바짝 붙어 실행된 경우) 여기서 일시정지시키면
+          // 진행 중인 실제 재생을 멈춰버리게 되므로 위치 복원 없이 음소거만 해제한다.
+          if (playedRoundRef.current === roundIndex) {
+            player.unMute();
+            return;
+          }
+          player.pauseVideo();
+          player.seekTo(startSec ?? 0, true);
+          player.unMute();
+        }, PREBUFFER_PLAY_MS);
+      },
+      Math.max(0, prebufferDelayMs),
+    );
+
+    return () => {
+      clearTimeout(startTimer);
+      if (prebufferPauseTimerRef.current) {
+        clearTimeout(prebufferPauseTimerRef.current);
+        prebufferPauseTimerRef.current = null;
+      }
+    };
+  }, [room.gameStatus, roundIndex, playScheduledAt, serverTimeOffsetMs, startSec]);
 
   useEffect(() => {
     if (
@@ -132,10 +229,19 @@ export function GamePlayer({
       () => {
         playedRoundRef.current = roundIndex;
         setIsPlayScheduleDue(true);
-        playerRef.current?.getInternalPlayer()?.playVideo();
+        const player = playerRef.current?.getInternalPlayer();
+        // 프리버퍼링이 아직 pause+unMute 단계 전이라 음소거 상태로 남아있을 가능성에
+        // 대비한 안전장치. 이미 음소거 해제된 상태라면 아무 효과가 없다.
+        player?.unMute();
+        player?.playVideo();
+
+        const actualServerTimeMs = Date.now() + serverTimeOffsetMs;
+        playbackCommandAtMsRef.current = {
+          roundIndex,
+          atMs: actualServerTimeMs,
+        };
 
         if (onPlaybackTriggered) {
-          const actualServerTimeMs = Date.now() + serverTimeOffsetMs;
           onPlaybackTriggered({
             roundIndex,
             scheduledAt: playScheduledAt,
@@ -202,6 +308,28 @@ export function GamePlayer({
   const handlePlayerStateChange = (event: YouTubeEvent<number>) => {
     if (event.data === YouTube.PlayerState.PLAYING) {
       setIsPlaying(true);
+
+      if (
+        onPlaybackStarted &&
+        roundIndex !== null &&
+        playbackStartReportedRoundRef.current !== roundIndex
+      ) {
+        playbackStartReportedRoundRef.current = roundIndex;
+        const actualServerTimeMs = Date.now() + serverTimeOffsetMs;
+        const command = playbackCommandAtMsRef.current;
+        onPlaybackStarted({
+          roundIndex,
+          scheduledAt: playScheduledAt,
+          actualAt: new Date(actualServerTimeMs).toISOString(),
+          deltaMs: playScheduledAt
+            ? actualServerTimeMs - new Date(playScheduledAt).getTime()
+            : null,
+          commandToStartMs:
+            command && command.roundIndex === roundIndex
+              ? actualServerTimeMs - command.atMs
+              : null,
+        });
+      }
     } else if (
       event.data === YouTube.PlayerState.PAUSED ||
       event.data === YouTube.PlayerState.ENDED
