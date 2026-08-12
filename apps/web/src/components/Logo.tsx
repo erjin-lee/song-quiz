@@ -24,7 +24,7 @@ export function Logo({ size = 'lg', className = '' }: LogoProps) {
       <span
         className={`bg-gradient-to-r from-purple-600 to-pink-500 bg-clip-text font-extrabold tracking-tight text-transparent ${SIZE_CLASSES[size]}`}
       >
-        노래맞추기
+        노래맞히기
       </span>
     </div>
   );
