@@ -18,6 +18,7 @@ import {
   saveRoomSession,
 } from '../utils/roomSession';
 import { sortParticipantsByScore } from '../utils/participants';
+import { playCorrectAnswerSound } from '../utils/sound';
 import type { RoomItemDto } from '../types/room';
 
 interface LocationState {
@@ -168,6 +169,25 @@ export function RoomGamePage() {
       .catch(() => setSongCount(null));
   }, [quizId]);
 
+  // 내가 방금 정답을 맞혔을 때만 효과음을 재생한다. room:state는 전체 라운드 상태를
+  // 통째로 내려주므로, 이전에 내 userId가 없다가 새로 추가된 순간(전환)만 감지한다.
+  // prevCorrectUserIdsRef가 null인 최초 렌더(새로고침 등으로 이미 맞춘 상태로 진입한
+  // 경우 포함)에는 재생하지 않는다.
+  const prevCorrectUserIdsRef = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const correctUserIds = room?.currentRound?.correctUserIds ?? [];
+    const prevCorrectUserIds = prevCorrectUserIdsRef.current;
+    if (
+      prevCorrectUserIds &&
+      userId &&
+      correctUserIds.includes(userId) &&
+      !prevCorrectUserIds.has(userId)
+    ) {
+      playCorrectAnswerSound();
+    }
+    prevCorrectUserIdsRef.current = new Set(correctUserIds);
+  }, [room?.currentRound?.correctUserIds, userId]);
+
   // 아래 핸들러들은 GamePlayer 내부 effect의 의존성으로 전달된다(onReady는 LOADING
   // 무한정지 방지용 fallback 타이머, onNextRound는 Shift+→ 단축키 리스너). 매 렌더마다
   // 새 함수를 만들면 그 effect들이 room:state 브로드캐스트가 올 때마다 불필요하게
@@ -266,6 +286,7 @@ export function RoomGamePage() {
               hostUserId={room.hostUserId}
               currentUserId={userId}
               maxUserCnt={room.maxUserCnt}
+              correctUserIds={room.currentRound?.correctUserIds ?? []}
             />
           </aside>
 
