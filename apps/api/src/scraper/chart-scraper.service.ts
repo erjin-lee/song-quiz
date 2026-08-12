@@ -5,9 +5,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
 import { Album } from '../quiz/entities/album.entity';
 import { Artist } from '../quiz/entities/artist.entity';
+import { QuizAnswer } from '../quiz/entities/quiz-answer.entity';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
 import { Quiz } from '../quiz/entities/quiz.entity';
 import { Song } from '../quiz/entities/song.entity';
@@ -36,6 +37,8 @@ export class ChartScraperService {
     private readonly quizRepository: Repository<Quiz>,
     @InjectRepository(QuizSong)
     private readonly quizSongRepository: Repository<QuizSong>,
+    @InjectRepository(QuizAnswer)
+    private readonly quizAnswerRepository: Repository<QuizAnswer>,
   ) {}
 
   async scrapeChart(
@@ -64,7 +67,11 @@ export class ChartScraperService {
 
     const { quizTtl, quizDesc } = this.buildQuizMeta(type, year);
     const quiz = await this.quizRepository.save(
-      this.quizRepository.create({ quizTtl, quizDesc }),
+      this.quizRepository.create({
+        quizTtl,
+        quizDesc,
+        thumbImgUrl: chartSongs[0].albumThumbImgUrl,
+      }),
     );
 
     const artistByMelonId = new Map<string, Artist>();
@@ -72,6 +79,8 @@ export class ChartScraperService {
     let savedArtistCount = 0;
     let savedSongCount = 0;
     let skippedSongCount = 0;
+    let reusedYoutubeCount = 0;
+    let reusedAnswerCount = 0;
     let quizSeq = 1;
 
     for (const chartSong of chartSongs) {
@@ -105,16 +114,28 @@ export class ChartScraperService {
         skippedSongCount++;
       }
 
-      await this.quizSongRepository.save(
+      const reusableYoutubeInfo = await this.findReusableYoutubeInfo(
+        song.songId,
+      );
+      if (reusableYoutubeInfo) {
+        reusedYoutubeCount++;
+      }
+
+      const quizSong = await this.quizSongRepository.save(
         this.quizSongRepository.create({
           quizId: quiz.quizId,
           songId: song.songId,
           quizSeq: quizSeq++,
-          youtubeUrl: '',
-          youtubeVideoId: null,
-          startSec: 0,
-          endSec: null,
+          youtubeUrl: reusableYoutubeInfo?.youtubeUrl ?? '',
+          youtubeVideoId: reusableYoutubeInfo?.youtubeVideoId ?? null,
+          startSec: reusableYoutubeInfo?.startSec ?? 0,
+          endSec: reusableYoutubeInfo?.endSec ?? null,
         }),
+      );
+
+      reusedAnswerCount += await this.copyReusableAnswers(
+        song.songId,
+        quizSong.quizSongId,
       );
     }
 
@@ -129,6 +150,8 @@ export class ChartScraperService {
       savedSongCount,
       skippedSongCount,
       savedQuizSongCount: chartSongs.length,
+      reusedYoutubeCount,
+      reusedAnswerCount,
     };
   }
 
@@ -233,6 +256,56 @@ export class ChartScraperService {
       }),
     );
     return { song: created, created: true };
+  }
+
+  /** 동일한 곡을 다른 퀴즈에서 이미 출제한 적이 있다면 그 유튜브 정보를 재사용한다. */
+  private async findReusableYoutubeInfo(
+    songId: string,
+  ): Promise<QuizSong | null> {
+    return this.quizSongRepository.findOne({
+      where: { songId, youtubeUrl: Not('') },
+      order: { updDt: 'DESC' },
+    });
+  }
+
+  /**
+   * 동일한 곡을 출제한 다른 퀴즈 출제곡 중 정답이 저장된 것이 있으면
+   * 가장 최근 것을 골라 그 정답 목록을 새 퀴즈 출제곡에 복사한다.
+   */
+  private async copyReusableAnswers(
+    songId: string,
+    targetQuizSongId: string,
+  ): Promise<number> {
+    const candidateQuizSongs = await this.quizSongRepository.find({
+      where: { songId },
+      order: { updDt: 'DESC' },
+    });
+
+    for (const candidate of candidateQuizSongs) {
+      if (candidate.quizSongId === targetQuizSongId) {
+        continue;
+      }
+      const sourceAnswers = await this.quizAnswerRepository.find({
+        where: { quizSongId: candidate.quizSongId },
+      });
+      if (sourceAnswers.length === 0) {
+        continue;
+      }
+
+      await this.quizAnswerRepository.save(
+        sourceAnswers.map((answer) =>
+          this.quizAnswerRepository.create({
+            quizSongId: targetQuizSongId,
+            answerTxt: answer.answerTxt,
+            answerType: answer.answerType,
+            confidence: answer.confidence,
+            isActive: answer.isActive,
+          }),
+        ),
+      );
+      return sourceAnswers.length;
+    }
+    return 0;
   }
 
   private async wrapMelonCall<T>(fn: () => Promise<T>): Promise<T> {

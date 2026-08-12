@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Album } from '../quiz/entities/album.entity';
 import { Artist } from '../quiz/entities/artist.entity';
+import { QuizAnswer } from '../quiz/entities/quiz-answer.entity';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
 import { Quiz } from '../quiz/entities/quiz.entity';
 import { Song } from '../quiz/entities/song.entity';
@@ -22,7 +23,7 @@ describe('ChartScraperService', () => {
       songNm: 'Song A',
       melonAlbmId: 'a1',
       albmNm: 'Album A',
-      albumThumbImgUrl: null,
+      albumThumbImgUrl: 'https://cdnimg.melon.co.kr/album-a.jpg',
       artists: [{ melonArtistId: 'ar1', atstNm: 'Artist1' }],
     },
     {
@@ -77,13 +78,30 @@ describe('ChartScraperService', () => {
     save: jest.fn(async (data) => ({ quizId: 'quiz-1', ...data })),
   };
 
+  let quizSongSeq = 0;
   const quizSongRepositoryMock = {
+    find: jest.fn(),
+    findOne: jest.fn(),
     create: jest.fn((data) => data),
-    save: jest.fn(async (data) => ({ quizSongId: 'quiz-song-1', ...data })),
+    save: jest.fn(async (data) => ({
+      quizSongId: `quiz-song-${++quizSongSeq}`,
+      updDt: new Date(),
+      ...data,
+    })),
+  };
+
+  const quizAnswerRepositoryMock = {
+    find: jest.fn(),
+    create: jest.fn((data) => data),
+    save: jest.fn(async (data) => data),
   };
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    quizSongSeq = 0;
+    quizSongRepositoryMock.find.mockResolvedValue([]);
+    quizSongRepositoryMock.findOne.mockResolvedValue(null);
+    quizAnswerRepositoryMock.find.mockResolvedValue([]);
 
     melonScraperClientMock.fetchAgeChartSongs.mockResolvedValue(
       chartSongFixture,
@@ -91,7 +109,7 @@ describe('ChartScraperService', () => {
     melonScraperClientMock.fetchArtist.mockResolvedValue({
       melonArtistId: 'ar1',
       atstNm: 'Artist1(fetched)',
-      thumbImgUrl: null,
+      thumbImgUrl: 'https://cdnimg.melon.co.kr/album-a.jpg',
     });
     artistRepositoryMock.findOne.mockImplementation(
       async ({ where: { melonAtstId } }) =>
@@ -114,6 +132,10 @@ describe('ChartScraperService', () => {
         {
           provide: getRepositoryToken(QuizSong),
           useValue: quizSongRepositoryMock,
+        },
+        {
+          provide: getRepositoryToken(QuizAnswer),
+          useValue: quizAnswerRepositoryMock,
         },
       ],
     }).compile();
@@ -181,6 +203,7 @@ describe('ChartScraperService', () => {
     expect(quizRepositoryMock.create).toHaveBeenCalledWith({
       quizTtl: '2010년대 인기곡',
       quizDesc: '2010 ~ 2020 멜론 인기 차트 곡 입니다.',
+      thumbImgUrl: 'https://cdnimg.melon.co.kr/album-a.jpg',
     });
     expect(quizSongRepositoryMock.create).toHaveBeenNthCalledWith(
       1,
@@ -206,6 +229,72 @@ describe('ChartScraperService', () => {
     expect(quizRepositoryMock.create).toHaveBeenCalledWith({
       quizTtl: '2023년 인기곡',
       quizDesc: '2023 멜론 인기 차트 곡 입니다.',
+      thumbImgUrl: 'https://cdnimg.melon.co.kr/album-a.jpg',
     });
+  });
+
+  it('동일 곡을 다른 퀴즈에서 이미 출제해 유튜브 정보가 있으면 재사용한다', async () => {
+    quizSongRepositoryMock.findOne.mockImplementation(
+      async ({ where }: { where: { songId: string } }) =>
+        where.songId === 'new-song-1'
+          ? {
+              quizSongId: 'other-quiz-song-1',
+              youtubeUrl: 'https://youtu.be/abc',
+              youtubeVideoId: 'abc',
+              startSec: 12,
+              endSec: 30,
+            }
+          : null,
+    );
+
+    const result = await service.scrapeChart(ChartType.AG, 2010);
+
+    expect(quizSongRepositoryMock.create).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        songId: 'new-song-1',
+        youtubeUrl: 'https://youtu.be/abc',
+        youtubeVideoId: 'abc',
+        startSec: 12,
+        endSec: 30,
+      }),
+    );
+    expect(result.reusedYoutubeCount).toBe(1);
+  });
+
+  it('동일 곡을 출제한 다른 퀴즈 출제곡에 정답이 있으면 새 출제곡에 복사한다', async () => {
+    quizSongRepositoryMock.find.mockImplementation(
+      async ({ where }: { where: { songId: string } }) =>
+        where.songId === 'new-song-1'
+          ? [{ quizSongId: 'other-quiz-song-1', updDt: new Date('2024-01-01') }]
+          : [],
+    );
+    quizAnswerRepositoryMock.find.mockImplementation(
+      async ({ where }: { where: { quizSongId: string } }) =>
+        where.quizSongId === 'other-quiz-song-1'
+          ? [
+              {
+                answerTxt: '노래A',
+                answerType: 'TITLE',
+                confidence: 'HIGH',
+                isActive: 'Y',
+              },
+              {
+                answerTxt: '가수A',
+                answerType: 'ARTIST',
+                confidence: 'HIGH',
+                isActive: 'Y',
+              },
+            ]
+          : [],
+    );
+
+    const result = await service.scrapeChart(ChartType.AG, 2010);
+
+    expect(quizAnswerRepositoryMock.save).toHaveBeenCalledWith([
+      expect.objectContaining({ answerTxt: '노래A' }),
+      expect.objectContaining({ answerTxt: '가수A' }),
+    ]);
+    expect(result.reusedAnswerCount).toBe(2);
   });
 });

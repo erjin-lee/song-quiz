@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Album } from '../quiz/entities/album.entity';
 import { Artist } from '../quiz/entities/artist.entity';
+import { QuizAnswer } from '../quiz/entities/quiz-answer.entity';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
 import { Quiz } from '../quiz/entities/quiz.entity';
 import { Song } from '../quiz/entities/song.entity';
@@ -12,7 +13,9 @@ import { ScraperController } from './scraper.controller';
 import { ScraperService } from './scraper.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Artist, Album, Song, Quiz, QuizSong])],
+  imports: [
+    TypeOrmModule.forFeature([Artist, Album, Song, Quiz, QuizSong, QuizAnswer]),
+  ],
   controllers: [ScraperController, ChartScraperController],
   providers: [ScraperService, ChartScraperService, MelonScraperClient],
 })
