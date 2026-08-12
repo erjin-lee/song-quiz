@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AdBanner } from '../components/AdBanner';
 import { Logo } from '../components/Logo';
@@ -33,6 +33,7 @@ export function RoomListPage() {
   const [joiningRoomId, setJoiningRoomId] = useState<string | null>(null);
   const [isJoinPreparingAd, setIsJoinPreparingAd] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     if (!nickname) {
@@ -73,6 +74,18 @@ export function RoomListPage() {
       .then(setQuizzes)
       .catch(() => setQuizzes([]));
   }, []);
+
+  const filteredRooms = useMemo(() => {
+    const keyword = searchQuery.trim().toLowerCase();
+    if (!keyword) {
+      return rooms;
+    }
+    return rooms.filter((room) =>
+      [room.roomTtl, room.quizTtl, ...room.atstNms].some((field) =>
+        field.toLowerCase().includes(keyword),
+      ),
+    );
+  }, [rooms, searchQuery]);
 
   const handleCreate = async (values: CreateRoomFormValues) => {
     setCreating(true);
@@ -135,13 +148,26 @@ export function RoomListPage() {
 
         {listError && <p className="text-sm text-rose-500">{listError}</p>}
 
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="방 제목, 퀴즈, 가수로 검색"
+          className="w-full rounded-full border border-slate-200 bg-white px-5 py-2.5 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-purple-400"
+        />
+
         <div className="flex flex-col gap-3">
           {rooms.length === 0 && (
             <p className="rounded-2xl bg-white/60 px-5 py-10 text-center text-sm text-slate-400">
               아직 열린 방이 없어요. 새 방을 만들어보세요.
             </p>
           )}
-          {rooms.map((room) => (
+          {rooms.length > 0 && filteredRooms.length === 0 && (
+            <p className="rounded-2xl bg-white/60 px-5 py-10 text-center text-sm text-slate-400">
+              검색 결과가 없어요.
+            </p>
+          )}
+          {filteredRooms.map((room) => (
             <RoomCard
               key={room.roomId}
               room={room}
