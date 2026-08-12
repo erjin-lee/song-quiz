@@ -1,8 +1,8 @@
 import { apiGet } from './client';
 import type { QuizListItemDto } from '../types/quiz';
 
-interface QuizSongItemDto {
-  quizSongId: string;
+interface QuizSongCountDto {
+  count: number;
 }
 
 export function getQuizzes(): Promise<QuizListItemDto[]> {
@@ -10,6 +10,8 @@ export function getQuizzes(): Promise<QuizListItemDto[]> {
 }
 
 export async function getQuizSongCount(quizId: string): Promise<number> {
-  const songs = await apiGet<QuizSongItemDto[]>(`/quizzes/${quizId}/songs`);
-  return songs.length;
+  const result = await apiGet<QuizSongCountDto>(
+    `/quizzes/${quizId}/songs/count`,
+  );
+  return result.count;
 }
