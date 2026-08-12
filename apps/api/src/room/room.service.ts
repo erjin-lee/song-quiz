@@ -37,13 +37,21 @@ const FORCE_SKIP_DELAY_SECONDS = 3;
  * 클라이언트가 clock offset을 보정해 재생 시각을 맞추므로, 소켓 전달 지연 편차만
  * 흡수하면 되는 짧은 값(1.8초)으로 충분하다.
  */
-const PLAY_SCHEDULE_DELAY_SECONDS = 1.8;
+const PLAY_SCHEDULE_DELAY_SECONDS = Number(
+  process.env.PLAY_SCHEDULE_DELAY_SECONDS ?? 1.8,
+);
 /** roomId별로 보관하는 채팅 히스토리 최대 개수. 초과분은 오래된 것부터 버린다. */
-const CHAT_HISTORY_MAX_ENTRIES = 100;
+const CHAT_HISTORY_MAX_ENTRIES = Number(
+  process.env.CHAT_HISTORY_MAX_ENTRIES ?? 100,
+);
 /** 스피드 모드에서 첫 정답자가 나온 뒤 정답을 자동 공개하기까지의 유예 시간. */
-const SPEED_MODE_REVEAL_DELAY_SECONDS = 6;
+const SPEED_MODE_REVEAL_DELAY_SECONDS = Number(
+  process.env.SPEED_MODE_REVEAL_DELAY_SECONDS ?? 6,
+);
 /** 스피드 모드에서 정답 공개 후 다음 라운드로 자동 전환되기까지의 유예 시간. */
-const SPEED_MODE_NEXT_ROUND_DELAY_SECONDS = 4;
+const SPEED_MODE_NEXT_ROUND_DELAY_SECONDS = Number(
+  process.env.SPEED_MODE_NEXT_ROUND_DELAY_SECONDS ?? 4,
+);
 
 export interface ChatSubmissionResult {
   action: 'broadcast' | 'blocked' | 'correct';
