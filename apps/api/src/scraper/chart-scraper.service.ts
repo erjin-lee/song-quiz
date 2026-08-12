@@ -11,6 +11,7 @@ import { Artist } from '../quiz/entities/artist.entity';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
 import { Quiz } from '../quiz/entities/quiz.entity';
 import { Song } from '../quiz/entities/song.entity';
+import { QuizSongReuseService } from '../quiz/quiz-song-reuse.service';
 import { ScrapeChartResultDto } from './dto/scrape-chart-result.dto';
 import {
   ChartType,
@@ -36,6 +37,7 @@ export class ChartScraperService {
     private readonly quizRepository: Repository<Quiz>,
     @InjectRepository(QuizSong)
     private readonly quizSongRepository: Repository<QuizSong>,
+    private readonly quizSongReuseService: QuizSongReuseService,
   ) {}
 
   async scrapeChart(
@@ -64,7 +66,11 @@ export class ChartScraperService {
 
     const { quizTtl, quizDesc } = this.buildQuizMeta(type, year);
     const quiz = await this.quizRepository.save(
-      this.quizRepository.create({ quizTtl, quizDesc }),
+      this.quizRepository.create({
+        quizTtl,
+        quizDesc,
+        thumbImgUrl: chartSongs[0].albumThumbImgUrl,
+      }),
     );
 
     const artistByMelonId = new Map<string, Artist>();
@@ -72,6 +78,8 @@ export class ChartScraperService {
     let savedArtistCount = 0;
     let savedSongCount = 0;
     let skippedSongCount = 0;
+    let reusedYoutubeCount = 0;
+    let reusedAnswerCount = 0;
     let quizSeq = 1;
 
     for (const chartSong of chartSongs) {
@@ -105,16 +113,27 @@ export class ChartScraperService {
         skippedSongCount++;
       }
 
-      await this.quizSongRepository.save(
+      const reusableYoutubeInfo =
+        await this.quizSongReuseService.findReusableYoutubeInfo(song.songId);
+      if (reusableYoutubeInfo) {
+        reusedYoutubeCount++;
+      }
+
+      const quizSong = await this.quizSongRepository.save(
         this.quizSongRepository.create({
           quizId: quiz.quizId,
           songId: song.songId,
           quizSeq: quizSeq++,
-          youtubeUrl: '',
-          youtubeVideoId: null,
-          startSec: 0,
-          endSec: null,
+          youtubeUrl: reusableYoutubeInfo?.youtubeUrl ?? '',
+          youtubeVideoId: reusableYoutubeInfo?.youtubeVideoId ?? null,
+          startSec: reusableYoutubeInfo?.startSec ?? 0,
+          endSec: reusableYoutubeInfo?.endSec ?? null,
         }),
+      );
+
+      reusedAnswerCount += await this.quizSongReuseService.copyReusableAnswers(
+        song.songId,
+        quizSong.quizSongId,
       );
     }
 
@@ -129,6 +148,8 @@ export class ChartScraperService {
       savedSongCount,
       skippedSongCount,
       savedQuizSongCount: chartSongs.length,
+      reusedYoutubeCount,
+      reusedAnswerCount,
     };
   }
 

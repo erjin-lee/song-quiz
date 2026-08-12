@@ -12,6 +12,7 @@ import { Artist } from './entities/artist.entity';
 import { QuizSong } from './entities/quiz-song.entity';
 import { Quiz } from './entities/quiz.entity';
 import { Song } from './entities/song.entity';
+import { QuizSongReuseService } from './quiz-song-reuse.service';
 import { YoutubeScraperClient, delay } from './youtube-scraper.client';
 
 const YOUTUBE_REQUEST_DELAY_MS = 300;
@@ -33,6 +34,7 @@ export class QuizGeneratorService {
     private readonly quizRepository: Repository<Quiz>,
     @InjectRepository(QuizSong)
     private readonly quizSongRepository: Repository<QuizSong>,
+    private readonly quizSongReuseService: QuizSongReuseService,
   ) {}
 
   async generateQuiz(atstId: string): Promise<GenerateQuizResultDto> {
@@ -130,11 +132,42 @@ export class QuizGeneratorService {
       );
     }
 
+    let reusedYoutubeCount = 0;
+    let reusedAnswerCount = 0;
+    const remainingQuizSongs: typeof quizSongs = [];
+
+    for (const quizSong of quizSongs) {
+      const reusable = await this.quizSongReuseService.findReusableYoutubeInfo(
+        quizSong.songId,
+      );
+      if (!reusable) {
+        remainingQuizSongs.push(quizSong);
+        continue;
+      }
+
+      quizSong.youtubeUrl = reusable.youtubeUrl;
+      quizSong.youtubeVideoId = reusable.youtubeVideoId;
+      quizSong.startSec = reusable.startSec;
+      quizSong.endSec = reusable.endSec;
+      await this.quizSongRepository.save(quizSong);
+
+      if (!quizSong.song.ytbLink) {
+        quizSong.song.ytbLink = reusable.youtubeUrl;
+        await this.songRepository.save(quizSong.song);
+      }
+
+      reusedYoutubeCount++;
+      reusedAnswerCount += await this.quizSongReuseService.copyReusableAnswers(
+        quizSong.songId,
+        quizSong.quizSongId,
+      );
+    }
+
     let savedSongCount = 0;
     let skippedSongCount = 0;
 
-    for (let i = 0; i < quizSongs.length; i++) {
-      const quizSong = quizSongs[i];
+    for (let i = 0; i < remainingQuizSongs.length; i++) {
+      const quizSong = remainingQuizSongs[i];
       const result = await this.searchSongVideo(
         quizSong.song.artist.atstNm,
         quizSong.song.songNm,
@@ -169,6 +202,8 @@ export class QuizGeneratorService {
       targetSongCount: quizSongs.length,
       savedSongCount,
       skippedSongCount,
+      reusedYoutubeCount,
+      reusedAnswerCount,
     };
   }
 

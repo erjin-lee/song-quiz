@@ -11,6 +11,7 @@ import { GptAnswerClient } from './gpt-answer.client';
 import { QuizController } from './quiz.controller';
 import { QuizAnswerGeneratorService } from './quiz-answer-generator.service';
 import { QuizGeneratorService } from './quiz-generator.service';
+import { QuizSongReuseService } from './quiz-song-reuse.service';
 import { QuizService } from './quiz.service';
 import { YoutubeScraperClient } from './youtube-scraper.client';
 
@@ -33,6 +34,8 @@ import { YoutubeScraperClient } from './youtube-scraper.client';
     YoutubeScraperClient,
     QuizAnswerGeneratorService,
     GptAnswerClient,
+    QuizSongReuseService,
   ],
+  exports: [QuizSongReuseService],
 })
 export class QuizModule {}

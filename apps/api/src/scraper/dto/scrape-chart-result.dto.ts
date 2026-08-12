@@ -34,4 +34,14 @@ export class ScrapeChartResultDto {
 
   @ApiProperty({ description: '퀴즈 출제곡으로 저장된 수' })
   savedQuizSongCount: number;
+
+  @ApiProperty({
+    description: '다른 퀴즈의 동일한 곡에서 유튜브 정보를 재사용한 출제곡 수',
+  })
+  reusedYoutubeCount: number;
+
+  @ApiProperty({
+    description: '다른 퀴즈의 동일한 곡에서 복사한 정답 수',
+  })
+  reusedAnswerCount: number;
 }
