@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { CacheModule } from '../cache/cache.module';
+import { ConfigModule } from '../config/config.module';
 import { QuizModule } from '../quiz/quiz.module';
 import { RoomModule } from '../room/room.module';
 import { ScraperModule } from '../scraper/scraper.module';
@@ -20,6 +21,7 @@ import { ScraperModule } from '../scraper/scraper.module';
       synchronize: false,
     }),
     CacheModule,
+    ConfigModule,
     QuizModule,
     RoomModule,
     ScraperModule,

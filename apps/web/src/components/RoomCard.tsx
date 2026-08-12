@@ -11,20 +11,33 @@ export function RoomCard({ room, onJoin, joining }: RoomCardProps) {
 
   return (
     <div className="flex items-center justify-between gap-4 rounded-2xl bg-white px-5 py-4 shadow-sm">
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="truncate font-bold text-slate-800">
-            {room.roomTtl}
-          </h3>
-          <span className="shrink-0 rounded-full bg-purple-50 px-2.5 py-0.5 text-xs font-medium text-purple-600">
-            {room.quizTtl}
-          </span>
-        </div>
-        {room.atstNms.length > 0 && (
-          <p className="mt-1 truncate text-sm text-slate-400">
-            {room.atstNms.join(', ')}
-          </p>
+      <div className="flex min-w-0 items-center gap-3">
+        {room.quizThumbImgUrl ? (
+          <img
+            src={room.quizThumbImgUrl}
+            alt={room.quizTtl}
+            className="h-12 w-12 shrink-0 rounded-xl object-cover"
+          />
+        ) : (
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-purple-50 text-lg">
+            🎵
+          </div>
         )}
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="truncate font-bold text-slate-800">
+              {room.roomTtl}
+            </h3>
+            <span className="shrink-0 rounded-full bg-purple-50 px-2.5 py-0.5 text-xs font-medium text-purple-600">
+              {room.quizTtl}
+            </span>
+          </div>
+          {room.atstNms.length > 0 && (
+            <p className="mt-1 truncate text-sm text-slate-400">
+              {room.atstNms.join(', ')}
+            </p>
+          )}
+        </div>
       </div>
 
       <div className="flex shrink-0 items-center gap-4">

@@ -22,6 +22,13 @@ export class RoomItemDto {
   quizTtl: string;
 
   @ApiProperty({
+    description: '퀴즈 썸네일 이미지 URL. 등록되지 않은 경우 null',
+    example: null,
+    nullable: true,
+  })
+  quizThumbImgUrl: string | null;
+
+  @ApiProperty({
     description: '퀴즈에 연결된 아티스트 ID 목록(없으면 빈 배열)',
     example: ['1'],
     type: [String],

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import type { QuizListItemDto } from '../types/quiz';
 import { RoomActionOverlay } from './RoomActionOverlay';
 
@@ -16,6 +16,7 @@ interface CreateRoomModalProps {
   quizzes: QuizListItemDto[];
   submitting: boolean;
   errorMessage: string | null;
+  adEnabled: boolean;
   onSubmit: (values: CreateRoomFormValues) => void;
   onClose: () => void;
 }
@@ -24,30 +25,52 @@ export function CreateRoomModal({
   quizzes,
   submitting,
   errorMessage,
+  adEnabled,
   onSubmit,
   onClose,
 }: CreateRoomModalProps) {
   const [roomTtl, setRoomTtl] = useState('');
   const [quizId, setQuizId] = useState(quizzes[0]?.quizId ?? '');
+  const [quizSearch, setQuizSearch] = useState('');
   const [maxUserCnt, setMaxUserCnt] = useState(8);
   const [speedModeEnabled, setSpeedModeEnabled] = useState(false);
   const [isPreparingAd, setIsPreparingAd] = useState(false);
+
+  const selectedQuiz = useMemo(
+    () => quizzes.find((quiz) => quiz.quizId === quizId) ?? null,
+    [quizzes, quizId],
+  );
+
+  const filteredQuizzes = useMemo(() => {
+    const keyword = quizSearch.trim().toLowerCase();
+    if (!keyword) {
+      return quizzes;
+    }
+    return quizzes.filter((quiz) =>
+      quiz.quizTtl.toLowerCase().includes(keyword),
+    );
+  }, [quizzes, quizSearch]);
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     if (!roomTtl.trim() || !quizId) {
       return;
     }
+    const values: CreateRoomFormValues = {
+      roomTtl: roomTtl.trim(),
+      quizId,
+      isRandom: true,
+      speedModeEnabled,
+      maxUserCnt,
+    };
+    if (!adEnabled) {
+      onSubmit(values);
+      return;
+    }
     setIsPreparingAd(true);
     setTimeout(() => {
       setIsPreparingAd(false);
-      onSubmit({
-        roomTtl: roomTtl.trim(),
-        quizId,
-        isRandom: true,
-        speedModeEnabled,
-        maxUserCnt,
-      });
+      onSubmit(values);
     }, CREATE_AD_DELAY_MS);
   };
 
@@ -72,20 +95,66 @@ export function CreateRoomModal({
             />
           </label>
 
-          <label className="flex flex-col gap-1 text-sm text-slate-600">
+          <div className="flex flex-col gap-1 text-sm text-slate-600">
             퀴즈 선택
-            <select
-              value={quizId}
-              onChange={(event) => setQuizId(event.target.value)}
+            {selectedQuiz && (
+              <div className="flex items-center gap-3 rounded-xl border border-purple-200 bg-purple-50 px-3 py-2">
+                {selectedQuiz.thumbImgUrl ? (
+                  <img
+                    src={selectedQuiz.thumbImgUrl}
+                    alt={selectedQuiz.quizTtl}
+                    className="h-10 w-10 shrink-0 rounded-lg object-cover"
+                  />
+                ) : (
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-base">
+                    🎵
+                  </div>
+                )}
+                <span className="truncate font-semibold text-purple-700">
+                  {selectedQuiz.quizTtl}
+                </span>
+              </div>
+            )}
+            <input
+              type="text"
+              value={quizSearch}
+              onChange={(event) => setQuizSearch(event.target.value)}
+              placeholder="퀴즈 검색"
               className="rounded-xl border border-slate-200 px-4 py-2.5 outline-none focus:border-purple-300"
-            >
-              {quizzes.map((quiz) => (
-                <option key={quiz.quizId} value={quiz.quizId}>
-                  {quiz.quizTtl}
-                </option>
+            />
+            <div className="flex max-h-40 flex-col gap-1 overflow-y-auto rounded-xl border border-slate-100 p-1">
+              {filteredQuizzes.length === 0 && (
+                <p className="px-3 py-2 text-center text-slate-400">
+                  검색 결과가 없어요.
+                </p>
+              )}
+              {filteredQuizzes.map((quiz) => (
+                <button
+                  key={quiz.quizId}
+                  type="button"
+                  onClick={() => setQuizId(quiz.quizId)}
+                  className={`flex items-center gap-3 rounded-lg px-3 py-2 text-left transition ${
+                    quiz.quizId === quizId
+                      ? 'bg-purple-100 text-purple-700'
+                      : 'hover:bg-slate-50'
+                  }`}
+                >
+                  {quiz.thumbImgUrl ? (
+                    <img
+                      src={quiz.thumbImgUrl}
+                      alt={quiz.quizTtl}
+                      className="h-8 w-8 shrink-0 rounded-md object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-sm">
+                      🎵
+                    </div>
+                  )}
+                  <span className="truncate">{quiz.quizTtl}</span>
+                </button>
               ))}
-            </select>
-          </label>
+            </div>
+          </div>
 
           <label className="flex flex-col gap-1 text-sm text-slate-600">
             최대 인원(2~50)
