@@ -9,6 +9,7 @@ import {
   type CreateRoomFormValues,
 } from '../components/CreateRoomModal';
 import { useSession } from '../context/SessionContext';
+import { useDocumentMeta } from '../hooks/useDocumentMeta';
 import { ApiError } from '../api/client';
 import { getAdConfig } from '../api/config';
 import { getQuizzes } from '../api/quiz';
@@ -37,11 +38,11 @@ export function RoomListPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [adEnabled, setAdEnabled] = useState(false);
 
-  useEffect(() => {
-    if (!nickname) {
-      navigate('/', { replace: true });
-    }
-  }, [nickname, navigate]);
+  useDocumentMeta({
+    title: '방 목록 | 노래맞히기',
+    description:
+      '지금 열려 있는 노래맞히기 방 목록을 확인하고 친구들과 함께 실시간으로 참여해보세요.',
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -114,6 +115,11 @@ export function RoomListPage() {
   };
 
   const handleJoin = (roomId: string) => {
+    if (!nickname) {
+      navigate('/');
+      return;
+    }
+
     setJoiningRoomId(roomId);
     setListError(null);
 
@@ -147,14 +153,32 @@ export function RoomListPage() {
       <div className="mx-auto flex max-w-3xl flex-col gap-6">
         <header className="flex items-center justify-between">
           <Logo size="md" />
-          <span className="text-sm text-slate-500">{nickname}님 환영합니다</span>
+          <span className="text-sm text-slate-500">
+            {nickname ? (
+              `${nickname}님 환영합니다`
+            ) : (
+              <button
+                type="button"
+                onClick={() => navigate('/')}
+                className="underline decoration-dotted underline-offset-2 hover:text-purple-500"
+              >
+                닉네임 등록하기
+              </button>
+            )}
+          </span>
         </header>
 
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-bold text-slate-700">방 목록</h1>
           <button
             type="button"
-            onClick={() => setCreateModalOpen(true)}
+            onClick={() => {
+              if (!nickname) {
+                navigate('/');
+                return;
+              }
+              setCreateModalOpen(true);
+            }}
             className="rounded-full bg-purple-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-purple-600"
           >
             + 새 방 만들기

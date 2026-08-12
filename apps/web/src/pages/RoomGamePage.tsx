@@ -13,6 +13,7 @@ import { getRoomById, leaveRoom } from '../api/room';
 import { getQuizSongCount } from '../api/quiz';
 import { createRoomSocket, type RoomSocket } from '../api/socket';
 import { useServerClockOffset } from '../hooks/useServerClockOffset';
+import { useDocumentMeta } from '../hooks/useDocumentMeta';
 import { useSession } from '../context/SessionContext';
 import {
   clearRoomSession,
@@ -55,6 +56,11 @@ export function RoomGamePage() {
   const [socket, setSocket] = useState<RoomSocket | null>(null);
   const serverTimeOffsetMs = useServerClockOffset(socket);
   const { nickname } = useSession();
+
+  useDocumentMeta({
+    title: room ? `${room.roomTtl} | 노래맞히기` : '게임 진행 중 | 노래맞히기',
+    robots: 'noindex, follow',
+  });
   // 디버그 이벤트 로그 발송 시 "서버 기준 현재 시각"을 계산하는 데 쓴다. onAny
   // 리스너는 소켓 생성 시 한 번만 등록되므로 offset 갱신 값을 최신으로 읽으려면
   // ref로 참조해야 한다(그렇지 않으면 등록 시점의 값에 고정된다).
