@@ -19,8 +19,13 @@ const READY_FALLBACK_TIMEOUT_MS = 8000;
  * 예정 시각 이전에 한 번 재생을 태워두면 예정 시각의 재생 재개 지연을 크게 줄일 수 있다.
  */
 const PREBUFFER_LEAD_MS = 1200;
-/** 프리버퍼링 중 실제로 재생 상태를 유지하는 시간(버퍼링을 유도하기 위한 최소 시간). */
-const PREBUFFER_PLAY_MS = 300;
+/**
+ * 프리버퍼링 중 실제로 재생 상태를 유지하는 시간(버퍼링을 유도하기 위한 최소 시간).
+ * 모바일 환경에서는 네트워크 상태에 따라 300ms 안에 버퍼링이 충분히 끝나지 않는
+ * 경우가 있어(그 상태에서 예정 시각에 재생을 재개하면 소리가 잠깐 끊기는 문제로
+ * 관측됨) 여유를 두고 500ms로 설정한다.
+ */
+const PREBUFFER_PLAY_MS = 500;
 
 export interface PlaybackTriggeredDetails {
   roundIndex: number;
@@ -191,14 +196,17 @@ export function GamePlayer({
           prebufferPauseTimerRef.current = null;
           // 이 사이 실제 재생 타이머가 이미 발동해버렸다면(느린 네트워크 등으로
           // 프리버퍼링 자체가 예정 시각에 바짝 붙어 실행된 경우) 여기서 일시정지시키면
-          // 진행 중인 실제 재생을 멈춰버리게 되므로 위치 복원 없이 음소거만 해제한다.
+          // 진행 중인 실제 재생을 멈춰버리게 된다. 그 경우 실제 재생 타이머가 이미
+          // unMute()까지 처리했으므로 아무것도 하지 않는다.
           if (playedRoundRef.current === roundIndex) {
-            player.unMute();
             return;
           }
           player.pauseVideo();
           player.seekTo(startSec ?? 0, true);
-          player.unMute();
+          // 음소거 해제는 여기서 하지 않는다. 일시정지 상태로 예정 시각까지 대기하는
+          // 동안 음소거를 미리 풀어두면(모바일 등 일부 환경에서) 재생 재개 순간에
+          // 짧게 소리가 났다 끊기는 문제가 관측되어, 실제 재생 타이머가 playVideo()
+          // 호출 직전에 unMute()하도록 그 시점을 뒤로 미룬다.
         }, PREBUFFER_PLAY_MS);
       },
       Math.max(0, prebufferDelayMs),
@@ -230,8 +238,8 @@ export function GamePlayer({
         playedRoundRef.current = roundIndex;
         setIsPlayScheduleDue(true);
         const player = playerRef.current?.getInternalPlayer();
-        // 프리버퍼링이 아직 pause+unMute 단계 전이라 음소거 상태로 남아있을 가능성에
-        // 대비한 안전장치. 이미 음소거 해제된 상태라면 아무 효과가 없다.
+        // 음소거 해제는 실제 재생을 시작하기 바로 직전, 여기서만 한다(프리버퍼링
+        // 단계에서는 일부러 음소거를 풀지 않는다 — 위 프리버퍼링 effect 주석 참고).
         player?.unMute();
         player?.playVideo();
 
