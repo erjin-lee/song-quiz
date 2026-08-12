@@ -2,11 +2,18 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Logo } from '../components/Logo';
 import { useSession } from '../context/SessionContext';
+import { useDocumentMeta } from '../hooks/useDocumentMeta';
 
 export function NicknamePage() {
   const { nickname, setNickname } = useSession();
   const [draft, setDraft] = useState(nickname);
   const navigate = useNavigate();
+
+  useDocumentMeta({
+    title: '노래맞히기 | 실시간 노래 맞히기 게임',
+    description:
+      '아이유 노래 맞히기(맞추기), 인기차트·인기곡 노래 맞히기(맞추기)까지 친구들과 함께 즐기는 실시간 노래맞히기(노래맞추기, 노맞) 게임입니다.',
+  });
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
