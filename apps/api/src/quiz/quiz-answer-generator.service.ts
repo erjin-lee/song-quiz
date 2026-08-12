@@ -5,6 +5,7 @@ import { FillQuizAnswersResultDto } from './dto/fill-quiz-answers-result.dto';
 import { QuizAnswer } from './entities/quiz-answer.entity';
 import { QuizSong } from './entities/quiz-song.entity';
 import { GptAnswerCandidate, GptAnswerClient } from './gpt-answer.client';
+import { QuizSongReuseService } from './quiz-song-reuse.service';
 
 const GPT_SONGS_PER_REQUEST = 50;
 const GPT_BATCH_REQUEST_DELAY_MS = 1000;
@@ -31,6 +32,7 @@ export class QuizAnswerGeneratorService {
     private readonly quizSongRepository: Repository<QuizSong>,
     @InjectRepository(QuizAnswer)
     private readonly quizAnswerRepository: Repository<QuizAnswer>,
+    private readonly quizSongReuseService: QuizSongReuseService,
   ) {}
 
   async fillAnswers(): Promise<FillQuizAnswersResultDto> {
@@ -49,11 +51,28 @@ export class QuizAnswerGeneratorService {
       );
     }
 
+    let reusedSongCount = 0;
+    let reusedAnswerCount = 0;
+    const remainingQuizSongs: typeof quizSongs = [];
+
+    for (const quizSong of quizSongs) {
+      const copiedCount = await this.quizSongReuseService.copyReusableAnswers(
+        quizSong.songId,
+        quizSong.quizSongId,
+      );
+      if (copiedCount > 0) {
+        reusedSongCount++;
+        reusedAnswerCount += copiedCount;
+      } else {
+        remainingQuizSongs.push(quizSong);
+      }
+    }
+
     let savedSongCount = 0;
     let savedAnswerCount = 0;
     let skippedSongCount = 0;
 
-    const chunks = chunk(quizSongs, GPT_SONGS_PER_REQUEST);
+    const chunks = chunk(remainingQuizSongs, GPT_SONGS_PER_REQUEST);
     for (let i = 0; i < chunks.length; i++) {
       const songChunk = chunks[i];
       const answersByQuizSongId = await this.generateChunkAnswers(songChunk);
@@ -94,6 +113,8 @@ export class QuizAnswerGeneratorService {
       savedSongCount,
       savedAnswerCount,
       skippedSongCount,
+      reusedSongCount,
+      reusedAnswerCount,
     };
   }
 

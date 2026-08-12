@@ -5,6 +5,7 @@ import { QuizAnswer } from './entities/quiz-answer.entity';
 import { QuizSong } from './entities/quiz-song.entity';
 import { GptAnswerClient } from './gpt-answer.client';
 import { QuizAnswerGeneratorService } from './quiz-answer-generator.service';
+import { QuizSongReuseService } from './quiz-song-reuse.service';
 
 describe('QuizAnswerGeneratorService.fillAnswers', () => {
   let service: QuizAnswerGeneratorService;
@@ -50,9 +51,14 @@ describe('QuizAnswerGeneratorService.fillAnswers', () => {
   const gptAnswerClientMock = {
     generateAnswersBatch: jest.fn(),
   };
+  const quizSongReuseServiceMock = {
+    findReusableYoutubeInfo: jest.fn(),
+    copyReusableAnswers: jest.fn(),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    quizSongReuseServiceMock.copyReusableAnswers.mockResolvedValue(0);
     queryBuilderMock.innerJoinAndSelect.mockReturnValue(queryBuilderMock);
     queryBuilderMock.leftJoin.mockReturnValue(queryBuilderMock);
     queryBuilderMock.where.mockReturnValue(queryBuilderMock);
@@ -105,6 +111,10 @@ describe('QuizAnswerGeneratorService.fillAnswers', () => {
         {
           provide: getRepositoryToken(QuizAnswer),
           useValue: quizAnswerRepositoryMock,
+        },
+        {
+          provide: QuizSongReuseService,
+          useValue: quizSongReuseServiceMock,
         },
       ],
     }).compile();
@@ -169,6 +179,30 @@ describe('QuizAnswerGeneratorService.fillAnswers', () => {
       gptAnswerClientMock.generateAnswersBatch.mock.calls[1][0],
     ).toHaveLength(10);
     expect(result.targetSongCount).toBe(60);
+  });
+
+  it('동일 곡을 출제한 다른 퀴즈에 정답이 있으면 GPT 호출 없이 재사용하고, 나머지 곡만 GPT로 채운다', async () => {
+    quizSongReuseServiceMock.copyReusableAnswers.mockImplementation(
+      async (songId: string) => (songId === 's1' ? 2 : 0),
+    );
+
+    const result = await service.fillAnswers();
+
+    expect(quizSongReuseServiceMock.copyReusableAnswers).toHaveBeenCalledWith(
+      's1',
+      'qs1',
+    );
+    expect(gptAnswerClientMock.generateAnswersBatch).toHaveBeenCalledWith([
+      { quizSongId: 'qs2', songNm: 'Song 2', atstNm: 'Artist2' },
+    ]);
+    expect(result).toMatchObject({
+      targetSongCount: 2,
+      reusedSongCount: 1,
+      reusedAnswerCount: 2,
+      savedSongCount: 0,
+      savedAnswerCount: 0,
+      skippedSongCount: 1,
+    });
   });
 
   it('GPT 배치 호출이 실패하면 해당 청크의 곡들을 모두 건너뛴다', async () => {

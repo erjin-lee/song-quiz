@@ -6,6 +6,7 @@ import { QuizSong } from './entities/quiz-song.entity';
 import { Quiz } from './entities/quiz.entity';
 import { Song } from './entities/song.entity';
 import { QuizGeneratorService } from './quiz-generator.service';
+import { QuizSongReuseService } from './quiz-song-reuse.service';
 import { YoutubeScraperClient } from './youtube-scraper.client';
 
 describe('QuizGeneratorService.fillYoutubeLinks', () => {
@@ -73,9 +74,15 @@ describe('QuizGeneratorService.fillYoutubeLinks', () => {
   const youtubeScraperClientMock = {
     search: jest.fn(),
   };
+  const quizSongReuseServiceMock = {
+    findReusableYoutubeInfo: jest.fn(),
+    copyReusableAnswers: jest.fn(),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    quizSongReuseServiceMock.findReusableYoutubeInfo.mockResolvedValue(null);
+    quizSongReuseServiceMock.copyReusableAnswers.mockResolvedValue(0);
     queryBuilderMock.innerJoinAndSelect.mockReturnValue(queryBuilderMock);
     queryBuilderMock.where.mockReturnValue(queryBuilderMock);
     queryBuilderMock.andWhere.mockReturnValue(queryBuilderMock);
@@ -105,6 +112,10 @@ describe('QuizGeneratorService.fillYoutubeLinks', () => {
         {
           provide: getRepositoryToken(QuizSong),
           useValue: quizSongRepositoryMock,
+        },
+        {
+          provide: QuizSongReuseService,
+          useValue: quizSongReuseServiceMock,
         },
       ],
     }).compile();
@@ -168,5 +179,46 @@ describe('QuizGeneratorService.fillYoutubeLinks', () => {
     await service.fillYoutubeLinks('1');
 
     expect(songRepositoryMock.save).not.toHaveBeenCalled();
+  });
+
+  it('동일 곡을 다른 퀴즈에서 이미 출제해 유튜브 정보가 있으면 유튜브 검색 없이 재사용하고, 정답도 함께 복사한다', async () => {
+    quizSongReuseServiceMock.findReusableYoutubeInfo.mockImplementation(
+      async (songId: string) =>
+        songId === 's1'
+          ? {
+              youtubeUrl: 'https://www.youtube.com/watch?v=reused',
+              youtubeVideoId: 'reused',
+              startSec: 10,
+              endSec: 40,
+            }
+          : null,
+    );
+    quizSongReuseServiceMock.copyReusableAnswers.mockImplementation(
+      async (songId: string) => (songId === 's1' ? 3 : 0),
+    );
+
+    const result = await service.fillYoutubeLinks('1');
+
+    expect(youtubeScraperClientMock.search).not.toHaveBeenCalledWith(
+      expect.stringContaining('Song A'),
+    );
+    expect(quizSongRepositoryMock.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        quizSongId: 'qs1',
+        youtubeUrl: 'https://www.youtube.com/watch?v=reused',
+        youtubeVideoId: 'reused',
+      }),
+    );
+    expect(quizSongReuseServiceMock.copyReusableAnswers).toHaveBeenCalledWith(
+      's1',
+      'qs1',
+    );
+    expect(result).toMatchObject({
+      targetSongCount: 2,
+      reusedYoutubeCount: 1,
+      reusedAnswerCount: 3,
+      savedSongCount: 0,
+      skippedSongCount: 1,
+    });
   });
 });

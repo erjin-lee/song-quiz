@@ -3,10 +3,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Album } from '../quiz/entities/album.entity';
 import { Artist } from '../quiz/entities/artist.entity';
-import { QuizAnswer } from '../quiz/entities/quiz-answer.entity';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
 import { Quiz } from '../quiz/entities/quiz.entity';
 import { Song } from '../quiz/entities/song.entity';
+import { QuizSongReuseService } from '../quiz/quiz-song-reuse.service';
 import { ChartScraperService } from './chart-scraper.service';
 import {
   ChartType,
@@ -80,28 +80,23 @@ describe('ChartScraperService', () => {
 
   let quizSongSeq = 0;
   const quizSongRepositoryMock = {
-    find: jest.fn(),
-    findOne: jest.fn(),
     create: jest.fn((data) => data),
     save: jest.fn(async (data) => ({
       quizSongId: `quiz-song-${++quizSongSeq}`,
-      updDt: new Date(),
       ...data,
     })),
   };
 
-  const quizAnswerRepositoryMock = {
-    find: jest.fn(),
-    create: jest.fn((data) => data),
-    save: jest.fn(async (data) => data),
+  const quizSongReuseServiceMock = {
+    findReusableYoutubeInfo: jest.fn(),
+    copyReusableAnswers: jest.fn(),
   };
 
   beforeEach(async () => {
     jest.clearAllMocks();
     quizSongSeq = 0;
-    quizSongRepositoryMock.find.mockResolvedValue([]);
-    quizSongRepositoryMock.findOne.mockResolvedValue(null);
-    quizAnswerRepositoryMock.find.mockResolvedValue([]);
+    quizSongReuseServiceMock.findReusableYoutubeInfo.mockResolvedValue(null);
+    quizSongReuseServiceMock.copyReusableAnswers.mockResolvedValue(0);
 
     melonScraperClientMock.fetchAgeChartSongs.mockResolvedValue(
       chartSongFixture,
@@ -134,8 +129,8 @@ describe('ChartScraperService', () => {
           useValue: quizSongRepositoryMock,
         },
         {
-          provide: getRepositoryToken(QuizAnswer),
-          useValue: quizAnswerRepositoryMock,
+          provide: QuizSongReuseService,
+          useValue: quizSongReuseServiceMock,
         },
       ],
     }).compile();
@@ -234,9 +229,9 @@ describe('ChartScraperService', () => {
   });
 
   it('동일 곡을 다른 퀴즈에서 이미 출제해 유튜브 정보가 있으면 재사용한다', async () => {
-    quizSongRepositoryMock.findOne.mockImplementation(
-      async ({ where }: { where: { songId: string } }) =>
-        where.songId === 'new-song-1'
+    quizSongReuseServiceMock.findReusableYoutubeInfo.mockImplementation(
+      async (songId: string) =>
+        songId === 'new-song-1'
           ? {
               quizSongId: 'other-quiz-song-1',
               youtubeUrl: 'https://youtu.be/abc',
@@ -263,38 +258,16 @@ describe('ChartScraperService', () => {
   });
 
   it('동일 곡을 출제한 다른 퀴즈 출제곡에 정답이 있으면 새 출제곡에 복사한다', async () => {
-    quizSongRepositoryMock.find.mockImplementation(
-      async ({ where }: { where: { songId: string } }) =>
-        where.songId === 'new-song-1'
-          ? [{ quizSongId: 'other-quiz-song-1', updDt: new Date('2024-01-01') }]
-          : [],
-    );
-    quizAnswerRepositoryMock.find.mockImplementation(
-      async ({ where }: { where: { quizSongId: string } }) =>
-        where.quizSongId === 'other-quiz-song-1'
-          ? [
-              {
-                answerTxt: '노래A',
-                answerType: 'TITLE',
-                confidence: 'HIGH',
-                isActive: 'Y',
-              },
-              {
-                answerTxt: '가수A',
-                answerType: 'ARTIST',
-                confidence: 'HIGH',
-                isActive: 'Y',
-              },
-            ]
-          : [],
+    quizSongReuseServiceMock.copyReusableAnswers.mockImplementation(
+      async (songId: string) => (songId === 'new-song-1' ? 2 : 0),
     );
 
     const result = await service.scrapeChart(ChartType.AG, 2010);
 
-    expect(quizAnswerRepositoryMock.save).toHaveBeenCalledWith([
-      expect.objectContaining({ answerTxt: '노래A' }),
-      expect.objectContaining({ answerTxt: '가수A' }),
-    ]);
+    expect(quizSongReuseServiceMock.copyReusableAnswers).toHaveBeenCalledWith(
+      'new-song-1',
+      'quiz-song-1',
+    );
     expect(result.reusedAnswerCount).toBe(2);
   });
 });

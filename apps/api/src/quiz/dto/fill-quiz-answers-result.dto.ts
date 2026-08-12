@@ -12,4 +12,12 @@ export class FillQuizAnswersResultDto {
 
   @ApiProperty({ description: 'GPT 응답 실패로 건너뛴 출제곡 수' })
   skippedSongCount: number;
+
+  @ApiProperty({
+    description: '다른 퀴즈의 동일한 곡에서 정답을 재사용한 출제곡 수',
+  })
+  reusedSongCount: number;
+
+  @ApiProperty({ description: '다른 퀴즈의 동일한 곡에서 복사한 정답 수' })
+  reusedAnswerCount: number;
 }

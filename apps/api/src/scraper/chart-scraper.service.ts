@@ -5,13 +5,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Not, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Album } from '../quiz/entities/album.entity';
 import { Artist } from '../quiz/entities/artist.entity';
-import { QuizAnswer } from '../quiz/entities/quiz-answer.entity';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
 import { Quiz } from '../quiz/entities/quiz.entity';
 import { Song } from '../quiz/entities/song.entity';
+import { QuizSongReuseService } from '../quiz/quiz-song-reuse.service';
 import { ScrapeChartResultDto } from './dto/scrape-chart-result.dto';
 import {
   ChartType,
@@ -37,8 +37,7 @@ export class ChartScraperService {
     private readonly quizRepository: Repository<Quiz>,
     @InjectRepository(QuizSong)
     private readonly quizSongRepository: Repository<QuizSong>,
-    @InjectRepository(QuizAnswer)
-    private readonly quizAnswerRepository: Repository<QuizAnswer>,
+    private readonly quizSongReuseService: QuizSongReuseService,
   ) {}
 
   async scrapeChart(
@@ -114,9 +113,8 @@ export class ChartScraperService {
         skippedSongCount++;
       }
 
-      const reusableYoutubeInfo = await this.findReusableYoutubeInfo(
-        song.songId,
-      );
+      const reusableYoutubeInfo =
+        await this.quizSongReuseService.findReusableYoutubeInfo(song.songId);
       if (reusableYoutubeInfo) {
         reusedYoutubeCount++;
       }
@@ -133,7 +131,7 @@ export class ChartScraperService {
         }),
       );
 
-      reusedAnswerCount += await this.copyReusableAnswers(
+      reusedAnswerCount += await this.quizSongReuseService.copyReusableAnswers(
         song.songId,
         quizSong.quizSongId,
       );
@@ -256,56 +254,6 @@ export class ChartScraperService {
       }),
     );
     return { song: created, created: true };
-  }
-
-  /** 동일한 곡을 다른 퀴즈에서 이미 출제한 적이 있다면 그 유튜브 정보를 재사용한다. */
-  private async findReusableYoutubeInfo(
-    songId: string,
-  ): Promise<QuizSong | null> {
-    return this.quizSongRepository.findOne({
-      where: { songId, youtubeUrl: Not('') },
-      order: { updDt: 'DESC' },
-    });
-  }
-
-  /**
-   * 동일한 곡을 출제한 다른 퀴즈 출제곡 중 정답이 저장된 것이 있으면
-   * 가장 최근 것을 골라 그 정답 목록을 새 퀴즈 출제곡에 복사한다.
-   */
-  private async copyReusableAnswers(
-    songId: string,
-    targetQuizSongId: string,
-  ): Promise<number> {
-    const candidateQuizSongs = await this.quizSongRepository.find({
-      where: { songId },
-      order: { updDt: 'DESC' },
-    });
-
-    for (const candidate of candidateQuizSongs) {
-      if (candidate.quizSongId === targetQuizSongId) {
-        continue;
-      }
-      const sourceAnswers = await this.quizAnswerRepository.find({
-        where: { quizSongId: candidate.quizSongId },
-      });
-      if (sourceAnswers.length === 0) {
-        continue;
-      }
-
-      await this.quizAnswerRepository.save(
-        sourceAnswers.map((answer) =>
-          this.quizAnswerRepository.create({
-            quizSongId: targetQuizSongId,
-            answerTxt: answer.answerTxt,
-            answerType: answer.answerType,
-            confidence: answer.confidence,
-            isActive: answer.isActive,
-          }),
-        ),
-      );
-      return sourceAnswers.length;
-    }
-    return 0;
   }
 
   private async wrapMelonCall<T>(fn: () => Promise<T>): Promise<T> {
