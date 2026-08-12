@@ -38,6 +38,7 @@ export interface RoomItemDto {
   roomTtl: string;
   quizId: string;
   quizTtl: string;
+  quizThumbImgUrl: string | null;
   atstIds: string[];
   atstNms: string[];
   isRandom: boolean;

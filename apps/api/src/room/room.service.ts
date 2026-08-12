@@ -151,6 +151,7 @@ export class RoomService extends EventEmitter {
       roomTtl: dto.roomTtl,
       quizId: dto.quizId,
       quizTtl: quiz.quizTtl,
+      quizThumbImgUrl: quiz.thumbImgUrl,
       atstIds: quizArtists.map((quizArtist) => quizArtist.atstId),
       atstNms: quizArtists.map((quizArtist) => quizArtist.artist.atstNm),
       isRandom: dto.isRandom,

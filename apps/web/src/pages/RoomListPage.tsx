@@ -10,6 +10,7 @@ import {
 } from '../components/CreateRoomModal';
 import { useSession } from '../context/SessionContext';
 import { ApiError } from '../api/client';
+import { getAdConfig } from '../api/config';
 import { getQuizzes } from '../api/quiz';
 import { createRoom, getRooms, joinRoom } from '../api/room';
 import { saveRoomSession } from '../utils/roomSession';
@@ -34,6 +35,7 @@ export function RoomListPage() {
   const [isJoinPreparingAd, setIsJoinPreparingAd] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [adEnabled, setAdEnabled] = useState(false);
 
   useEffect(() => {
     if (!nickname) {
@@ -75,6 +77,12 @@ export function RoomListPage() {
       .catch(() => setQuizzes([]));
   }, []);
 
+  useEffect(() => {
+    getAdConfig()
+      .then((config) => setAdEnabled(config.adEnabled))
+      .catch(() => setAdEnabled(false));
+  }, []);
+
   const filteredRooms = useMemo(() => {
     const keyword = searchQuery.trim().toLowerCase();
     if (!keyword) {
@@ -108,8 +116,8 @@ export function RoomListPage() {
   const handleJoin = (roomId: string) => {
     setJoiningRoomId(roomId);
     setListError(null);
-    setIsJoinPreparingAd(true);
-    setTimeout(async () => {
+
+    const doJoin = async () => {
       setIsJoinPreparingAd(false);
       try {
         const result = await joinRoom(roomId, { nickname });
@@ -124,7 +132,14 @@ export function RoomListPage() {
       } finally {
         setJoiningRoomId(null);
       }
-    }, JOIN_AD_DELAY_MS);
+    };
+
+    if (!adEnabled) {
+      doJoin();
+      return;
+    }
+    setIsJoinPreparingAd(true);
+    setTimeout(doJoin, JOIN_AD_DELAY_MS);
   };
 
   return (
@@ -187,6 +202,7 @@ export function RoomListPage() {
           quizzes={quizzes}
           submitting={creating}
           errorMessage={createError}
+          adEnabled={adEnabled}
           onSubmit={handleCreate}
           onClose={() => setCreateModalOpen(false)}
         />
