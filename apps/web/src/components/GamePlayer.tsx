@@ -12,6 +12,16 @@ import type { RoomItemDto } from '../types/room';
  */
 const READY_FALLBACK_TIMEOUT_MS = 8000;
 
+export interface PlaybackTriggeredDetails {
+  roundIndex: number;
+  /** 서버가 지정한 재생 예정 시각(ISO) */
+  scheduledAt: string;
+  /** 이 클라이언트가 실제로 playVideo()를 호출한, 서버 기준 보정 시각(ISO) */
+  actualAt: string;
+  /** actualAt - scheduledAt (ms). 0보다 크면 예정 시각보다 늦게 재생을 시도한 것이다. */
+  deltaMs: number;
+}
+
 interface GamePlayerProps {
   room: RoomItemDto;
   myUserId: string;
@@ -23,6 +33,8 @@ interface GamePlayerProps {
   onForceSkip: () => void;
   shortcutEnabled: boolean;
   onShortcutEnabledChange: (enabled: boolean) => void;
+  /** 동시 재생 디버깅용: 실제로 playVideo()를 호출한 시점마다 호출된다(선택). */
+  onPlaybackTriggered?: (details: PlaybackTriggeredDetails) => void;
 }
 
 // targetIso는 서버 기준 절대 시각이므로, 로컬 시계를 그대로 쓰지 않고 offsetMs로
@@ -64,6 +76,7 @@ export function GamePlayer({
   onForceSkip,
   shortcutEnabled,
   onShortcutEnabledChange,
+  onPlaybackTriggered,
 }: GamePlayerProps) {
   const isHost = room.hostUserId === myUserId;
   const round = room.currentRound;
@@ -120,12 +133,28 @@ export function GamePlayer({
         playedRoundRef.current = roundIndex;
         setIsPlayScheduleDue(true);
         playerRef.current?.getInternalPlayer()?.playVideo();
+
+        if (onPlaybackTriggered) {
+          const actualServerTimeMs = Date.now() + serverTimeOffsetMs;
+          onPlaybackTriggered({
+            roundIndex,
+            scheduledAt: playScheduledAt,
+            actualAt: new Date(actualServerTimeMs).toISOString(),
+            deltaMs: actualServerTimeMs - new Date(playScheduledAt).getTime(),
+          });
+        }
       },
       Math.max(0, delayMs),
     );
 
     return () => clearTimeout(timer);
-  }, [room.gameStatus, roundIndex, playScheduledAt, serverTimeOffsetMs]);
+  }, [
+    room.gameStatus,
+    roundIndex,
+    playScheduledAt,
+    serverTimeOffsetMs,
+    onPlaybackTriggered,
+  ]);
 
   // ready 보고는 유튜브 플레이어(iframe)가 생성되면(onReady) 바로 한다. 실제 버퍼링
   // 완료 여부까지 정밀하게 확인하려던 시도(CUED 상태 감지)는 이 컴포넌트의 플레이어
