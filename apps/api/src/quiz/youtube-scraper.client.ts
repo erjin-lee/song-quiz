@@ -7,6 +7,7 @@ const USER_AGENT =
 const YT_INITIAL_DATA_MARKER = 'var ytInitialData = ';
 const MAX_FETCH_ATTEMPTS = 3;
 const FETCH_RETRY_DELAY_MS = 800;
+const LENGTH_SECONDS_PATTERN = /"lengthSeconds":"(\d+)"/;
 
 export interface YoutubeSearchResult {
   videoId: string;
@@ -133,6 +134,17 @@ export class YoutubeScraperClient {
       return null;
     }
     return findFirstValidVideo(data);
+  }
+
+  /** 특정 videoId의 재생 페이지를 조회해 영상 길이(초)를 반환한다. 실패 시 null. */
+  async getDurationSec(videoId: string): Promise<number | null> {
+    const html = await this.getHtml(`${YOUTUBE_BASE_URL}/watch?v=${videoId}`);
+    const match = html.match(LENGTH_SECONDS_PATTERN);
+    if (!match) {
+      return null;
+    }
+    const seconds = Number(match[1]);
+    return Number.isFinite(seconds) ? seconds : null;
   }
 
   private async getHtml(url: string): Promise<string> {

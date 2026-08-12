@@ -71,6 +71,7 @@ export interface ChatHistoryEntry {
 }
 
 interface RoundRevealInfo {
+  quizSongId: string;
   songNm: string;
   atstNm: string;
   albmNm: string;
@@ -550,6 +551,7 @@ export class RoomService extends EventEmitter {
     room.currentRound.songNm = reveal?.songNm ?? null;
     room.currentRound.atstNm = reveal?.atstNm ?? null;
     room.currentRound.albmNm = reveal?.albmNm ?? null;
+    room.currentRound.quizSongId = reveal?.quizSongId ?? null;
     room.gameStatus = 'ROUND_ENDED';
 
     if (room.speedModeEnabled) {
@@ -720,6 +722,7 @@ export class RoomService extends EventEmitter {
       quizAnswers.map((answer) => answer.answerTxt),
     );
     this.currentReveal.set(roomId, {
+      quizSongId: quizSong.quizSongId,
       songNm: quizSong.song.songNm,
       atstNm: quizSong.song.artist.atstNm,
       albmNm: quizSong.song.album.albmNm,
@@ -742,6 +745,7 @@ export class RoomService extends EventEmitter {
       songNm: null,
       atstNm: null,
       albmNm: null,
+      quizSongId: null,
     };
   }
 

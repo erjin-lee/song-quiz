@@ -1,0 +1,324 @@
+import { Injectable, Logger } from '@nestjs/common';
+import {
+  INQUIRY_FUNCTION_NAMES,
+  InquiryConfidence,
+  InquiryFunctionName,
+} from './inquiry.types';
+
+const GPT_API_URL = 'https://api.openai.com/v1/chat/completions';
+const GPT_MODEL = 'gpt-5.6-luna';
+const MAX_FETCH_ATTEMPTS = 3;
+const FETCH_RETRY_DELAY_MS = 800;
+const CONFIDENCE_VALUES: InquiryConfidence[] = ['LOW', 'MEDIUM', 'HIGH'];
+
+export class InquiryGptError extends Error {}
+
+export interface InquirySongContext {
+  quizSongId: string;
+  songNm: string;
+  atstNm: string;
+  startSec: number;
+  youtubeUrl: string;
+}
+
+export interface InquiryClassifyResult {
+  matchedFunction: InquiryFunctionName | null;
+  args: Record<string, unknown> | null;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const CLASSIFY_SYSTEM_RULES = `너는 음악 퀴즈 게임에서 유저가 남긴 곡 관련 문의를 보고, 사전에 정의된 조치 함수 중 어떤 것을 사용해야 할지 판별하는 역할이다.
+
+사용 가능한 함수는 다음과 같다.
+
+1. CHANGE_START_TIME
+   설명: 퀴즈에서 재생을 시작하는 시점(초)을 변경한다.
+   유저가 "시작 지점이 이상하다", "너무 늦게/일찍 나온다", "몇 초부터 틀어달라" 등 재생 시작 시간에 대한 요청을 할 때 사용한다.
+   인자: { "startSec": number } — 변경을 원하는 새 시작 시간(초). 유저가 명시적인 초를 말하지 않았다면 문맥상 합리적으로 추정한다.
+
+2. CHANGE_LINK
+   설명: 퀴즈에 연결된 유튜브 링크를 변경한다.
+   유저가 "영상이 재생 안 된다", "링크가 잘못됐다", "다른 노래가 나온다", "삭제된 영상이다" 등 링크 자체의 문제를 제기하면서 새 링크를 제시했을 때 사용한다.
+   인자: { "youtubeUrl": string } — 유저가 제시한 새 유튜브 URL. 유효한 URL이 없으면 이 함수를 선택하지 않는다.
+
+3. ADD_ANSWER
+   설명: 특정 답안을 정답으로 추가 인정한다.
+   유저가 "이 답도 정답 처리해달라", "이렇게 입력했는데 오답 처리됐다" 등 정답으로 인정되어야 할 표현을 제시했을 때 사용한다.
+   인자: { "answerTxt": string, "answerType": string | null } — 정답으로 추가할 문자열. answerType은 타입에 따라 ABBREVIATION, ALIAS, NORMALIZ, ORIGINAL, TRANSLIT 로 구분하고, 확실하지 않으면 null로 둔다.
+
+## 판별 규칙
+
+- 유저의 문의 내용이 위 세 함수 중 하나와 명확히 관련 있을 때만 매칭한다.
+- 단순 불만, 칭찬, 조치가 불가능한 요청(예: 노래 자체를 바꿔달라, 점수를 올려달라 등)은 매칭하지 않는다.
+- 함수를 선택했다면 실행에 필요한 인자를 반드시 함께 반환한다. 인자를 확정할 수 없으면 매칭하지 않는다.
+- 애매하더라도 문의 내용에서 합리적으로 유추 가능하면 매칭을 시도한다.
+
+## 출력 형식
+
+설명, 마크다운, 코드블록 없이 반드시 아래 JSON 형식 하나만 출력한다.
+
+매칭되는 함수가 있을 때:
+{ "matchedFunction": "CHANGE_START_TIME", "args": { "startSec": 30 } }
+
+매칭되는 함수가 없을 때:
+{ "matchedFunction": null, "args": null }`;
+
+const VERIFY_SYSTEM_RULES: Record<InquiryFunctionName, string> = {
+  CHANGE_START_TIME: `너는 한국 음악 퀴즈 출제곡의 재생 시작 시간 변경 요청이 타당한지 판별하는 역할이다.
+
+곡 정보와 유저가 원래 남긴 문의, 1차로 추출된 변경 요청 시간(초)이 주어진다.
+
+다음 기준으로 신뢰도를 판단한다.
+
+HIGH: 문의 내용과 변경 요청 시간이 명확하게 일치하고, 요청 자체가 합리적이다(예: 도입부가 너무 길다는 불만과 함께 구체적인 초를 제시).
+MEDIUM: 요청 취지는 타당해 보이나 구체적인 시간값이 유저 문의에서 명시적으로 확인되지는 않고 추정된 값이다.
+LOW: 요청 취지가 불명확하거나, 값이 비합리적(음수, 지나치게 큰 값 등)이거나, 장난/스팸으로 의심된다.
+
+## 출력 형식
+
+설명 없이 반드시 아래 JSON 형식만 출력한다.
+
+{ "confidence": "HIGH" }`,
+
+  CHANGE_LINK: `너는 한국 음악 퀴즈 출제곡의 유튜브 링크 교체 요청이 타당한지 판별하는 역할이다.
+
+곡 정보(원래 제목, 아티스트, 기존 링크)와 유저 문의, 유저가 제시한 새 링크가 주어진다.
+
+다음 기준으로 신뢰도를 판단한다.
+
+HIGH: 문의 내용이 기존 링크의 명확한 문제(재생 불가, 다른 곡 재생, 삭제된 영상 등)를 구체적으로 설명하고, 제시된 링크가 유효한 유튜브 URL 형식이다.
+MEDIUM: 문제 제기는 타당해 보이나 근거가 다소 불명확하다.
+LOW: 문제 제기가 불명확하거나, 제시된 링크가 유튜브 URL 형식이 아니거나, 장난/스팸으로 의심된다.
+
+## 출력 형식
+
+설명 없이 반드시 아래 JSON 형식만 출력한다.
+
+{ "confidence": "HIGH" }`,
+
+  ADD_ANSWER: `너는 한국 음악 퀴즈의 정답 후보 데이터를 판별하는 역할이다.
+
+목표는 사용자가 노래 제목을 입력했을 때 정답으로 인정할 수 있는 다양한 제목 표현을 판단하는 것이다.
+
+특히 다음 두 가지를 중요하게 판단한다.
+
+* 원제에서 자연스럽게 파생되는 표기인가?
+* 한국에서 실제로 사용되거나 사용할 가능성이 높은 약칭·줄임말인가?
+
+단, 곡 제목과 의미가 전혀 다른 표현이나 너무 억지로 만든 약칭은 포함하지 않는다.
+
+영어 제목은 한국 사용자가 실제로 입력할 법한 자연스러운 한글 발음인지 고려한다.
+단순한 번역/직역은 판별하지 않는다.
+
+원곡의 제목, 아티스트와 유저가 정답으로 인정해달라고 요청한 표현이 주어진다.
+
+다음 기준으로 신뢰도를 판단한다.
+
+HIGH: 실제로 널리 쓰이거나 원곡 제목과의 대응이 매우 명확한 표현이다.
+MEDIUM: 실제 사용 여부는 확실하지 않지만 한국 사용자가 자연스럽게 사용할 가능성이 높은 표현이다.
+LOW: 원곡 제목과 관계가 불명확하거나, 다른 곡과 혼동될 수 있거나, 근거 없이 임의로 만들어진 표현이다.
+
+## ANSWER_TYPE 지정
+
+타입에 따라 ABBREVIATION, ALIAS, NORMALIZ, ORIGINAL, TRANSLIT 로 구분한다.
+
+
+## 출력 형식
+
+설명 없이 반드시 아래 JSON 형식만 출력한다.
+
+{ "confidence": "HIGH", "type": "ORIGINAL" }`,
+};
+
+function buildClassifyUserMessage(
+  song: InquirySongContext,
+  content: string,
+): string {
+  return `아래 요청에 적절한 함수가 있는지 확인해줘.
+
+곡 정보:
+- QUIZ_SONG_ID: ${song.quizSongId}
+- 제목: ${song.songNm}
+- 아티스트: ${song.atstNm}
+- 현재 재생 시작 시간(초): ${song.startSec}
+- 현재 유튜브 링크: ${song.youtubeUrl}
+
+요청: ${content}`;
+}
+
+function buildVerifyUserMessage(
+  functionName: InquiryFunctionName,
+  song: InquirySongContext,
+  content: string,
+  args: Record<string, unknown>,
+): string {
+  switch (functionName) {
+    case 'CHANGE_START_TIME':
+      return `곡 "${song.songNm}"(아티스트: ${song.atstNm})의 재생 시작 시간을 현재 ${song.startSec}초에서 ${String(
+        args.startSec,
+      )}초로 변경해달라는 요청이야. 원래 문의 내용: ${content}\n\n이 요청은 적절할까?`;
+    case 'CHANGE_LINK':
+      return `곡 "${song.songNm}"(아티스트: ${song.atstNm})의 유튜브 링크를 현재 "${song.youtubeUrl}"에서 "${String(
+        args.youtubeUrl,
+      )}"로 교체해달라는 요청이야. 원래 문의 내용: ${content}\n\n이 요청은 적절할까?`;
+    case 'ADD_ANSWER':
+      return `${song.atstNm}의 노래 ${song.songNm}의 정답 후보로 "${String(
+        args.answerTxt,
+      )}"은 적절할까? 원래 문의 내용: ${content}`;
+  }
+}
+
+function parseClassifyResult(content: string): InquiryClassifyResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    throw new InquiryGptError(`GPT 응답이 JSON 형식이 아닙니다: ${content}`);
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    throw new InquiryGptError(`GPT 응답 형식이 올바르지 않습니다: ${content}`);
+  }
+
+  const matchedFunction = (parsed as { matchedFunction?: unknown })
+    .matchedFunction;
+  if (matchedFunction === null) {
+    return { matchedFunction: null, args: null };
+  }
+  if (
+    typeof matchedFunction !== 'string' ||
+    !INQUIRY_FUNCTION_NAMES.includes(matchedFunction as InquiryFunctionName)
+  ) {
+    return { matchedFunction: null, args: null };
+  }
+
+  const args = (parsed as { args?: unknown }).args;
+  if (!args || typeof args !== 'object') {
+    return { matchedFunction: null, args: null };
+  }
+
+  return {
+    matchedFunction: matchedFunction as InquiryFunctionName,
+    args: args as Record<string, unknown>,
+  };
+}
+
+function parseVerifyResult(content: string): InquiryConfidence {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    throw new InquiryGptError(`GPT 응답이 JSON 형식이 아닙니다: ${content}`);
+  }
+
+  const confidence =
+    parsed && typeof parsed === 'object'
+      ? (parsed as { confidence?: unknown }).confidence
+      : undefined;
+  if (
+    typeof confidence !== 'string' ||
+    !CONFIDENCE_VALUES.includes(confidence as InquiryConfidence)
+  ) {
+    throw new InquiryGptError(
+      `GPT 응답에 유효한 confidence가 없습니다: ${content}`,
+    );
+  }
+
+  return confidence as InquiryConfidence;
+}
+
+@Injectable()
+export class InquiryGptClient {
+  private readonly logger = new Logger(InquiryGptClient.name);
+
+  async classify(
+    song: InquirySongContext,
+    content: string,
+  ): Promise<InquiryClassifyResult> {
+    const raw = await this.callChatJson(
+      CLASSIFY_SYSTEM_RULES,
+      buildClassifyUserMessage(song, content),
+    );
+    return parseClassifyResult(raw);
+  }
+
+  async verifyConfidence(
+    functionName: InquiryFunctionName,
+    song: InquirySongContext,
+    content: string,
+    args: Record<string, unknown>,
+  ): Promise<InquiryConfidence> {
+    const raw = await this.callChatJson(
+      VERIFY_SYSTEM_RULES[functionName],
+      buildVerifyUserMessage(functionName, song, content, args),
+    );
+    return parseVerifyResult(raw);
+  }
+
+  private async callChatJson(
+    systemMessage: string,
+    userMessage: string,
+  ): Promise<string> {
+    const apiKey = process.env.GPT_SECRET_KEY;
+    if (!apiKey) {
+      throw new InquiryGptError(
+        'GPT_SECRET_KEY 환경변수가 설정되지 않았습니다.',
+      );
+    }
+
+    const body = JSON.stringify({
+      model: GPT_MODEL,
+      messages: [
+        { role: 'system', content: systemMessage },
+        { role: 'user', content: userMessage },
+      ],
+      response_format: { type: 'json_object' },
+    });
+
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt++) {
+      try {
+        const response = await fetch(GPT_API_URL, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body,
+        });
+        if (!response.ok) {
+          throw new InquiryGptError(
+            `GPT API 응답이 올바르지 않습니다. (status: ${response.status})`,
+          );
+        }
+
+        const data = (await response.json()) as {
+          choices?: { message?: { content?: string } }[];
+        };
+        const responseContent = data.choices?.[0]?.message?.content;
+        if (!responseContent) {
+          throw new InquiryGptError('GPT 응답에 content가 없습니다.');
+        }
+
+        return responseContent;
+      } catch (error) {
+        lastError = error;
+        this.logger.warn(
+          `GPT 문의 처리 요청 실패(시도 ${attempt}/${MAX_FETCH_ATTEMPTS})`,
+        );
+        if (attempt < MAX_FETCH_ATTEMPTS) {
+          await delay(FETCH_RETRY_DELAY_MS * attempt);
+        }
+      }
+    }
+
+    this.logger.error('GPT 문의 처리 요청 최종 실패', lastError);
+    throw lastError instanceof Error
+      ? lastError
+      : new InquiryGptError('GPT 요청에 실패했습니다.');
+  }
+}

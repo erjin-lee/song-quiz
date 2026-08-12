@@ -111,4 +111,12 @@ export class RoundPublicStateDto {
     nullable: true,
   })
   albmNm: string | null;
+
+  @ApiProperty({
+    description:
+      '정답 공개 전에는 null, 라운드 종료 후 문의 접수용 quizSongId 공개',
+    example: null,
+    nullable: true,
+  })
+  quizSongId: string | null;
 }
