@@ -21,8 +21,10 @@ export class QuizSongItemDto {
   albmNm: string;
 
   @ApiProperty({
-    description: '유튜브 URL. 재생 시작 지점(t 파라미터)이 포함되어 있음',
-    example: 'https://www.youtube.com/watch?v=pDvBiB1waBk&t=132',
+    description:
+      '유튜브 URL. 재생 시작 지점(t 파라미터)이 포함되어 있으며, 실제 저장된 ' +
+      '시작 지점(startSec)보다 1초 앞당겨서 내려준다.',
+    example: 'https://www.youtube.com/watch?v=pDvBiB1waBk&t=131',
   })
   youtubeUrl: string;
 
