@@ -12,6 +12,7 @@ import { getRoomById, leaveRoom } from '../api/room';
 import { getQuizSongCount } from '../api/quiz';
 import { createRoomSocket, type RoomSocket } from '../api/socket';
 import { useServerClockOffset } from '../hooks/useServerClockOffset';
+import { useSession } from '../context/SessionContext';
 import {
   clearRoomSession,
   loadRoomSession,
@@ -19,7 +20,9 @@ import {
 } from '../utils/roomSession';
 import { sortParticipantsByScore } from '../utils/participants';
 import { playCorrectAnswerSound } from '../utils/sound';
+import { isDebugUser, truncateForDebugChat } from '../utils/debugUser';
 import type { RoomItemDto } from '../types/room';
+import type { PlaybackTriggeredDetails } from '../components/GamePlayer';
 
 interface LocationState {
   room: RoomItemDto;
@@ -46,6 +49,14 @@ export function RoomGamePage() {
   const chatPanelRef = useRef<ChatPanelHandle>(null);
   const [socket, setSocket] = useState<RoomSocket | null>(null);
   const serverTimeOffsetMs = useServerClockOffset(socket);
+  const { nickname } = useSession();
+  // 디버그 이벤트 로그 발송 시 "서버 기준 현재 시각"을 계산하는 데 쓴다. onAny
+  // 리스너는 소켓 생성 시 한 번만 등록되므로 offset 갱신 값을 최신으로 읽으려면
+  // ref로 참조해야 한다(그렇지 않으면 등록 시점의 값에 고정된다).
+  const serverTimeOffsetMsRef = useRef(serverTimeOffsetMs);
+  useEffect(() => {
+    serverTimeOffsetMsRef.current = serverTimeOffsetMs;
+  }, [serverTimeOffsetMs]);
 
   // 방 상태를 서버에서 최신으로 확인/복구한다. 새로고침으로 location.state가
   // 사라진 경우 로컬스토리지에 저장해둔 { roomId, userId }로 이어서 입장한다.
@@ -150,6 +161,28 @@ export function RoomGamePage() {
       ]);
     });
 
+    // 동시 재생 디버깅용: 닉네임에 DEBUG_USER가 포함된 유저는 이 소켓이 받는 모든
+    // 이벤트를 채팅으로도 발송해, 여러 클라이언트의 이벤트 수신 시점을 방 채팅
+    // 로그(sentAt 타임스탬프 포함)로 비교할 수 있게 한다. chat:message는 이 로직이
+    // 만든 디버그 메시지 자신도 다시 받게 되므로(서버가 방 전체에 echo), 무한 루프를
+    // 막기 위해 로깅 대상에서 제외한다.
+    if (isDebugUser(nickname)) {
+      socket.onAny((event, ...args) => {
+        if (event === 'chat:message') {
+          return;
+        }
+        const payload = args.length <= 1 ? args[0] : args;
+        const serverTimeIso = new Date(
+          Date.now() + serverTimeOffsetMsRef.current,
+        ).toISOString();
+        socket.emit('chat:message', {
+          message: truncateForDebugChat(
+            `[DEBUG] event=${event} serverTimeAt=${serverTimeIso} payload=${JSON.stringify(payload)}`,
+          ),
+        });
+      });
+    }
+
     socket.connect();
     socket.emit('room:enter', { roomId, userId });
 
@@ -157,7 +190,7 @@ export function RoomGamePage() {
       socket.disconnect();
       setSocket(null);
     };
-  }, [roomId, userId]);
+  }, [roomId, userId, nickname]);
 
   const quizId = room?.quizId;
   useEffect(() => {
@@ -238,6 +271,20 @@ export function RoomGamePage() {
     socket?.emit('game:force-skip');
   }, [socket]);
 
+  // 동시 재생 디버깅용: 이 클라이언트가 실제로 playVideo()를 호출한 시점(예약
+  // 시각과의 오차 포함)을 채팅으로 발송한다. DEBUG_USER가 아니면 아무것도 하지 않는다.
+  const handlePlaybackTriggered = useCallback(
+    (details: PlaybackTriggeredDetails) => {
+      if (!isDebugUser(nickname)) {
+        return;
+      }
+      socket?.emit('chat:message', {
+        message: `[DEBUG] playback roundIndex=${details.roundIndex} scheduledAt=${details.scheduledAt} actualAt=${details.actualAt} deltaMs=${details.deltaMs}`,
+      });
+    },
+    [socket, nickname],
+  );
+
   if (!room || !userId) {
     return (
       <div className="flex min-h-screen items-center justify-center text-sm text-slate-400">
@@ -300,6 +347,7 @@ export function RoomGamePage() {
               onNextRound={handleNextRound}
               onSkip={handleSkip}
               onForceSkip={handleForceSkip}
+              onPlaybackTriggered={handlePlaybackTriggered}
               shortcutEnabled={nextRoundShortcutEnabled}
               onShortcutEnabledChange={setNextRoundShortcutEnabled}
             />
