@@ -16,6 +16,8 @@ import { saveRoomSession } from '../utils/roomSession';
 import type { QuizListItemDto } from '../types/quiz';
 import type { RoomItemDto } from '../types/room';
 
+const ADSENSE_SLOT_ROOM_LIST = import.meta.env.VITE_ADSENSE_SLOT_ROOM_LIST;
+
 const ROOM_LIST_POLL_MS = 5000;
 const JOIN_AD_DELAY_MS = 3000;
 
@@ -150,11 +152,7 @@ export function RoomListPage() {
         </div>
 
         <div className="flex justify-center">
-          <AdBanner
-            unitId={"DAN-HY8VhIUN3ZhwbYKP"}
-            width={320}
-            height={50}
-          />
+          <AdBanner slotId={ADSENSE_SLOT_ROOM_LIST} />
         </div>
       </div>
 

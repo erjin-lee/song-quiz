@@ -1,6 +1,6 @@
 import { AdBanner } from './AdBanner';
 
-const ADFIT_UNIT_ID = 'DAN-u5RBfdl0nhCmMwD0';
+const ADSENSE_SLOT_ROOM_GAME = import.meta.env.VITE_ADSENSE_SLOT_ROOM_GAME;
 
 interface RoomActionOverlayProps {
   message: string;
@@ -12,7 +12,7 @@ export function RoomActionOverlay({ message }: RoomActionOverlayProps) {
     <div className="fixed inset-0 z-10 flex items-center justify-center bg-slate-900/40 px-4">
       <div className="flex flex-col items-center gap-4 rounded-2xl bg-white p-6 shadow-xl">
         <p className="text-sm font-semibold text-slate-600">{message}</p>
-        <AdBanner unitId={ADFIT_UNIT_ID} width={320} height={250} />
+        <AdBanner slotId={ADSENSE_SLOT_ROOM_GAME} />
       </div>
     </div>
   );
