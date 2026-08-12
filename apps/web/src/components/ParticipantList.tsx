@@ -26,6 +26,7 @@ interface ParticipantListProps {
   hostUserId: string;
   currentUserId: string;
   maxUserCnt: number;
+  correctUserIds?: string[];
 }
 
 export function ParticipantList({
@@ -33,6 +34,7 @@ export function ParticipantList({
   hostUserId,
   currentUserId,
   maxUserCnt,
+  correctUserIds = [],
 }: ParticipantListProps) {
   const emptySlotCount = Math.max(maxUserCnt - participants.length, 0);
 
@@ -40,13 +42,16 @@ export function ParticipantList({
     <div className="flex flex-col gap-3">
       {participants.map((participant) => {
         const isMe = participant.userId === currentUserId;
+        const isCorrect = correctUserIds.includes(participant.userId);
         return (
           <div
             key={participant.userId}
-            className={`flex items-center gap-3 rounded-2xl border px-4 py-3 shadow-sm ${
-              isMe
-                ? 'border-amber-300 bg-amber-50'
-                : 'border-transparent bg-white'
+            className={`flex items-center gap-3 rounded-2xl border px-4 py-3 shadow-sm transition-colors duration-300 ${
+              isCorrect
+                ? 'animate-[correct-answer-blink_2s_ease-in-out_1_forwards] border-emerald-400 bg-emerald-50'
+                : isMe
+                  ? 'border-amber-300 bg-amber-50'
+                  : 'border-transparent bg-white'
             }`}
           >
             <span

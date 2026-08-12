@@ -3,3 +3,19 @@
 body {
   @apply bg-gradient-to-br from-purple-100 via-fuchsia-50 to-pink-100 text-slate-800;
 }
+
+/* 정답을 맞힌 유저 카드에 2초간 3번 깜빡이며 빛나는 효과를 준다. 마지막 프레임은
+   깜빡임이 끝난 뒤에도 유지되는 은은한 테두리 광원 상태다(animation-fill-mode: forwards). */
+@keyframes correct-answer-blink {
+  0%,
+  30%,
+  60%,
+  100% {
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.35);
+  }
+  15%,
+  45%,
+  75% {
+    box-shadow: 0 0 18px 5px rgba(16, 185, 129, 0.9);
+  }
+}
