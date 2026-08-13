@@ -7,10 +7,10 @@ import {
 } from 'typeorm';
 import { QuizSong } from './quiz-song.entity';
 
-@Entity('SQ_QUIZ_ANSWER')
+@Entity('SQ_QUIZ_SONG_ANSWER')
 export class QuizAnswer {
   @PrimaryGeneratedColumn({
-    name: 'QUIZ_ANSWER_ID',
+    name: 'QUIZ_SONG_ANSWER_ID',
     type: 'bigint',
     unsigned: true,
   })
