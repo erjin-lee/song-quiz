@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { OpenAiChatClient } from '../openai/openai-chat.client';
 import { QuizAnswer } from '../quiz/entities/quiz-answer.entity';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
 import { YoutubeScraperClient } from '../quiz/youtube-scraper.client';
@@ -19,6 +20,7 @@ import { InquiryService } from './inquiry.service';
   providers: [
     InquiryService,
     InquiryGptClient,
+    OpenAiChatClient,
     InquiryActionService,
     YoutubeScraperClient,
   ],

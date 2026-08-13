@@ -2,6 +2,7 @@ import './node-fetch-polyfill';
 import { Injectable, Logger } from '@nestjs/common';
 import * as cheerio from 'cheerio';
 import type { AnyNode } from 'domhandler';
+import { delay } from '../common/delay';
 
 const MELON_BASE_URL = 'https://www.melon.com';
 const USER_AGENT =
@@ -78,10 +79,6 @@ function toIsoDate(text: string): string | null {
     return null;
   }
   return trimmed.replace(/\./g, '-');
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 @Injectable()

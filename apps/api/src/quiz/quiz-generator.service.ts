@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
+import { delay } from '../common/delay';
 import { FillQuizYoutubeLinksResultDto } from './dto/fill-quiz-youtube-links-result.dto';
 import { GenerateQuizResultDto } from './dto/generate-quiz-result.dto';
 import { Artist } from './entities/artist.entity';
@@ -13,7 +14,7 @@ import { QuizSong } from './entities/quiz-song.entity';
 import { Quiz } from './entities/quiz.entity';
 import { Song } from './entities/song.entity';
 import { QuizSongReuseService } from './quiz-song-reuse.service';
-import { YoutubeScraperClient, delay } from './youtube-scraper.client';
+import { YoutubeScraperClient } from './youtube-scraper.client';
 
 const YOUTUBE_REQUEST_DELAY_MS = 300;
 const YOUTUBE_BATCH_SIZE = 10;
