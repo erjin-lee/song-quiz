@@ -10,11 +10,11 @@ export class Inquiry {
   @PrimaryGeneratedColumn({
     name: 'INQUIRY_ID',
     type: 'bigint',
-    unsigned: false,
+    unsigned: true,
   })
   inquiryId: string;
 
-  @Column({ name: 'QUIZ_SONG_ID', type: 'bigint', unsigned: false })
+  @Column({ name: 'QUIZ_SONG_ID', type: 'bigint', unsigned: true })
   quizSongId: string;
 
   @Column({ name: 'ROOM_ID', type: 'varchar', length: 255 })

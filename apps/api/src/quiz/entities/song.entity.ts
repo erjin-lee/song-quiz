@@ -37,7 +37,7 @@ export class Song {
   @Column({ name: 'RLS_DT', type: 'date', nullable: true })
   rlsDt: string | null;
 
-  @Column({ name: 'YTB_LINK', type: 'varchar', length: 512, nullable: true })
+  @Column({ name: 'YTB_URL', type: 'varchar', length: 512, nullable: true })
   ytbLink: string | null;
 
   @Column({ name: 'CRT_DT', type: 'datetime' })

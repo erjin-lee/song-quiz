@@ -33,7 +33,7 @@ export class QuizAnswer {
   @Column({ name: 'CONFIDENCE', type: 'varchar', length: 8, nullable: true })
   confidence: string | null;
 
-  @Column({ name: 'IS_ACTIVE', type: 'varchar', length: 1, default: 'Y' })
+  @Column({ name: 'ACTIVE_YN', type: 'char', length: 1, default: 'Y' })
   isActive: string;
 
   @Column({ name: 'CRT_DT', type: 'datetime' })
