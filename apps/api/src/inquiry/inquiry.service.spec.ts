@@ -161,7 +161,7 @@ describe('InquiryService', () => {
         expect.objectContaining({
           status: 'REJECTED',
           resultMessage:
-            '요청 내용을 확인했지만 자동으로 처리하기 어려운 문의예요. 관리자가 다시 확인할게요.',
+            '요청하신 내용은 반려되었습니다. 자동으로 처리하기 어려운 문의라 관리자가 다시 확인할게요.',
         }),
       );
       expect(roomGatewayMock.emitInquiryResult).toHaveBeenCalledWith(
@@ -170,7 +170,30 @@ describe('InquiryService', () => {
       );
     });
 
-    it('신뢰도가 충분하면 조치를 실행하고 COMPLETED로 종료한다', async () => {
+    it('신뢰도가 MEDIUM이면 조치를 실행하지 않고 PENDING_REVIEW로 종료한다', async () => {
+      gptClientMock.classify.mockResolvedValue({
+        matchedFunction: 'CHANGE_START_TIME',
+        args: { startSec: 30 },
+      });
+      gptClientMock.verifyConfidence.mockResolvedValue('MEDIUM');
+
+      await callProcess('iq1');
+
+      expect(actionServiceMock.changeStartTime).not.toHaveBeenCalled();
+      expect(inquiryRepositoryMock.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'PENDING_REVIEW',
+          resultMessage:
+            '요청하신 내용이 검토 목록에 추가되었습니다. 확인 후 반영해드릴게요.',
+        }),
+      );
+      expect(roomGatewayMock.emitInquiryResult).toHaveBeenCalledWith(
+        'user1',
+        expect.objectContaining({ status: 'PENDING_REVIEW' }),
+      );
+    });
+
+    it('신뢰도가 HIGH면 조치를 실행하고 COMPLETED로 종료한다', async () => {
       gptClientMock.classify.mockResolvedValue({
         matchedFunction: 'CHANGE_START_TIME',
         args: { startSec: 30 },
@@ -214,7 +237,7 @@ describe('InquiryService', () => {
         matchedFunction: 'ADD_ANSWER',
         args: { answerTxt: '너닿', answerType: null },
       });
-      gptClientMock.verifyConfidence.mockResolvedValue('MEDIUM');
+      gptClientMock.verifyConfidence.mockResolvedValue('HIGH');
       actionServiceMock.addAnswer.mockRejectedValue(new Error('DB 오류'));
 
       await callProcess('iq1');

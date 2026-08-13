@@ -20,7 +20,9 @@ import {
 const MAX_INQUIRIES_PER_GAME = 5;
 const RECEIVED_MESSAGE = '문의가 접수되었습니다. 확인 후 알려드릴게요.';
 const REJECTED_MESSAGE =
-  '요청 내용을 확인했지만 자동으로 처리하기 어려운 문의예요. 관리자가 다시 확인할게요.';
+  '요청하신 내용은 반려되었습니다. 자동으로 처리하기 어려운 문의라 관리자가 다시 확인할게요.';
+const PENDING_REVIEW_MESSAGE =
+  '요청하신 내용이 검토 목록에 추가되었습니다. 확인 후 반영해드릴게요.';
 
 class InquiryArgsValidationError extends Error {}
 
@@ -121,6 +123,18 @@ export class InquiryService {
         args,
         confidence,
         REJECTED_MESSAGE,
+      );
+      return;
+    }
+
+    if (confidence === 'MEDIUM') {
+      await this.finish(
+        inquiry,
+        'PENDING_REVIEW',
+        matchedFunction,
+        args,
+        confidence,
+        PENDING_REVIEW_MESSAGE,
       );
       return;
     }
@@ -232,7 +246,10 @@ export class InquiryService {
     }
   }
 
-  /** NO_MATCH/FAILED는 DB에만 기록하고(침묵), REJECTED/COMPLETED만 유저에게 소켓으로 알린다. */
+  /**
+   * NO_MATCH/FAILED는 DB에만 기록하고(침묵),
+   * REJECTED/PENDING_REVIEW/COMPLETED만 유저에게 소켓으로 알린다.
+   */
   private async finish(
     inquiry: Inquiry,
     status: InquiryStatus,
@@ -248,7 +265,11 @@ export class InquiryService {
     inquiry.resultMessage = resultMessage;
     await this.inquiryRepository.save(inquiry);
 
-    if (status === 'REJECTED' || status === 'COMPLETED') {
+    if (
+      status === 'REJECTED' ||
+      status === 'PENDING_REVIEW' ||
+      status === 'COMPLETED'
+    ) {
       this.roomGateway.emitInquiryResult(inquiry.userId, {
         inquiryId: inquiry.inquiryId,
         status,

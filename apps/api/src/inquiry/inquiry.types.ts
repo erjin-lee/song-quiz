@@ -1,5 +1,10 @@
 export type InquiryStatus =
-  'RECEIVED' | 'NO_MATCH' | 'REJECTED' | 'COMPLETED' | 'FAILED';
+  | 'RECEIVED'
+  | 'NO_MATCH'
+  | 'REJECTED'
+  | 'PENDING_REVIEW'
+  | 'COMPLETED'
+  | 'FAILED';
 
 export type InquiryConfidence = 'LOW' | 'MEDIUM' | 'HIGH';
 

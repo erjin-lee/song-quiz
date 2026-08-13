@@ -19,7 +19,7 @@ export interface RoomErrorEvent {
 
 export interface InquiryResultEvent {
   inquiryId: string;
-  status: 'REJECTED' | 'COMPLETED';
+  status: 'REJECTED' | 'PENDING_REVIEW' | 'COMPLETED';
   message: string;
 }
 
