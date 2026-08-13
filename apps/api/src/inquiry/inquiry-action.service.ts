@@ -38,9 +38,10 @@ export class InquiryActionService {
   }
 
   /**
-   * 새 링크에 t 파라미터가 있으면 그 값을 시작 시간으로, 없으면 영상 페이지를
-   * 스크래핑해 전체 재생시간의 절반을 시작 시간으로 쓴다. 종료 시간은 시작 시간 +
-   * QUIZ_SONG_CLIP_SEC으로 고정한다(quiz-generator.service.ts와 동일한 클립 길이).
+   * 새 링크의 영상 길이를 스크래핑해 DURATION을 갱신한다. 새 링크에 t 파라미터가
+   * 있으면 그 값을 시작 시간으로, 없으면 스크래핑한 재생시간의 절반을 시작 시간으로
+   * 쓴다. 종료 시간은 시작 시간 + QUIZ_SONG_CLIP_SEC으로 고정한다
+   * (quiz-generator.service.ts와 동일한 클립 길이).
    */
   async changeLink(quizSongId: string, args: ChangeLinkArgs): Promise<void> {
     const quizSong = await this.findQuizSongOrThrow(quizSongId);
@@ -48,15 +49,21 @@ export class InquiryActionService {
       args.youtubeUrl,
     );
 
+    const durationSec = videoId
+      ? await this.youtubeScraperClient.getDurationSec(
+          videoId,
+          `quizSongId: ${quizSongId}`,
+        )
+      : null;
+
     const startSec =
       startSecFromUrl ??
-      (videoId
-        ? await this.estimateStartSecFromDuration(videoId, quizSongId)
-        : null) ??
+      (durationSec !== null ? Math.round(durationSec / 2) : null) ??
       quizSong.startSec;
 
     quizSong.youtubeUrl = args.youtubeUrl;
     quizSong.youtubeVideoId = videoId;
+    quizSong.durationSec = durationSec;
     quizSong.startSec = startSec;
     quizSong.endSec = startSec + QUIZ_SONG_CLIP_SEC;
     await this.quizSongRepository.save(quizSong);
@@ -75,17 +82,6 @@ export class InquiryActionService {
       isActive: 'Y',
     });
     await this.quizAnswerRepository.save(quizAnswer);
-  }
-
-  private async estimateStartSecFromDuration(
-    videoId: string,
-    quizSongId: string,
-  ): Promise<number | null> {
-    const durationSec = await this.youtubeScraperClient.getDurationSec(
-      videoId,
-      `quizSongId: ${quizSongId}`,
-    );
-    return durationSec !== null ? Math.round(durationSec / 2) : null;
   }
 
   private async findQuizSongOrThrow(quizSongId: string): Promise<QuizSong> {
