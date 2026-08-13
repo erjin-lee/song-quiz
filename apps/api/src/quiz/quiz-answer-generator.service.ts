@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { delay } from '../common/delay';
 import { FillQuizAnswersResultDto } from './dto/fill-quiz-answers-result.dto';
 import { QuizAnswer } from './entities/quiz-answer.entity';
 import { QuizSong } from './entities/quiz-song.entity';
@@ -9,10 +10,6 @@ import { QuizSongReuseService } from './quiz-song-reuse.service';
 
 const GPT_SONGS_PER_REQUEST = 50;
 const GPT_BATCH_REQUEST_DELAY_MS = 1000;
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function chunk<T>(items: T[], size: number): T[][] {
   const chunks: T[][] = [];

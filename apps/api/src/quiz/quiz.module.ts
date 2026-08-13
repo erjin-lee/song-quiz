@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { OpenAiChatClient } from '../openai/openai-chat.client';
 import { Album } from './entities/album.entity';
 import { Artist } from './entities/artist.entity';
 import { QuizAnswer } from './entities/quiz-answer.entity';
@@ -34,6 +35,7 @@ import { YoutubeScraperClient } from './youtube-scraper.client';
     YoutubeScraperClient,
     QuizAnswerGeneratorService,
     GptAnswerClient,
+    OpenAiChatClient,
     QuizSongReuseService,
   ],
   exports: [QuizSongReuseService],

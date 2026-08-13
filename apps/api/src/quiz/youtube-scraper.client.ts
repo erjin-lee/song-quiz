@@ -1,5 +1,6 @@
 import '../scraper/node-fetch-polyfill';
 import { Injectable, Logger } from '@nestjs/common';
+import { delay } from '../common/delay';
 
 const YOUTUBE_BASE_URL = 'https://www.youtube.com';
 const USER_AGENT =
@@ -117,10 +118,6 @@ function findFirstValidVideo(node: unknown): YoutubeSearchResult | null {
     }
   }
   return null;
-}
-
-export function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 @Injectable()
