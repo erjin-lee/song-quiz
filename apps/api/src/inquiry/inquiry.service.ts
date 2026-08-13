@@ -93,6 +93,7 @@ export class InquiryService {
       atstNm: quizSong.song.artist.atstNm,
       startSec: quizSong.startSec,
       youtubeUrl: quizSong.youtubeUrl,
+      durationSec: quizSong.durationSec,
     };
 
     const classifyResult = await this.gptClient.classify(

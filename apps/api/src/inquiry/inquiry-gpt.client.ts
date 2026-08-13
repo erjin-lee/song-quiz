@@ -23,6 +23,7 @@ export interface InquirySongContext {
   atstNm: string;
   startSec: number;
   youtubeUrl: string;
+  durationSec: number | null;
 }
 
 export interface InquiryClassifyResult {

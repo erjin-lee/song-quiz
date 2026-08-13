@@ -40,13 +40,13 @@ export const CLASSIFY_SYSTEM_RULES = `너는 음악 퀴즈 게임에서 유저�
 export const VERIFY_SYSTEM_RULES: Record<InquiryFunctionName, string> = {
   CHANGE_START_TIME: `너는 한국 음악 퀴즈 출제곡의 재생 시작 시간 변경 요청이 타당한지 판별하는 역할이다.
 
-곡 정보와 유저가 원래 남긴 문의, 1차로 추출된 변경 요청 시간(초)이 주어진다.
+곡 정보(영상 길이 포함)와 유저가 원래 남긴 문의, 1차로 추출된 변경 요청 시간(초)이 주어진다.
 
 다음 기준으로 신뢰도를 판단한다.
 
 HIGH: 문의 내용과 변경 요청 시간이 명확하게 일치하고, 요청 자체가 합리적이다(예: 도입부가 너무 길다는 불만과 함께 구체적인 초를 제시).
 MEDIUM: 요청 취지는 타당해 보이나 구체적인 시간값이 유저 문의에서 명시적으로 확인되지는 않고 추정된 값이다.
-LOW: 요청 취지가 불명확하거나, 값이 비합리적(음수, 지나치게 큰 값 등)이거나, 장난/스팸으로 의심된다.
+LOW: 요청 취지가 불명확하거나, 값이 비합리적(음수, 영상 길이를 초과하거나 근접한 값 등)이거나, 장난/스팸으로 의심된다.
 
 ## 출력 형식
 
@@ -74,15 +74,16 @@ LOW: 문제 제기가 불명확하거나, 제시된 링크가 유튜브 URL 형�
 
 목표는 사용자가 노래 제목을 입력했을 때 정답으로 인정할 수 있는 다양한 제목 표현을 판단하는 것이다.
 
-특히 다음 두 가지를 중요하게 판단한다.
+특히 다음 세 가지를 중요하게 판단한다.
 
 * 원제에서 자연스럽게 파생되는 표기인가?
 * 한국에서 실제로 사용되거나 사용할 가능성이 높은 약칭·줄임말인가?
+* 케이팝 팬들이 자주 사용될 법한 표현인가?
 
 단, 곡 제목과 의미가 전혀 다른 표현이나 너무 억지로 만든 약칭은 포함하지 않는다.
 
 영어 제목은 한국 사용자가 실제로 입력할 법한 자연스러운 한글 발음인지 고려한다.
-단순한 번역/직역은 판별하지 않는다.
+단순한 번역/직역은 인정하지 않는다.
 
 원곡의 제목, 아티스트와 유저가 정답으로 인정해달라고 요청한 표현이 주어진다.
 
@@ -127,10 +128,13 @@ export function buildVerifyUserMessage(
   args: Record<string, unknown>,
 ): string {
   switch (functionName) {
-    case 'CHANGE_START_TIME':
-      return `곡 "${song.songNm}"(아티스트: ${song.atstNm})의 재생 시작 시간을 현재 ${song.startSec}초에서 ${String(
+    case 'CHANGE_START_TIME': {
+      const durationText =
+        song.durationSec !== null ? `${song.durationSec}초` : '알 수 없음';
+      return `곡 "${song.songNm}"(아티스트: ${song.atstNm}, 영상 길이: ${durationText})의 재생 시작 시간을 현재 ${song.startSec}초에서 ${String(
         args.startSec,
       )}초로 변경해달라는 요청이야. 원래 문의 내용: ${content}\n\n이 요청은 적절할까?`;
+    }
     case 'CHANGE_LINK':
       return `곡 "${song.songNm}"(아티스트: ${song.atstNm})의 유튜브 링크를 현재 "${song.youtubeUrl}"에서 "${String(
         args.youtubeUrl,
