@@ -236,6 +236,7 @@ describe('ChartScraperService', () => {
               quizSongId: 'other-quiz-song-1',
               youtubeUrl: 'https://youtu.be/abc',
               youtubeVideoId: 'abc',
+              durationSec: 240,
               startSec: 12,
               endSec: 30,
             }
@@ -250,6 +251,7 @@ describe('ChartScraperService', () => {
         songId: 'new-song-1',
         youtubeUrl: 'https://youtu.be/abc',
         youtubeVideoId: 'abc',
+        durationSec: 240,
         startSec: 12,
         endSec: 30,
       }),

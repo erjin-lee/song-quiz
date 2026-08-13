@@ -39,6 +39,9 @@ export class QuizSong {
   })
   youtubeVideoId: string | null;
 
+  @Column({ name: 'DURATION', type: 'int', nullable: true })
+  durationSec: number | null;
+
   @Column({ name: 'START_SEC', type: 'int', unsigned: true, default: 0 })
   startSec: number | null;
 

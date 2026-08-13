@@ -126,6 +126,7 @@ export class ChartScraperService {
           quizSeq: quizSeq++,
           youtubeUrl: reusableYoutubeInfo?.youtubeUrl ?? '',
           youtubeVideoId: reusableYoutubeInfo?.youtubeVideoId ?? null,
+          durationSec: reusableYoutubeInfo?.durationSec ?? null,
           startSec: reusableYoutubeInfo?.startSec ?? 0,
           endSec: reusableYoutubeInfo?.endSec ?? null,
         }),
