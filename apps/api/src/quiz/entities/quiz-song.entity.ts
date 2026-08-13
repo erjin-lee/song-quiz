@@ -28,18 +28,18 @@ export class QuizSong {
   @Column({ name: 'QUIZ_SEQ', type: 'int', unsigned: true })
   quizSeq: number;
 
-  @Column({ name: 'YOUTUBE_URL', type: 'varchar', length: 500 })
+  @Column({ name: 'YTB_URL', type: 'varchar', length: 500 })
   youtubeUrl: string;
 
   @Column({
-    name: 'YOUTUBE_VIDEO_ID',
+    name: 'YTB_VIDEO_ID',
     type: 'varchar',
     length: 50,
     nullable: true,
   })
   youtubeVideoId: string | null;
 
-  @Column({ name: 'DURATION', type: 'int', nullable: true })
+  @Column({ name: 'DURATION', type: 'int', unsigned: true, nullable: true })
   durationSec: number | null;
 
   @Column({ name: 'START_SEC', type: 'int', unsigned: true, default: 0 })
