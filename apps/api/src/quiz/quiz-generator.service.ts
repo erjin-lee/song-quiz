@@ -69,7 +69,11 @@ export class QuizGeneratorService {
 
     for (let i = 0; i < songs.length; i++) {
       const song = songs[i];
-      const result = await this.searchSongVideo(artist.atstNm, song.songNm);
+      const result = await this.searchSongVideo(
+        artist.atstNm,
+        song.songNm,
+        `songId: ${song.songId}`,
+      );
       if (!result) {
         skippedSongCount++;
         await this.waitBetweenYoutubeRequests(i + 1);
@@ -171,6 +175,7 @@ export class QuizGeneratorService {
       const result = await this.searchSongVideo(
         quizSong.song.artist.atstNm,
         quizSong.song.songNm,
+        `quizSongId: ${quizSong.quizSongId}`,
       );
       if (!result) {
         skippedSongCount++;
@@ -216,9 +221,16 @@ export class QuizGeneratorService {
     }
   }
 
-  private async searchSongVideo(atstNm: string, songNm: string) {
+  private async searchSongVideo(
+    atstNm: string,
+    songNm: string,
+    logContext: string,
+  ) {
     try {
-      return await this.youtubeScraperClient.search(`${atstNm} - ${songNm}`);
+      return await this.youtubeScraperClient.search(
+        `${atstNm} - ${songNm}`,
+        logContext,
+      );
     } catch (error) {
       this.logger.warn(
         `유튜브 검색 실패, 곡을 건너뜁니다. (${atstNm} - ${songNm})`,

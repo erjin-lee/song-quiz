@@ -50,7 +50,9 @@ export class InquiryActionService {
 
     const startSec =
       startSecFromUrl ??
-      (videoId ? await this.estimateStartSecFromDuration(videoId) : null) ??
+      (videoId
+        ? await this.estimateStartSecFromDuration(videoId, quizSongId)
+        : null) ??
       quizSong.startSec;
 
     quizSong.youtubeUrl = args.youtubeUrl;
@@ -77,8 +79,12 @@ export class InquiryActionService {
 
   private async estimateStartSecFromDuration(
     videoId: string,
+    quizSongId: string,
   ): Promise<number | null> {
-    const durationSec = await this.youtubeScraperClient.getDurationSec(videoId);
+    const durationSec = await this.youtubeScraperClient.getDurationSec(
+      videoId,
+      `quizSongId: ${quizSongId}`,
+    );
     return durationSec !== null ? Math.round(durationSec / 2) : null;
   }
 
