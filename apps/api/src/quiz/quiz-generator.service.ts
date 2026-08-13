@@ -94,6 +94,7 @@ export class QuizGeneratorService {
           quizSeq: quizSeq++,
           youtubeUrl,
           youtubeVideoId: result.videoId,
+          durationSec: result.durationSec,
           startSec,
           endSec: startSec + QUIZ_SONG_CLIP_SEC,
         }),
@@ -152,6 +153,7 @@ export class QuizGeneratorService {
 
       quizSong.youtubeUrl = reusable.youtubeUrl;
       quizSong.youtubeVideoId = reusable.youtubeVideoId;
+      quizSong.durationSec = reusable.durationSec;
       quizSong.startSec = reusable.startSec;
       quizSong.endSec = reusable.endSec;
       await this.quizSongRepository.save(quizSong);
@@ -189,6 +191,7 @@ export class QuizGeneratorService {
 
       quizSong.youtubeUrl = youtubeUrl;
       quizSong.youtubeVideoId = result.videoId;
+      quizSong.durationSec = result.durationSec;
       quizSong.startSec = startSec;
       quizSong.endSec = startSec + QUIZ_SONG_CLIP_SEC;
       await this.quizSongRepository.save(quizSong);

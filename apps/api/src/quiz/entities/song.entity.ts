@@ -28,8 +28,8 @@ export class Song {
   @Column({ name: 'TRACK_NO', type: 'int', unsigned: true, nullable: true })
   trackNo: number | null;
 
-  @Column({ name: 'PLAY_TM', type: 'int', unsigned: true, nullable: true })
-  playTm: number | null;
+  @Column({ name: 'DURATION', type: 'int', unsigned: true, nullable: true })
+  durationSec: number | null;
 
   @Column({ name: 'TITLE_YN', type: 'char', length: 1, default: 'N' })
   titleYn: string;

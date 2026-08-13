@@ -152,6 +152,7 @@ describe('QuizGeneratorService.fillYoutubeLinks', () => {
         quizSongId: 'qs1',
         youtubeUrl: expect.stringContaining('vid-a'),
         youtubeVideoId: 'vid-a',
+        durationSec: 200,
       }),
     );
     expect(songRepositoryMock.save).toHaveBeenCalledTimes(1);
@@ -188,6 +189,7 @@ describe('QuizGeneratorService.fillYoutubeLinks', () => {
           ? {
               youtubeUrl: 'https://www.youtube.com/watch?v=reused',
               youtubeVideoId: 'reused',
+              durationSec: 180,
               startSec: 10,
               endSec: 40,
             }
@@ -207,6 +209,7 @@ describe('QuizGeneratorService.fillYoutubeLinks', () => {
         quizSongId: 'qs1',
         youtubeUrl: 'https://www.youtube.com/watch?v=reused',
         youtubeVideoId: 'reused',
+        durationSec: 180,
       }),
     );
     expect(quizSongReuseServiceMock.copyReusableAnswers).toHaveBeenCalledWith(
