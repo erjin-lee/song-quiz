@@ -26,7 +26,7 @@ interface TimeSyncResponse {
 
 export interface InquiryResultPayload {
   inquiryId: string;
-  status: 'REJECTED' | 'COMPLETED';
+  status: 'REJECTED' | 'PENDING_REVIEW' | 'COMPLETED';
   message: string;
 }
 
