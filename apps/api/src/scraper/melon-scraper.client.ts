@@ -11,6 +11,7 @@ const ALBUM_PAGE_SIZE = 15;
 const SONG_PAGE_SIZE = 50;
 const PAGE_FETCH_DELAY_MS = 200;
 const MAX_PAGE_ITERATIONS = 500;
+const FETCH_TIMEOUT_MS = 10_000;
 
 export enum ChartType {
   AG = 'AG',
@@ -90,6 +91,7 @@ export class MelonScraperClient {
   async fetchArtist(melonArtistId: string): Promise<ScrapedArtist | null> {
     const url = `${MELON_BASE_URL}/artist/timeline.htm?artistId=${melonArtistId}`;
     const html = await this.getHtml(url);
+    await delay(PAGE_FETCH_DELAY_MS);
     const $ = cheerio.load(html);
 
     const titleEl = $('p.title_atist');
@@ -215,11 +217,15 @@ export class MelonScraperClient {
   ): ScrapedAlbum | null {
     const melonAlbmId = extractId($li.find('.thumb').attr('href'));
     if (!melonAlbmId) {
+      this.logger.warn('앨범 파싱 실패: 앨범 ID를 찾을 수 없습니다.');
       return null;
     }
 
     const albmNm = $li.find('dt a.ellipsis').first().text().trim();
     if (!albmNm) {
+      this.logger.warn(
+        `앨범 파싱 실패: 앨범명을 찾을 수 없습니다. (melonAlbmId: ${melonAlbmId})`,
+      );
       return null;
     }
 
@@ -244,6 +250,7 @@ export class MelonScraperClient {
       .find('input.input_check[name="input_check"]')
       .attr('value');
     if (!melonSongId) {
+      this.logger.warn('곡 파싱 실패: 곡 ID를 찾을 수 없습니다.');
       return null;
     }
 
@@ -253,6 +260,9 @@ export class MelonScraperClient {
       .text()
       .trim();
     if (!songNm) {
+      this.logger.warn(
+        `곡 파싱 실패: 곡명을 찾을 수 없습니다. (melonSongId: ${melonSongId})`,
+      );
       return null;
     }
 
@@ -273,6 +283,7 @@ export class MelonScraperClient {
       .find('input.input_check[name="input_check"]')
       .attr('value');
     if (!melonSongId) {
+      this.logger.warn('차트 곡 파싱 실패: 곡 ID를 찾을 수 없습니다.');
       return null;
     }
 
@@ -281,6 +292,9 @@ export class MelonScraperClient {
       $titleAnchor.attr('title') || $titleAnchor.text(),
     );
     if (!songNm) {
+      this.logger.warn(
+        `차트 곡 파싱 실패: 곡명을 찾을 수 없습니다. (melonSongId: ${melonSongId})`,
+      );
       return null;
     }
 
@@ -292,6 +306,9 @@ export class MelonScraperClient {
       $tr.find('div.ellipsis.rank03 a').first().text(),
     );
     if (!melonAlbmId || !albmNm) {
+      this.logger.warn(
+        `차트 곡 파싱 실패: 앨범 정보를 찾을 수 없습니다. (melonSongId: ${melonSongId})`,
+      );
       return null;
     }
 
@@ -311,6 +328,9 @@ export class MelonScraperClient {
       .get()
       .filter((artist): artist is ScrapedChartArtist => artist !== null);
     if (artists.length === 0) {
+      this.logger.warn(
+        `차트 곡 파싱 실패: 아티스트 정보를 찾을 수 없습니다. (melonSongId: ${melonSongId})`,
+      );
       return null;
     }
 
@@ -333,6 +353,7 @@ export class MelonScraperClient {
           'X-Requested-With': 'XMLHttpRequest',
           ...(referer ? { Referer: referer } : {}),
         },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
     } catch (error) {
       this.logger.error(`멜론 요청 실패: ${url}`, error);

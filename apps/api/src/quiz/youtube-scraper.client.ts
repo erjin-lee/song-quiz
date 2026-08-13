@@ -6,7 +6,8 @@ const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const YT_INITIAL_DATA_MARKER = 'var ytInitialData = ';
 const MAX_FETCH_ATTEMPTS = 3;
-const FETCH_RETRY_DELAY_MS = 800;
+const FETCH_RETRY_DELAY_MS = 1300;
+const FETCH_TIMEOUT_MS = 10_000;
 const LENGTH_SECONDS_PATTERN = /"lengthSeconds":"(\d+)"/;
 
 export interface YoutubeSearchResult {
@@ -126,9 +127,12 @@ export function delay(ms: number): Promise<void> {
 export class YoutubeScraperClient {
   private readonly logger = new Logger(YoutubeScraperClient.name);
 
-  async search(query: string): Promise<YoutubeSearchResult | null> {
+  async search(
+    query: string,
+    logContext?: string,
+  ): Promise<YoutubeSearchResult | null> {
     const url = `${YOUTUBE_BASE_URL}/results?search_query=${encodeURIComponent(query)}`;
-    const html = await this.getHtml(url);
+    const html = await this.getHtml(url, logContext);
     const data = extractYtInitialData(html);
     if (!data) {
       return null;
@@ -137,8 +141,14 @@ export class YoutubeScraperClient {
   }
 
   /** 특정 videoId의 재생 페이지를 조회해 영상 길이(초)를 반환한다. 실패 시 null. */
-  async getDurationSec(videoId: string): Promise<number | null> {
-    const html = await this.getHtml(`${YOUTUBE_BASE_URL}/watch?v=${videoId}`);
+  async getDurationSec(
+    videoId: string,
+    logContext?: string,
+  ): Promise<number | null> {
+    const html = await this.getHtml(
+      `${YOUTUBE_BASE_URL}/watch?v=${videoId}`,
+      logContext,
+    );
     const match = html.match(LENGTH_SECONDS_PATTERN);
     if (!match) {
       return null;
@@ -147,17 +157,19 @@ export class YoutubeScraperClient {
     return Number.isFinite(seconds) ? seconds : null;
   }
 
-  private async getHtml(url: string): Promise<string> {
+  private async getHtml(url: string, logContext?: string): Promise<string> {
     let lastError: unknown;
+    const logSuffix = logContext ? ` (${logContext})` : '';
 
     for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt++) {
       try {
         const response = await fetch(url, {
+          redirect: 'manual',
           headers: {
-            redirect: 'manual',
             'User-Agent': USER_AGENT,
             'Accept-Language': 'ko-KR,ko;q=0.9',
           },
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         });
         if (!response.ok) {
           throw new YoutubeFetchError(
@@ -168,7 +180,7 @@ export class YoutubeScraperClient {
       } catch (error) {
         lastError = error;
         this.logger.warn(
-          `유튜브 요청 실패(시도 ${attempt}/${MAX_FETCH_ATTEMPTS}): ${url}`,
+          `유튜브 요청 실패(시도 ${attempt}/${MAX_FETCH_ATTEMPTS}): ${url}${logSuffix}`,
         );
         if (attempt < MAX_FETCH_ATTEMPTS) {
           await delay(FETCH_RETRY_DELAY_MS * attempt);
@@ -176,7 +188,7 @@ export class YoutubeScraperClient {
       }
     }
 
-    this.logger.error(`유튜브 요청 최종 실패: ${url}`, lastError);
+    this.logger.error(`유튜브 요청 최종 실패: ${url}${logSuffix}`, lastError);
     throw lastError instanceof Error
       ? lastError
       : new YoutubeFetchError(
