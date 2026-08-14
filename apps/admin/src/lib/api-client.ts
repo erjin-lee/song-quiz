@@ -3,6 +3,14 @@ const API_BASE_URL =
 
 const TOKEN_STORAGE_KEY = 'admin_token';
 
+export const AUTH_EXPIRED_EVENT = 'admin-auth-expired';
+
+function notifyAuthExpired(): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+  }
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -41,6 +49,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (response.status === 401) {
     clearToken();
+    notifyAuthExpired();
   }
 
   if (!response.ok) {

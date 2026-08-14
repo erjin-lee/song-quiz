@@ -8,7 +8,12 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { clearToken, getStoredToken, verifyLogin } from '@/lib/api-client';
+import {
+  AUTH_EXPIRED_EVENT,
+  clearToken,
+  getStoredToken,
+  verifyLogin,
+} from '@/lib/api-client';
 
 interface AuthContextValue {
   isAuthenticated: boolean;
@@ -30,6 +35,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setIsAuthenticated(getStoredToken() !== null);
     setIsInitialized(true);
+  }, []);
+
+  useEffect(() => {
+    // api-client가 401 응답을 받아 토큰을 지웠을 때도 인증 상태를 즉시 반영해
+    // RequireAuth가 로그인 화면으로 리다이렉트하게 한다.
+    const handleAuthExpired = () => setIsAuthenticated(false);
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+    return () => {
+      window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+    };
   }, []);
 
   const login = async (username: string, password: string) => {
