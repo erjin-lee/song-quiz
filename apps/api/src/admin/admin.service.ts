@@ -11,6 +11,7 @@ import { In, Repository } from 'typeorm';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
 import { User } from '../user/entities/user.entity';
 import { AdminInquiryItemDto } from './dto/admin-inquiry-item.dto';
+import { AdminInquiryListDto } from './dto/admin-inquiry-list.dto';
 import { AdminItemDto } from './dto/admin-item.dto';
 import { AdminLoginRequestDto } from './dto/admin-login-request.dto';
 import { AdminLoginResponseDto } from './dto/admin-login-response.dto';
@@ -49,8 +50,11 @@ export class AdminService {
 
   async getInquiries(
     query: GetAdminInquiriesQueryDto,
-  ): Promise<AdminInquiryItemDto[]> {
-    const inquiries = await this.inquiryRepository.find({
+  ): Promise<AdminInquiryListDto> {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 50;
+
+    const [inquiries, total] = await this.inquiryRepository.findAndCount({
       where: {
         ...(query.status?.length && { status: In(query.status) }),
         ...(query.confidence?.length && { confidence: In(query.confidence) }),
@@ -59,6 +63,8 @@ export class AdminService {
         }),
       },
       order: { crtDt: 'DESC' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
     });
 
     const quizSongIds = [...new Set(inquiries.map((i) => i.quizSongId))];
@@ -70,7 +76,7 @@ export class AdminService {
       : [];
     const quizSongById = new Map(quizSongs.map((qs) => [qs.quizSongId, qs]));
 
-    return inquiries.map((inquiry) => {
+    const items = inquiries.map((inquiry) => {
       const quizSong = quizSongById.get(inquiry.quizSongId);
       return {
         inquiryId: inquiry.inquiryId,
@@ -89,6 +95,8 @@ export class AdminService {
         crtDt: inquiry.crtDt,
       };
     });
+
+    return { items, total, page, pageSize };
   }
 
   approveInquiry(inquiryId: string): Promise<void> {

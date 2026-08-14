@@ -22,7 +22,7 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
-import { AdminInquiryItemDto } from './dto/admin-inquiry-item.dto';
+import { AdminInquiryListDto } from './dto/admin-inquiry-list.dto';
 import { AdminItemDto } from './dto/admin-item.dto';
 import { AdminMeDto } from './dto/admin-me.dto';
 import { ChangeAdminPasswordRequestDto } from './dto/change-admin-password-request.dto';
@@ -49,15 +49,13 @@ export class AdminController {
   }
 
   @Get('inquiries')
-  @ApiOperation({ summary: '문의 처리 현황 목록 조회(상태/신뢰도 필터 가능)' })
-  @ApiOkResponse({
-    description: '문의 목록',
-    type: AdminInquiryItemDto,
-    isArray: true,
+  @ApiOperation({
+    summary: '문의 처리 현황 목록 조회(상태/신뢰도 필터, 페이지네이션)',
   })
+  @ApiOkResponse({ description: '문의 목록', type: AdminInquiryListDto })
   getInquiries(
     @Query() query: GetAdminInquiriesQueryDto,
-  ): Promise<AdminInquiryItemDto[]> {
+  ): Promise<AdminInquiryListDto> {
     return this.adminService.getInquiries(query);
   }
 

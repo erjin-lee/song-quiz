@@ -28,6 +28,7 @@ describe('AdminService', () => {
 
   const inquiryRepositoryMock = {
     find: jest.fn(),
+    findAndCount: jest.fn(),
   };
 
   const quizSongRepositoryMock = {
@@ -76,56 +77,78 @@ describe('AdminService', () => {
 
   describe('getInquiries', () => {
     it('필터 조건을 Inquiry 리포지토리 조회에 그대로 전달하고 최신순으로 조회한다', async () => {
-      inquiryRepositoryMock.find.mockResolvedValue([]);
+      inquiryRepositoryMock.findAndCount.mockResolvedValue([[], 0]);
       quizSongRepositoryMock.find.mockResolvedValue([]);
 
       await service.getInquiries({
         status: ['PENDING_REVIEW', 'REJECTED'],
         confidence: ['MEDIUM'],
         matchedFunction: ['ADD_ANSWER'],
+        page: 1,
+        pageSize: 50,
       });
 
-      expect(inquiryRepositoryMock.find).toHaveBeenCalledWith({
+      expect(inquiryRepositoryMock.findAndCount).toHaveBeenCalledWith({
         where: {
           status: In(['PENDING_REVIEW', 'REJECTED']),
           confidence: In(['MEDIUM']),
           matchedFunction: In(['ADD_ANSWER']),
         },
         order: { crtDt: 'DESC' },
+        skip: 0,
+        take: 50,
       });
     });
 
     it('필터 배열이 비어 있으면 해당 조건을 where에 포함하지 않는다', async () => {
-      inquiryRepositoryMock.find.mockResolvedValue([]);
+      inquiryRepositoryMock.findAndCount.mockResolvedValue([[], 0]);
       quizSongRepositoryMock.find.mockResolvedValue([]);
 
       await service.getInquiries({
         status: [],
         confidence: [],
         matchedFunction: [],
+        page: 1,
+        pageSize: 50,
       });
 
-      expect(inquiryRepositoryMock.find).toHaveBeenCalledWith({
+      expect(inquiryRepositoryMock.findAndCount).toHaveBeenCalledWith({
         where: {},
         order: { crtDt: 'DESC' },
+        skip: 0,
+        take: 50,
       });
     });
 
+    it('page/pageSize로 skip/take를 계산한다', async () => {
+      inquiryRepositoryMock.findAndCount.mockResolvedValue([[], 0]);
+      quizSongRepositoryMock.find.mockResolvedValue([]);
+
+      await service.getInquiries({ page: 3, pageSize: 20 });
+
+      expect(inquiryRepositoryMock.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 40, take: 20 }),
+      );
+    });
+
     it('출제곡을 찾을 수 있으면 곡명/아티스트명을 채워 반환한다', async () => {
-      inquiryRepositoryMock.find.mockResolvedValue([
-        {
-          inquiryId: '1',
-          quizSongId: 'qs-1',
-          roomId: 'room-1',
-          userId: 'user-1',
-          content: '시작 지점이 이상해요',
-          matchedFunction: 'CHANGE_START_TIME',
-          matchedArgs: { startSec: 10 },
-          confidence: 'HIGH',
-          status: 'COMPLETED',
-          resultMessage: '반영되었습니다.',
-          crtDt: new Date('2026-01-01'),
-        },
+      inquiryRepositoryMock.findAndCount.mockResolvedValue([
+        [
+          {
+            inquiryId: '1',
+            quizSongId: 'qs-1',
+            roomId: 'room-1',
+            userId: 'user-1',
+            content: '시작 지점이 이상해요',
+            matchedFunction: 'CHANGE_START_TIME',
+            matchedArgs: { startSec: 10 },
+            confidence: 'HIGH',
+            status: 'COMPLETED',
+            resultMessage: '반영되었습니다.',
+            crtDt: new Date('2026-01-01'),
+          },
+        ],
+        1,
       ]);
       quizSongRepositoryMock.find.mockResolvedValue([
         {
@@ -141,38 +164,48 @@ describe('AdminService', () => {
         where: { quizSongId: expect.anything() },
         relations: { song: { artist: true } },
       });
-      expect(result).toEqual([
+      expect(result).toEqual(
         expect.objectContaining({
-          inquiryId: '1',
-          quizSongId: 'qs-1',
-          songNm: '바이, 썸머',
-          atstNm: '아이유',
-          youtubeUrl: 'https://www.youtube.com/watch?v=abc123&t=10',
+          total: 1,
+          page: 1,
+          pageSize: 50,
+          items: [
+            expect.objectContaining({
+              inquiryId: '1',
+              quizSongId: 'qs-1',
+              songNm: '바이, 썸머',
+              atstNm: '아이유',
+              youtubeUrl: 'https://www.youtube.com/watch?v=abc123&t=10',
+            }),
+          ],
         }),
-      ]);
+      );
     });
 
     it('출제곡을 찾을 수 없으면 songNm/atstNm이 null이다', async () => {
-      inquiryRepositoryMock.find.mockResolvedValue([
-        {
-          inquiryId: '1',
-          quizSongId: 'missing-song',
-          roomId: 'room-1',
-          userId: 'user-1',
-          content: '문의',
-          matchedFunction: null,
-          matchedArgs: null,
-          confidence: null,
-          status: 'NO_MATCH',
-          resultMessage: null,
-          crtDt: new Date('2026-01-01'),
-        },
+      inquiryRepositoryMock.findAndCount.mockResolvedValue([
+        [
+          {
+            inquiryId: '1',
+            quizSongId: 'missing-song',
+            roomId: 'room-1',
+            userId: 'user-1',
+            content: '문의',
+            matchedFunction: null,
+            matchedArgs: null,
+            confidence: null,
+            status: 'NO_MATCH',
+            resultMessage: null,
+            crtDt: new Date('2026-01-01'),
+          },
+        ],
+        1,
       ]);
       quizSongRepositoryMock.find.mockResolvedValue([]);
 
       const result = await service.getInquiries({});
 
-      expect(result).toEqual([
+      expect(result.items).toEqual([
         expect.objectContaining({
           songNm: null,
           atstNm: null,
@@ -182,12 +215,13 @@ describe('AdminService', () => {
     });
 
     it('문의가 없으면 QuizSong 조회를 생략한다', async () => {
-      inquiryRepositoryMock.find.mockResolvedValue([]);
+      inquiryRepositoryMock.findAndCount.mockResolvedValue([[], 0]);
 
       const result = await service.getInquiries({});
 
       expect(quizSongRepositoryMock.find).not.toHaveBeenCalled();
-      expect(result).toEqual([]);
+      expect(result.items).toEqual([]);
+      expect(result.total).toBe(0);
     });
   });
 

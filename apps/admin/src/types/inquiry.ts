@@ -29,3 +29,10 @@ export interface AdminInquiryItemDto {
   resultMessage: string | null;
   crtDt: string;
 }
+
+export interface AdminInquiryListDto {
+  items: AdminInquiryItemDto[];
+  total: number;
+  page: number;
+  pageSize: number;
+}

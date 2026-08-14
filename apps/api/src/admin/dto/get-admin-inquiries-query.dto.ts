@@ -1,5 +1,5 @@
-import { Transform } from 'class-transformer';
-import { IsArray, IsIn, IsOptional } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { IsArray, IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 import {
   INQUIRY_FUNCTION_NAMES,
   InquiryConfidence,
@@ -44,4 +44,17 @@ export class GetAdminInquiriesQueryDto {
   @IsArray()
   @IsIn(INQUIRY_FUNCTION_NAMES, { each: true })
   matchedFunction?: InquiryFunctionName[];
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  pageSize?: number = 50;
 }
