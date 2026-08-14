@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Inquiry } from '../inquiry/entities/inquiry.entity';
 import { InquiryModule } from '../inquiry/inquiry.module';
@@ -16,6 +17,7 @@ import { AdminAuthGuard } from './guards/admin-auth.guard';
     TypeOrmModule.forFeature([Inquiry, QuizSong, User]),
     InquiryModule,
     JwtModule.register({}),
+    ThrottlerModule.forRoot([{ name: 'login', ttl: 60_000, limit: 5 }]),
   ],
   controllers: [AdminController, AdminAuthController],
   providers: [AdminService, AdminAuthGuard, AdminSeedService],
