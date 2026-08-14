@@ -11,6 +11,10 @@ setDefaultResultOrder('ipv4first');
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // 리버스 프록시(nginx/ALB) 1단계 뒤에서 서비스되므로, X-Forwarded-For의
+  // 마지막 값을 실제 클라이언트 IP로 신뢰한다. 그렇지 않으면 ThrottlerGuard가
+  // 프록시 IP 기준으로만 rate limit을 적용해 모든 사용자가 이를 공유하게 된다.
+  app.set('trust proxy', 1);
   const corsOriginEnv = process.env.CORS_ORIGIN?.trim();
   const corsOrigins = corsOriginEnv
     ? corsOriginEnv.split(',').map((origin) => origin.trim())
