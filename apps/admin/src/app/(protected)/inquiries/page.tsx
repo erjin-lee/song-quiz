@@ -114,6 +114,7 @@ export default function InquiryListPage() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const latestRequestIdRef = useRef(0);
+  const fetchInquiriesRef = useRef<() => Promise<void>>();
 
   const fetchInquiries = useCallback(async () => {
     const requestId = ++latestRequestIdRef.current;
@@ -127,6 +128,12 @@ export default function InquiryListPage() {
         pageSize: PAGE_SIZE,
       });
       if (latestRequestIdRef.current !== requestId) {
+        return;
+      }
+      if (data.items.length === 0 && data.total > 0 && page > 1) {
+        // 마지막 페이지의 항목을 모두 처리해 현재 페이지가 비면, total 기준
+        // 마지막 유효 페이지로 되돌아간다(재조회는 page 변경에 의해 트리거됨).
+        setPage(Math.max(1, Math.ceil(data.total / PAGE_SIZE)));
         return;
       }
       setInquiries(data.items);
@@ -146,6 +153,8 @@ export default function InquiryListPage() {
       }
     }
   }, [statusFilter, confidenceFilter, requestTypeFilter, page]);
+
+  fetchInquiriesRef.current = fetchInquiries;
 
   useEffect(() => {
     fetchInquiries();
@@ -178,7 +187,9 @@ export default function InquiryListPage() {
     const results = await Promise.allSettled(targetIds.map((id) => actionFn(id)));
     const failedCount = results.filter((r) => r.status === 'rejected').length;
 
-    await fetchInquiries();
+    // 처리 중 필터/페이지가 바뀌었을 수 있으므로 클릭 시점에 캡처된 값이
+    // 아니라 항상 최신 fetchInquiries를 참조해 재조회한다.
+    await fetchInquiriesRef.current?.();
     setActionLoading(false);
 
     if (failedCount > 0) {
