@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
@@ -246,6 +246,148 @@ describe('InquiryService', () => {
         expect.objectContaining({ status: 'FAILED', resultMessage: null }),
       );
       expect(roomGatewayMock.emitInquiryResult).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('approve', () => {
+    const pendingInquiry = {
+      ...baseInquiry,
+      status: 'PENDING_REVIEW',
+      matchedFunction: 'CHANGE_START_TIME',
+      matchedArgs: { startSec: 30 },
+      confidence: 'MEDIUM',
+    };
+
+    it('문의를 찾을 수 없으면 404를 던진다', async () => {
+      inquiryRepositoryMock.findOne.mockResolvedValue(null);
+
+      await expect(service.approve('iq1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('판별된 조치 정보가 없으면 400을 던진다', async () => {
+      inquiryRepositoryMock.findOne.mockResolvedValue({
+        ...pendingInquiry,
+        matchedFunction: null,
+        matchedArgs: null,
+        confidence: null,
+      });
+
+      await expect(service.approve('iq1')).rejects.toThrow(BadRequestException);
+      expect(actionServiceMock.changeStartTime).not.toHaveBeenCalled();
+    });
+
+    it('검토 대기 상태가 아니어도 판별된 조치가 있으면 승인할 수 있다', async () => {
+      inquiryRepositoryMock.findOne.mockResolvedValue({
+        ...pendingInquiry,
+        status: 'REJECTED',
+      });
+
+      await service.approve('iq1');
+
+      expect(actionServiceMock.changeStartTime).toHaveBeenCalledWith('qs1', {
+        startSec: 30,
+      });
+      expect(inquiryRepositoryMock.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'COMPLETED' }),
+      );
+    });
+
+    it('이미 완료된 정답 추가 문의는 재승인 시 400을 던진다', async () => {
+      inquiryRepositoryMock.findOne.mockResolvedValue({
+        ...pendingInquiry,
+        status: 'COMPLETED',
+        matchedFunction: 'ADD_ANSWER',
+        matchedArgs: { answerTxt: '너닿', answerType: null },
+      });
+
+      await expect(service.approve('iq1')).rejects.toThrow(BadRequestException);
+      expect(actionServiceMock.addAnswer).not.toHaveBeenCalled();
+    });
+
+    it('완료된 시간/링크 변경 문의는 재승인할 수 있다', async () => {
+      inquiryRepositoryMock.findOne.mockResolvedValue({
+        ...pendingInquiry,
+        status: 'COMPLETED',
+      });
+
+      await service.approve('iq1');
+
+      expect(actionServiceMock.changeStartTime).toHaveBeenCalledWith('qs1', {
+        startSec: 30,
+      });
+    });
+
+    it('조치를 실행하고 COMPLETED로 종료한다', async () => {
+      inquiryRepositoryMock.findOne.mockResolvedValue({ ...pendingInquiry });
+
+      await service.approve('iq1');
+
+      expect(actionServiceMock.changeStartTime).toHaveBeenCalledWith('qs1', {
+        startSec: 30,
+      });
+      expect(inquiryRepositoryMock.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'COMPLETED',
+          resultMessage: '요청하신 재생 시작 시간이 반영되었습니다.',
+        }),
+      );
+      expect(roomGatewayMock.emitInquiryResult).toHaveBeenCalledWith(
+        'user1',
+        expect.objectContaining({ status: 'COMPLETED' }),
+      );
+    });
+
+    it('조치 실행 중 예외가 발생하면 FAILED로 종료하고 400을 던진다', async () => {
+      inquiryRepositoryMock.findOne.mockResolvedValue({ ...pendingInquiry });
+      actionServiceMock.changeStartTime.mockRejectedValue(new Error('DB 오류'));
+
+      await expect(service.approve('iq1')).rejects.toThrow(BadRequestException);
+      expect(inquiryRepositoryMock.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'FAILED' }),
+      );
+    });
+  });
+
+  describe('reject', () => {
+    const pendingInquiry = {
+      ...baseInquiry,
+      status: 'PENDING_REVIEW',
+      matchedFunction: 'ADD_ANSWER',
+      matchedArgs: { answerTxt: '너닿', answerType: null },
+      confidence: 'MEDIUM',
+    };
+
+    it('문의를 찾을 수 없으면 404를 던진다', async () => {
+      inquiryRepositoryMock.findOne.mockResolvedValue(null);
+
+      await expect(service.reject('iq1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('검토 대기 상태가 아니면 400을 던진다', async () => {
+      inquiryRepositoryMock.findOne.mockResolvedValue({
+        ...pendingInquiry,
+        status: 'REJECTED',
+      });
+
+      await expect(service.reject('iq1')).rejects.toThrow(BadRequestException);
+    });
+
+    it('REJECTED로 종료하고 소켓으로 알린다', async () => {
+      inquiryRepositoryMock.findOne.mockResolvedValue({ ...pendingInquiry });
+
+      await service.reject('iq1');
+
+      expect(actionServiceMock.addAnswer).not.toHaveBeenCalled();
+      expect(inquiryRepositoryMock.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'REJECTED',
+          resultMessage: '요청하신 내용은 검토 후 반려되었습니다.',
+        }),
+      );
+      expect(roomGatewayMock.emitInquiryResult).toHaveBeenCalledWith(
+        'user1',
+        expect.objectContaining({ status: 'REJECTED' }),
+      );
     });
   });
 });
