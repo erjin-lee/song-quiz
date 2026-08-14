@@ -14,7 +14,11 @@ async function bootstrap() {
   const corsOriginEnv = process.env.CORS_ORIGIN?.trim();
   const corsOrigins = corsOriginEnv
     ? corsOriginEnv.split(',').map((origin) => origin.trim())
-    : ['http://localhost:5173', 'https://noraemat.site'];
+    : [
+        'http://localhost:5173',
+        'http://localhost:3000',
+        'https://noraemat.site',
+      ];
   app.enableCors({ origin: corsOrigins });
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
   app.useWebSocketAdapter(new IoAdapter(app));
@@ -37,6 +41,18 @@ async function bootstrap() {
         challenge: true,
       }),
     );
+  }
+
+  // ADMIN_USER/ADMIN_PASSWORD는 더 이상 basic-auth 자격증명이 아니라
+  // 최초 관리자 계정 시딩(AdminSeedService)에 사용된다.
+  const adminUser = process.env.ADMIN_USER;
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (!adminUser || !adminPassword) {
+    throw new Error('ADMIN_USER와 ADMIN_PASSWORD를 설정해야 합니다.');
+  }
+
+  if (!process.env.ADMIN_JWT_SECRET) {
+    throw new Error('ADMIN_JWT_SECRET을 설정해야 합니다.');
   }
 
   const swaggerConfig = new DocumentBuilder()

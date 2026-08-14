@@ -24,5 +24,6 @@ import { InquiryService } from './inquiry.service';
     InquiryActionService,
     YoutubeScraperClient,
   ],
+  exports: [InquiryService],
 })
 export class InquiryModule {}
