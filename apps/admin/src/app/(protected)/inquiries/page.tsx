@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -25,6 +25,8 @@ import type {
   InquiryFunctionName,
   InquiryStatus,
 } from '@/types/inquiry';
+
+const PAGE_SIZE = 50;
 
 const REQUEST_TYPE_LABELS: Record<InquiryFunctionName, string> = {
   ADD_ANSWER: '정답 추가',
@@ -109,37 +111,44 @@ export default function InquiryListPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const latestRequestIdRef = useRef(0);
 
   const fetchInquiries = useCallback(async () => {
+    const requestId = ++latestRequestIdRef.current;
     setLoading(true);
     try {
       const data = await getAdminInquiries({
         status: Array.from(statusFilter),
         confidence: Array.from(confidenceFilter),
         matchedFunction: Array.from(requestTypeFilter),
+        page,
+        pageSize: PAGE_SIZE,
       });
-      setInquiries(data);
+      if (latestRequestIdRef.current !== requestId) {
+        return;
+      }
+      setInquiries(data.items);
+      setTotal(data.total);
       setSelectedIds(new Set());
       setErrorMessage(null);
     } catch (err) {
+      if (latestRequestIdRef.current !== requestId) {
+        return;
+      }
       setErrorMessage(
         err instanceof ApiError ? err.message : '문의 목록을 불러오지 못했습니다.',
       );
     } finally {
-      setLoading(false);
+      if (latestRequestIdRef.current === requestId) {
+        setLoading(false);
+      }
     }
-  }, [statusFilter, confidenceFilter, requestTypeFilter]);
+  }, [statusFilter, confidenceFilter, requestTypeFilter, page]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!cancelled) {
-        await fetchInquiries();
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    fetchInquiries();
   }, [fetchInquiries]);
 
   const handleBulkAction = async (action: 'approve' | 'reject') => {
@@ -179,6 +188,7 @@ export default function InquiryListPage() {
     }
   };
 
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const allSelected = inquiries.length > 0 && selectedIds.size === inquiries.length;
 
   const toggleAll = (checked: boolean) => {
@@ -212,11 +222,12 @@ export default function InquiryListPage() {
               >
                 <Checkbox
                   checked={statusFilter.has(option.value)}
-                  onCheckedChange={(checked) =>
+                  onCheckedChange={(checked) => {
                     setStatusFilter((prev) =>
                       toggleSetValue(prev, option.value, checked === true),
-                    )
-                  }
+                    );
+                    setPage(1);
+                  }}
                 />
                 {option.label}
               </label>
@@ -234,11 +245,12 @@ export default function InquiryListPage() {
               >
                 <Checkbox
                   checked={confidenceFilter.has(option.value)}
-                  onCheckedChange={(checked) =>
+                  onCheckedChange={(checked) => {
                     setConfidenceFilter((prev) =>
                       toggleSetValue(prev, option.value, checked === true),
-                    )
-                  }
+                    );
+                    setPage(1);
+                  }}
                 />
                 {option.label}
               </label>
@@ -256,11 +268,12 @@ export default function InquiryListPage() {
               >
                 <Checkbox
                   checked={requestTypeFilter.has(option.value)}
-                  onCheckedChange={(checked) =>
+                  onCheckedChange={(checked) => {
                     setRequestTypeFilter((prev) =>
                       toggleSetValue(prev, option.value, checked === true),
-                    )
-                  }
+                    );
+                    setPage(1);
+                  }}
                 />
                 {option.label}
               </label>
@@ -375,6 +388,28 @@ export default function InquiryListPage() {
             })}
           </TableBody>
         </Table>
+      </div>
+
+      <div className="flex items-center justify-end gap-3 text-sm text-muted-foreground">
+        <span>
+          총 {total}건 · {totalPages}페이지 중 {page}페이지
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={page <= 1 || loading}
+          onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+        >
+          이전
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={page >= totalPages || loading}
+          onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+        >
+          다음
+        </Button>
       </div>
     </div>
   );
