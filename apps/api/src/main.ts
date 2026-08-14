@@ -11,10 +11,18 @@ setDefaultResultOrder('ipv4first');
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // 리버스 프록시(nginx/ALB) 1단계 뒤에서 서비스되므로, X-Forwarded-For의
+  // 마지막 값을 실제 클라이언트 IP로 신뢰한다. 그렇지 않으면 ThrottlerGuard가
+  // 프록시 IP 기준으로만 rate limit을 적용해 모든 사용자가 이를 공유하게 된다.
+  app.set('trust proxy', 1);
   const corsOriginEnv = process.env.CORS_ORIGIN?.trim();
   const corsOrigins = corsOriginEnv
     ? corsOriginEnv.split(',').map((origin) => origin.trim())
-    : ['http://localhost:5173', 'https://noraemat.site'];
+    : [
+        'http://localhost:5173',
+        'http://localhost:3000',
+        'https://noraemat.site',
+      ];
   app.enableCors({ origin: corsOrigins });
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
   app.useWebSocketAdapter(new IoAdapter(app));
@@ -37,6 +45,18 @@ async function bootstrap() {
         challenge: true,
       }),
     );
+  }
+
+  // ADMIN_USER/ADMIN_PASSWORD는 더 이상 basic-auth 자격증명이 아니라
+  // 최초 관리자 계정 시딩(AdminSeedService)에 사용된다.
+  const adminUser = process.env.ADMIN_USER;
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (!adminUser || !adminPassword) {
+    throw new Error('ADMIN_USER와 ADMIN_PASSWORD를 설정해야 합니다.');
+  }
+
+  if (!process.env.ADMIN_JWT_SECRET) {
+    throw new Error('ADMIN_JWT_SECRET을 설정해야 합니다.');
   }
 
   const swaggerConfig = new DocumentBuilder()

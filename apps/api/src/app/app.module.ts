@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { AdminModule } from '../admin/admin.module';
 import { CacheModule } from '../cache/cache.module';
 import { ConfigModule } from '../config/config.module';
 import { InquiryModule } from '../inquiry/inquiry.module';
@@ -21,6 +22,7 @@ import { ScraperModule } from '../scraper/scraper.module';
       autoLoadEntities: true,
       synchronize: false,
     }),
+    AdminModule,
     CacheModule,
     ConfigModule,
     InquiryModule,

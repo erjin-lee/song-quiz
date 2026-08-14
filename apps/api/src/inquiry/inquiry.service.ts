@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
@@ -23,6 +28,7 @@ const REJECTED_MESSAGE =
   '요청하신 내용은 반려되었습니다. 자동으로 처리하기 어려운 문의라 관리자가 다시 확인할게요.';
 const PENDING_REVIEW_MESSAGE =
   '요청하신 내용이 검토 목록에 추가되었습니다. 확인 후 반영해드릴게요.';
+const ADMIN_REJECTED_MESSAGE = '요청하신 내용은 검토 후 반려되었습니다.';
 
 class InquiryArgsValidationError extends Error {}
 
@@ -70,6 +76,90 @@ export class InquiryService {
     });
 
     return { inquiryId: inquiry.inquiryId, message: RECEIVED_MESSAGE };
+  }
+
+  /** 관리자가 문의를 승인한다: 판별된 조치를 실제로 실행하고 완료 처리한다. 현재 상태와 무관하게 승인할 수 있다. */
+  async approve(inquiryId: string): Promise<void> {
+    const inquiry = await this.inquiryRepository.findOne({
+      where: { inquiryId },
+    });
+    if (!inquiry) {
+      throw new NotFoundException(
+        `문의를 찾을 수 없습니다. (inquiryId: ${inquiryId})`,
+      );
+    }
+    const { matchedFunction, matchedArgs, confidence } = inquiry;
+    if (!matchedFunction || !matchedArgs || !confidence) {
+      throw new BadRequestException(
+        `승인할 조치 정보가 없습니다. (inquiryId: ${inquiryId})`,
+      );
+    }
+    // ADD_ANSWER는 재승인 시 정답이 중복으로 추가되므로, 이미 완료된 건은 재승인을 막는다.
+    if (matchedFunction === 'ADD_ANSWER' && inquiry.status === 'COMPLETED') {
+      throw new BadRequestException(
+        `이미 완료된 정답 추가 문의는 다시 승인할 수 없습니다. (inquiryId: ${inquiryId})`,
+      );
+    }
+
+    try {
+      await this.executeAction(
+        matchedFunction,
+        inquiry.quizSongId,
+        matchedArgs,
+        confidence,
+      );
+      await this.finish(
+        inquiry,
+        'COMPLETED',
+        matchedFunction,
+        matchedArgs,
+        confidence,
+        this.buildSuccessMessage(matchedFunction),
+      );
+    } catch (error) {
+      this.logger.error(`문의 승인 처리 실패(inquiryId: ${inquiryId})`, error);
+      await this.finish(
+        inquiry,
+        'FAILED',
+        matchedFunction,
+        matchedArgs,
+        confidence,
+        null,
+      );
+      throw new BadRequestException(
+        `조치 실행에 실패했습니다. (inquiryId: ${inquiryId})`,
+      );
+    }
+  }
+
+  /** 검토 대기 문의를 관리자가 반려한다. */
+  async reject(inquiryId: string): Promise<void> {
+    const inquiry = await this.findPendingReviewOrThrow(inquiryId);
+    await this.finish(
+      inquiry,
+      'REJECTED',
+      inquiry.matchedFunction,
+      inquiry.matchedArgs,
+      inquiry.confidence,
+      ADMIN_REJECTED_MESSAGE,
+    );
+  }
+
+  private async findPendingReviewOrThrow(inquiryId: string): Promise<Inquiry> {
+    const inquiry = await this.inquiryRepository.findOne({
+      where: { inquiryId },
+    });
+    if (!inquiry) {
+      throw new NotFoundException(
+        `문의를 찾을 수 없습니다. (inquiryId: ${inquiryId})`,
+      );
+    }
+    if (inquiry.status !== 'PENDING_REVIEW') {
+      throw new BadRequestException(
+        `검토 대기 상태의 문의만 처리할 수 있습니다. (inquiryId: ${inquiryId})`,
+      );
+    }
+    return inquiry;
   }
 
   private async process(inquiryId: string): Promise<void> {

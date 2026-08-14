@@ -2,6 +2,8 @@
 /out-tsc
 node_modules
 dist
+.next
+.turbo
 .env
 .env.local
 npm-debug.log*
