@@ -72,6 +72,16 @@ export function LoginPage() {
           <Logo size="lg" />
         </div>
 
+        {/* <p className="mb-4 text-sm font-medium text-purple-600">
+          🎵 노래를 듣고 제목을 맞히는 실시간 음악 게임
+        </p> */}
+
+        <ol className="mb-8 flex flex-col gap-1.5 rounded-2xl bg-purple-50/60 px-4 py-3 text-left text-xs text-slate-500">
+          <li>1. 방을 만들거나 원하는 방에 입장해요</li>
+          <li>2. 노래가 나오면 채팅창에 제목을 입력해요</li>
+          <li>3. 먼저 정확하게 맞힐수록 더 높은 점수를 받아요</li>
+        </ol>
+
         {mode === 'auth' ? (
           <form onSubmit={handleLogin} className="flex flex-col gap-4">
             <input
