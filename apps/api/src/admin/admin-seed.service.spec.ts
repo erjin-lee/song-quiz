@@ -79,6 +79,7 @@ describe('AdminSeedService', () => {
     expect(bcrypt.hash).toHaveBeenCalledWith('admin1234', 10);
     expect(userRepositoryMock.save).toHaveBeenCalledWith(
       expect.objectContaining({
+        userId: expect.any(String),
         loginId: 'admin',
         pwdHash: 'hashed-password',
         role: 'ADMIN',

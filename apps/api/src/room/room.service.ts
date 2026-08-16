@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'crypto';
 import { EventEmitter } from 'events';
 import {
   ConflictException,
@@ -139,7 +139,10 @@ export class RoomService extends EventEmitter {
     return this.cacheService.get<RoomItemDto>(this.roomKey(roomId));
   }
 
-  async createRoom(dto: CreateRoomRequestDto): Promise<RoomJoinResultDto> {
+  async createRoom(
+    dto: CreateRoomRequestDto,
+    accountUserId?: string,
+  ): Promise<RoomJoinResultDto> {
     const quiz = await this.quizRepository.findOne({
       where: { quizId: dto.quizId, useYn: 'Y' },
     });
@@ -153,13 +156,18 @@ export class RoomService extends EventEmitter {
       where: { quizId: dto.quizId },
       relations: { artist: true },
     });
+    const songCount = await this.quizSongRepository.count({
+      where: { quizId: dto.quizId },
+    });
 
-    const hostUserId = randomUUID();
+    const hostUserId = accountUserId ?? randomUUID();
     const room: RoomItemDto = {
       roomId: randomUUID(),
       roomTtl: dto.roomTtl,
       quizId: dto.quizId,
       quizTtl: quiz.quizTtl,
+      quizDesc: quiz.quizDesc,
+      songCount,
       quizThumbImgUrl: quiz.thumbImgUrl,
       atstIds: quizArtists.map((quizArtist) => quizArtist.atstId),
       atstNms: quizArtists.map((quizArtist) => quizArtist.artist.atstNm),
@@ -177,28 +185,46 @@ export class RoomService extends EventEmitter {
     await this.saveRoom(room);
     await this.addToIndex(room.roomId);
 
-    return { room, userId: hostUserId };
+    const accessToken = this.computeMembershipToken(room.roomId, hostUserId);
+    return { room, userId: hostUserId, accessToken };
   }
 
   async joinRoom(
     roomId: string,
     dto: JoinRoomRequestDto,
+    accountUserId?: string,
   ): Promise<RoomJoinResultDto> {
     return this.withRoomLock(roomId, async () => {
       const room = await this.getRoomOrThrow(roomId);
+
+      // 로그인 유저는 계정 userId를 그대로 참가자 ID로 쓰므로, 같은 방에
+      // 다시 입장(재조회 등)하면 중복 참가자를 만들지 않고 그대로 재입장시킨다.
+      if (accountUserId) {
+        const existing = room.participants.find(
+          (p) => p.userId === accountUserId,
+        );
+        if (existing) {
+          const accessToken = this.computeMembershipToken(
+            roomId,
+            existing.userId,
+          );
+          return { room, userId: existing.userId, accessToken };
+        }
+      }
 
       if (room.curUserCnt >= room.maxUserCnt) {
         throw new ConflictException('방 정원이 가득 찼습니다.');
       }
 
-      const userId = randomUUID();
+      const userId = accountUserId ?? randomUUID();
       room.participants.push({ userId, nickname: dto.nickname, score: 0 });
       room.curUserCnt = room.participants.length;
 
       await this.saveRoom(room);
       this.emit('room-updated', room);
 
-      return { room, userId };
+      const accessToken = this.computeMembershipToken(roomId, userId);
+      return { room, userId, accessToken };
     });
   }
 
@@ -778,6 +804,37 @@ export class RoomService extends EventEmitter {
 
   private roomKey(roomId: string): string {
     return `${ROOM_CACHE_KEY_PREFIX}${roomId}`;
+  }
+
+  /**
+   * 참가자 접근 토큰은 상태를 저장하지 않고 roomId+userId로부터 결정적으로
+   * 계산한다(HMAC 서명). 무작위로 발급해 in-memory Map에 저장하는 방식은:
+   * - API 프로세스가 재시작되면(배포 등) 방 데이터는 Redis에 그대로 남아있는데
+   *   토큰만 전부 사라져, 재시작 이전에 입장한 참가자는 소켓에 다시 들어올 수
+   *   없게 된다.
+   * - 여러 API 인스턴스로 확장하면 발급한 인스턴스와 검증하는 인스턴스가 달라
+   *   실패할 수 있다.
+   * - 같은 계정이 다른 기기로 재입장하면 토큰을 다시 발급(덮어쓰기)하므로
+   *   기존 기기의 토큰이 무효화된다.
+   * 결정적 서명 방식은 이 세 가지를 모두 해결한다: 같은 입력이면 프로세스가
+   * 다시 시작되거나 인스턴스가 달라도 항상 같은 토큰이 나오고, 재입장해도
+   * 다른 기기의 토큰을 무효화하지 않는다. "이 요청자가 그 방의 실제 참가자인가"
+   * 자체는 room.participants에 해당 userId가 남아있는지로 검증되므로(퇴장하면
+   * 제거됨), 토큰을 별도로 저장/폐기할 필요가 없다.
+   */
+  private computeMembershipToken(roomId: string, userId: string): string {
+    return createHmac('sha256', `${process.env.USER_JWT_SECRET}:room-access`)
+      .update(`${roomId}:${userId}`)
+      .digest('hex');
+  }
+
+  /** 소켓 room:enter, REST 퇴장 요청에서 요청자가 실제 그 참가자 본인인지 검증한다. */
+  verifyMembershipToken(roomId: string, userId: string, token: string): boolean {
+    const expected = Buffer.from(this.computeMembershipToken(roomId, userId));
+    const actual = Buffer.from(token);
+    return (
+      expected.length === actual.length && timingSafeEqual(expected, actual)
+    );
   }
 
   private async getRoomIndex(): Promise<string[]> {

@@ -31,6 +31,10 @@ export function joinRoom(
 export function leaveRoom(
   roomId: string,
   userId: string,
+  accessToken: string,
 ): Promise<LeaveRoomResultDto> {
-  return apiPost<LeaveRoomResultDto>(`/rooms/${roomId}/leave`, { userId });
+  return apiPost<LeaveRoomResultDto>(`/rooms/${roomId}/leave`, {
+    userId,
+    accessToken,
+  });
 }

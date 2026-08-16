@@ -9,11 +9,12 @@ import {
   type ChatEntry,
   type ChatPanelHandle,
 } from '../components/ChatPanel';
-import { getRoomById, leaveRoom } from '../api/room';
+import { getRoomById, joinRoom, leaveRoom } from '../api/room';
 import { getQuizSongCount } from '../api/quiz';
 import { createRoomSocket, type RoomSocket } from '../api/socket';
 import { useServerClockOffset } from '../hooks/useServerClockOffset';
 import { useDocumentMeta } from '../hooks/useDocumentMeta';
+import { useGuestNicknameFallback } from '../hooks/useGuestNicknameFallback';
 import { useSession } from '../context/SessionContext';
 import {
   clearRoomSession,
@@ -32,6 +33,12 @@ import type {
 interface LocationState {
   room: RoomItemDto;
   userId: string;
+  accessToken: string;
+}
+
+interface RoomMembership {
+  userId: string;
+  accessToken: string;
 }
 
 let entrySeq = 0;
@@ -46,6 +53,9 @@ export function RoomGamePage() {
 
   const [room, setRoom] = useState<RoomItemDto | null>(state?.room ?? null);
   const [userId, setUserId] = useState<string | null>(state?.userId ?? null);
+  const [accessToken, setAccessToken] = useState<string | null>(
+    state?.accessToken ?? null,
+  );
   const [loading, setLoading] = useState(true);
   const [chatEntries, setChatEntries] = useState<ChatEntry[]>([]);
   const [songCount, setSongCount] = useState<number | null>(null);
@@ -55,7 +65,8 @@ export function RoomGamePage() {
   const chatPanelRef = useRef<ChatPanelHandle>(null);
   const [socket, setSocket] = useState<RoomSocket | null>(null);
   const serverTimeOffsetMs = useServerClockOffset(socket);
-  const { nickname } = useSession();
+  const { nickname, isInitialized } = useSession();
+  useGuestNicknameFallback();
 
   useDocumentMeta({
     title: room ? `${room.roomTtl} | 노래맞히기` : '게임 진행 중 | 노래맞히기',
@@ -69,23 +80,44 @@ export function RoomGamePage() {
     serverTimeOffsetMsRef.current = serverTimeOffsetMs;
   }, [serverTimeOffsetMs]);
 
-  // 방 상태를 서버에서 최신으로 확인/복구한다. 새로고침으로 location.state가
-  // 사라진 경우 로컬스토리지에 저장해둔 { roomId, userId }로 이어서 입장한다.
+  // location.state로 넘어온 userId/accessToken이 없으면(새로고침 등) 로컬스토리지에
+  // 저장해둔 { roomId, userId, accessToken }으로 이어서 입장한다. 둘 다 없으면
+  // (공유 링크로 직접 들어온 경우) 아래 두 번째 effect가 닉네임 준비 후 자동으로
+  // 방에 입장시킨다.
+  const [candidateMembership, setCandidateMembership] =
+    useState<RoomMembership | null>(() => {
+      if (state?.userId && state?.accessToken) {
+        return { userId: state.userId, accessToken: state.accessToken };
+      }
+      const session = loadRoomSession();
+      return session && session.roomId === roomId
+        ? { userId: session.userId, accessToken: session.accessToken }
+        : null;
+    });
+
+  useEffect(() => {
+    if (state?.userId && state?.accessToken) {
+      setCandidateMembership({
+        userId: state.userId,
+        accessToken: state.accessToken,
+      });
+      return;
+    }
+    const session = loadRoomSession();
+    setCandidateMembership(
+      session && session.roomId === roomId
+        ? { userId: session.userId, accessToken: session.accessToken }
+        : null,
+    );
+  }, [roomId, state?.userId, state?.accessToken]);
+
   useEffect(() => {
     if (!roomId) {
       navigate('/rooms', { replace: true });
       return;
     }
 
-    const candidateUserId =
-      state?.userId ??
-      (() => {
-        const session = loadRoomSession();
-        return session && session.roomId === roomId ? session.userId : null;
-      })();
-
-    if (!candidateUserId) {
-      navigate('/rooms', { replace: true });
+    if (!candidateMembership) {
       return;
     }
 
@@ -97,17 +129,25 @@ export function RoomGamePage() {
           return;
         }
         const isParticipant = fetchedRoom.participants.some(
-          (participant) => participant.userId === candidateUserId,
+          (participant) => participant.userId === candidateMembership.userId,
         );
         if (!isParticipant) {
+          // 서버에서는 이미 퇴장 처리됐지만 로컬 세션이 남아있던 경우다.
+          // 방 목록으로 튕겨내지 않고, 아래 자동 입장 effect로 이어서
+          // 새 참가자로 다시 입장시킨다.
           clearRoomSession();
-          navigate('/rooms', { replace: true });
+          setCandidateMembership(null);
           return;
         }
 
-        saveRoomSession({ roomId, userId: candidateUserId });
+        saveRoomSession({
+          roomId,
+          userId: candidateMembership.userId,
+          accessToken: candidateMembership.accessToken,
+        });
         setRoom(fetchedRoom);
-        setUserId(candidateUserId);
+        setUserId(candidateMembership.userId);
+        setAccessToken(candidateMembership.accessToken);
       })
       .catch(() => {
         if (!cancelled) {
@@ -125,10 +165,52 @@ export function RoomGamePage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId]);
+  }, [roomId, candidateMembership]);
+
+  // 참가 기록이 전혀 없는 직접 진입(공유 링크 등): 닉네임이 준비되는 대로
+  // REST 입장을 호출해 게스트/로그인 유저 구분 없이 자동으로 방에 들어간다.
+  useEffect(() => {
+    if (!roomId || candidateMembership) {
+      return;
+    }
+    if (!isInitialized || !nickname) {
+      return;
+    }
+
+    let cancelled = false;
+
+    joinRoom(roomId, { nickname })
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        saveRoomSession({
+          roomId,
+          userId: result.userId,
+          accessToken: result.accessToken,
+        });
+        setRoom(result.room);
+        setUserId(result.userId);
+        setAccessToken(result.accessToken);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          navigate('/rooms', { replace: true });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [roomId, candidateMembership, nickname, isInitialized, navigate]);
 
   useEffect(() => {
-    if (!roomId || !userId) {
+    if (!roomId || !userId || !accessToken) {
       return;
     }
 
@@ -206,13 +288,13 @@ export function RoomGamePage() {
     }
 
     socket.connect();
-    socket.emit('room:enter', { roomId, userId });
+    socket.emit('room:enter', { roomId, userId, accessToken });
 
     return () => {
       socket.disconnect();
       setSocket(null);
     };
-  }, [roomId, userId, nickname]);
+  }, [roomId, userId, accessToken, nickname]);
 
   const quizId = room?.quizId;
   useEffect(() => {
@@ -252,16 +334,16 @@ export function RoomGamePage() {
   // 선언해야 하므로 내부에서 null을 다시 확인한다(실제로는 얼리 리턴 이후에만 렌더되는
   // JSX에서 호출되므로 항상 non-null이다).
   const handleLeave = useCallback(async () => {
-    if (!room || !userId) {
+    if (!room || !userId || !accessToken) {
       return;
     }
     try {
-      await leaveRoom(room.roomId, userId);
+      await leaveRoom(room.roomId, userId, accessToken);
     } finally {
       clearRoomSession();
       navigate('/rooms', { replace: true });
     }
-  }, [room, userId, navigate]);
+  }, [room, userId, accessToken, navigate]);
 
   const handleSendChat = useCallback(
     (message: string) => {

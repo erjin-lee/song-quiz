@@ -59,6 +59,10 @@ async function bootstrap() {
     throw new Error('ADMIN_JWT_SECRET을 설정해야 합니다.');
   }
 
+  if (!process.env.USER_JWT_SECRET) {
+    throw new Error('USER_JWT_SECRET을 설정해야 합니다.');
+  }
+
   const swaggerConfig = new DocumentBuilder()
     .setTitle('API')
     .setDescription('API 문서')

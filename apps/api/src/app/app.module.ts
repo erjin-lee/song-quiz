@@ -9,6 +9,7 @@ import { InquiryModule } from '../inquiry/inquiry.module';
 import { QuizModule } from '../quiz/quiz.module';
 import { RoomModule } from '../room/room.module';
 import { ScraperModule } from '../scraper/scraper.module';
+import { UserModule } from '../user/user.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { ScraperModule } from '../scraper/scraper.module';
     QuizModule,
     RoomModule,
     ScraperModule,
+    UserModule,
   ],
   controllers: [AppController],
   providers: [AppService],
