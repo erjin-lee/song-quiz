@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Logo } from '../components/Logo';
 import { ParticipantList } from '../components/ParticipantList';
@@ -9,11 +9,12 @@ import {
   type ChatEntry,
   type ChatPanelHandle,
 } from '../components/ChatPanel';
-import { getRoomById, leaveRoom } from '../api/room';
+import { getRoomById, joinRoom, leaveRoom } from '../api/room';
 import { getQuizSongCount } from '../api/quiz';
 import { createRoomSocket, type RoomSocket } from '../api/socket';
 import { useServerClockOffset } from '../hooks/useServerClockOffset';
 import { useDocumentMeta } from '../hooks/useDocumentMeta';
+import { useGuestNicknameFallback } from '../hooks/useGuestNicknameFallback';
 import { useSession } from '../context/SessionContext';
 import {
   clearRoomSession,
@@ -55,7 +56,9 @@ export function RoomGamePage() {
   const chatPanelRef = useRef<ChatPanelHandle>(null);
   const [socket, setSocket] = useState<RoomSocket | null>(null);
   const serverTimeOffsetMs = useServerClockOffset(socket);
-  const { nickname } = useSession();
+  const { nickname, isAuthenticated, isInitialized, accountUserId } =
+    useSession();
+  useGuestNicknameFallback();
 
   useDocumentMeta({
     title: room ? `${room.roomTtl} | 노래맞히기` : '게임 진행 중 | 노래맞히기',
@@ -69,23 +72,24 @@ export function RoomGamePage() {
     serverTimeOffsetMsRef.current = serverTimeOffsetMs;
   }, [serverTimeOffsetMs]);
 
-  // 방 상태를 서버에서 최신으로 확인/복구한다. 새로고침으로 location.state가
-  // 사라진 경우 로컬스토리지에 저장해둔 { roomId, userId }로 이어서 입장한다.
+  // location.state로 넘어온 userId가 없으면(새로고침 등) 로컬스토리지에 저장해둔
+  // { roomId, userId }로 이어서 입장한다. 둘 다 없으면(공유 링크로 직접 들어온
+  // 경우) 아래 두 번째 effect가 닉네임 준비 후 자동으로 방에 입장시킨다.
+  const candidateUserId = useMemo(() => {
+    if (state?.userId) {
+      return state.userId;
+    }
+    const session = loadRoomSession();
+    return session && session.roomId === roomId ? session.userId : null;
+  }, [roomId, state?.userId]);
+
   useEffect(() => {
     if (!roomId) {
       navigate('/rooms', { replace: true });
       return;
     }
 
-    const candidateUserId =
-      state?.userId ??
-      (() => {
-        const session = loadRoomSession();
-        return session && session.roomId === roomId ? session.userId : null;
-      })();
-
     if (!candidateUserId) {
-      navigate('/rooms', { replace: true });
       return;
     }
 
@@ -125,7 +129,55 @@ export function RoomGamePage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId]);
+  }, [roomId, candidateUserId]);
+
+  // 참가 기록이 전혀 없는 직접 진입(공유 링크 등): 닉네임이 준비되는 대로
+  // REST 입장을 호출해 게스트/로그인 유저 구분 없이 자동으로 방에 들어간다.
+  useEffect(() => {
+    if (!roomId || candidateUserId) {
+      return;
+    }
+    if (!isInitialized || !nickname) {
+      return;
+    }
+
+    let cancelled = false;
+
+    joinRoom(roomId, {
+      nickname,
+      ...(isAuthenticated && accountUserId ? { userId: accountUserId } : {}),
+    })
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        saveRoomSession({ roomId, userId: result.userId });
+        setRoom(result.room);
+        setUserId(result.userId);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          navigate('/rooms', { replace: true });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    roomId,
+    candidateUserId,
+    nickname,
+    isAuthenticated,
+    isInitialized,
+    accountUserId,
+    navigate,
+  ]);
 
   useEffect(() => {
     if (!roomId || !userId) {
