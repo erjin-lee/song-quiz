@@ -93,6 +93,15 @@ export class RoomService extends EventEmitter {
    */
   private readonly roomLocks = new Map<string, Promise<unknown>>();
 
+  /**
+   * `${roomId}:${userId}` -> 참가자 본인만 아는 비공개 접근 토큰.
+   * 방 정보(RoomItemDto)의 참가자 userId/hostUserId는 GET /rooms(/:roomId)로
+   * 누구나 조회할 수 있어, userId만으로는 소켓 room:enter나 REST 퇴장 요청의
+   * 주체를 증명할 수 없다. 생성/입장 응답에만 이 토큰을 함께 내려주고, 이후
+   * 소켓 입장·퇴장 요청에서 이 토큰을 검증해야 해당 참가자로 인정한다.
+   */
+  private readonly membershipTokens = new Map<string, string>();
+
   /** roomId -> 이번 게임에서 출제할 quizSongId 순서(랜덤이면 셔플됨). 스포일러라 클라이언트에 노출하지 않는다. */
   private readonly songOrders = new Map<string, string[]>();
   /** roomId -> 현재 라운드의 허용 정답 목록. 정답 채점에만 쓰고 절대 클라이언트로 보내지 않는다. */
@@ -185,7 +194,8 @@ export class RoomService extends EventEmitter {
     await this.saveRoom(room);
     await this.addToIndex(room.roomId);
 
-    return { room, userId: hostUserId };
+    const accessToken = this.issueMembershipToken(room.roomId, hostUserId);
+    return { room, userId: hostUserId, accessToken };
   }
 
   async joinRoom(
@@ -203,7 +213,11 @@ export class RoomService extends EventEmitter {
           (p) => p.userId === accountUserId,
         );
         if (existing) {
-          return { room, userId: existing.userId };
+          const accessToken = this.issueMembershipToken(
+            roomId,
+            existing.userId,
+          );
+          return { room, userId: existing.userId, accessToken };
         }
       }
 
@@ -218,7 +232,8 @@ export class RoomService extends EventEmitter {
       await this.saveRoom(room);
       this.emit('room-updated', room);
 
-      return { room, userId };
+      const accessToken = this.issueMembershipToken(roomId, userId);
+      return { room, userId, accessToken };
     });
   }
 
@@ -235,6 +250,7 @@ export class RoomService extends EventEmitter {
 
       room.participants.splice(participantIndex, 1);
       room.curUserCnt = room.participants.length;
+      this.clearMembershipToken(roomId, userId);
 
       if (room.curUserCnt === 0) {
         await this.deleteRoom(roomId);
@@ -798,6 +814,29 @@ export class RoomService extends EventEmitter {
 
   private roomKey(roomId: string): string {
     return `${ROOM_CACHE_KEY_PREFIX}${roomId}`;
+  }
+
+  private membershipTokenKey(roomId: string, userId: string): string {
+    return `${roomId}:${userId}`;
+  }
+
+  /** 참가자에게 새 접근 토큰을 발급하고 저장한다(같은 참가자로 재입장하면 덮어쓴다). */
+  private issueMembershipToken(roomId: string, userId: string): string {
+    const token = randomUUID();
+    this.membershipTokens.set(this.membershipTokenKey(roomId, userId), token);
+    return token;
+  }
+
+  /** 소켓 room:enter, REST 퇴장 요청에서 요청자가 실제 그 참가자 본인인지 검증한다. */
+  verifyMembershipToken(roomId: string, userId: string, token: string): boolean {
+    return (
+      this.membershipTokens.get(this.membershipTokenKey(roomId, userId)) ===
+      token
+    );
+  }
+
+  private clearMembershipToken(roomId: string, userId: string): void {
+    this.membershipTokens.delete(this.membershipTokenKey(roomId, userId));
   }
 
   private async getRoomIndex(): Promise<string[]> {

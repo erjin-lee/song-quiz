@@ -325,6 +325,64 @@ describe('RoomService', () => {
     });
   });
 
+  describe('참가자 접근 토큰(accessToken)', () => {
+    it('방을 생성하면 accessToken이 함께 발급되고 verifyMembershipToken으로 검증된다', async () => {
+      const { room, userId, accessToken } = await createTestRoom();
+
+      expect(accessToken).toEqual(expect.any(String));
+      expect(
+        roomService.verifyMembershipToken(room.roomId, userId, accessToken),
+      ).toBe(true);
+      expect(
+        roomService.verifyMembershipToken(room.roomId, userId, '가짜토큰'),
+      ).toBe(false);
+    });
+
+    it('입장하면 accessToken이 함께 발급된다', async () => {
+      const { room } = await createTestRoom();
+
+      const joinResult = await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+      });
+
+      expect(joinResult.accessToken).toEqual(expect.any(String));
+      expect(
+        roomService.verifyMembershipToken(
+          room.roomId,
+          joinResult.userId,
+          joinResult.accessToken,
+        ),
+      ).toBe(true);
+    });
+
+    it('다른 참가자의 userId로는 내 accessToken이 검증되지 않는다', async () => {
+      const { room, accessToken: hostAccessToken } = await createTestRoom();
+      const { userId: guestUserId } = await roomService.joinRoom(
+        room.roomId,
+        { nickname: '참가자1' },
+      );
+
+      expect(
+        roomService.verifyMembershipToken(
+          room.roomId,
+          guestUserId,
+          hostAccessToken,
+        ),
+      ).toBe(false);
+    });
+
+    it('퇴장하면 accessToken이 무효화된다', async () => {
+      const { room, userId, accessToken } = await createTestRoom();
+      await roomService.joinRoom(room.roomId, { nickname: '참가자1' });
+
+      await roomService.leaveRoom(room.roomId, userId);
+
+      expect(
+        roomService.verifyMembershipToken(room.roomId, userId, accessToken),
+      ).toBe(false);
+    });
+  });
+
   describe('게임 진행', () => {
     it('방장만 게임을 시작할 수 있다', async () => {
       const { room } = await createTestRoom();

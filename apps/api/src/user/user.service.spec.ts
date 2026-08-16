@@ -27,6 +27,7 @@ describe('UserService', () => {
 
   const jwtServiceMock = {
     sign: jest.fn().mockReturnValue('signed-jwt'),
+    verify: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -237,6 +238,50 @@ describe('UserService', () => {
       await expect(service.getMe('random-user-id')).rejects.toThrow(
         UnauthorizedException,
       );
+    });
+  });
+
+  describe('resolveOptionalAccountUserId', () => {
+    it('Authorization 헤더가 없으면 undefined를 반환한다(게스트)', async () => {
+      const result = await service.resolveOptionalAccountUserId(undefined);
+
+      expect(result).toBeUndefined();
+      expect(jwtServiceMock.verify).not.toHaveBeenCalled();
+    });
+
+    it('토큰 검증에 실패하면 UnauthorizedException을 던진다', async () => {
+      jwtServiceMock.verify.mockImplementation(() => {
+        throw new Error('invalid token');
+      });
+
+      await expect(
+        service.resolveOptionalAccountUserId('Bearer invalid'),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('계정이 ACTIVE가 아니면 UnauthorizedException을 던진다(게스트로 낮추지 않음)', async () => {
+      jwtServiceMock.verify.mockReturnValue({ userId: 'random-user-id' });
+      userRepositoryMock.findOne.mockResolvedValue({
+        userId: 'random-user-id',
+        status: 'SUSPENDED',
+      });
+
+      await expect(
+        service.resolveOptionalAccountUserId('Bearer valid-token'),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('유효한 토큰이면 계정 userId를 반환한다', async () => {
+      jwtServiceMock.verify.mockReturnValue({ userId: 'random-user-id' });
+      userRepositoryMock.findOne.mockResolvedValue({
+        userId: 'random-user-id',
+        status: 'ACTIVE',
+      });
+
+      const result =
+        await service.resolveOptionalAccountUserId('Bearer valid-token');
+
+      expect(result).toBe('random-user-id');
     });
   });
 });

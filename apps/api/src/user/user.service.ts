@@ -93,6 +93,39 @@ export class UserService {
     return { userId: user.userId, loginId: user.loginId, nickNm: user.nickNm };
   }
 
+  /**
+   * 로그인이 필수는 아니지만(게스트 허용) 로그인 상태라면 계정 식별을 반영해야
+   * 하는 API(방 생성/입장 등)에서 쓰는 공용 선택적 인증. Authorization 헤더가
+   * 아예 없으면 게스트로 취급해 undefined를 반환한다. 헤더가 있는데 서명이
+   * 무효거나 계정이 더 이상 ACTIVE가 아니면(정지/탈퇴) 조용히 게스트로
+   * 낮추지 않고 401을 던진다 — 유효하지 않은 자격증명은 명시적으로 거부해야
+   * 정지된 계정이 방 생성/입장에서 자신의 영구 userId를 계속 쓰는 것을 막을 수 있다.
+   */
+  async resolveOptionalAccountUserId(
+    authHeader: string | undefined,
+  ): Promise<string | undefined> {
+    if (!authHeader?.startsWith('Bearer ')) {
+      return undefined;
+    }
+
+    let payload: UserJwtPayload;
+    try {
+      payload = this.jwtService.verify<UserJwtPayload>(
+        authHeader.slice('Bearer '.length),
+        { secret: process.env.USER_JWT_SECRET },
+      );
+    } catch {
+      throw new UnauthorizedException('인증 토큰이 유효하지 않습니다.');
+    }
+
+    try {
+      const user = await this.findUserByUserIdOrThrow(payload.userId);
+      return user.userId;
+    } catch {
+      throw new UnauthorizedException('인증 토큰이 유효하지 않습니다.');
+    }
+  }
+
   private issueToken(user: User): LoginResponseDto {
     const payload: UserJwtPayload = {
       sub: user.userId,

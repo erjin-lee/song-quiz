@@ -14,6 +14,8 @@ import { RoomService } from './room.service';
 interface EnterRoomPayload {
   roomId: string;
   userId: string;
+  /** createRoom/joinRoom 응답으로 발급받은 비공개 접근 토큰(본인 확인용). */
+  accessToken: string;
 }
 
 interface ChatMessagePayload {
@@ -91,6 +93,19 @@ export class RoomGateway implements OnGatewayDisconnect {
       client.emit('room:error', {
         message: '방에 입장한 유저가 아닙니다. REST로 먼저 입장해주세요.',
       });
+      return;
+    }
+
+    // userId/hostUserId는 방 정보 조회로 누구나 알 수 있으므로, 참가자 본인만
+    // 아는 accessToken을 함께 검증해야 다른 사람을 사칭한 접속을 막을 수 있다.
+    if (
+      !this.roomService.verifyMembershipToken(
+        payload.roomId,
+        payload.userId,
+        payload.accessToken,
+      )
+    ) {
+      client.emit('room:error', { message: '유효하지 않은 접근입니다.' });
       return;
     }
 
@@ -270,8 +285,21 @@ export class RoomGateway implements OnGatewayDisconnect {
     }
 
     const key = this.membershipKey(membership.roomId, membership.userId);
+    // 같은 유저의 두 소켓이 거의 동시에 끊기면 각각 이 지점에 도달할 수 있다.
+    // 새 타이머를 걸기 전에 먼저 기존 타이머가 있으면 취소해, 맵에 남은 참조만
+    // 지우고 실제 setTimeout은 계속 살아있는(orphan) 상태를 만들지 않는다.
+    const existingTimer = this.pendingLeaveTimers.get(key);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
     const timer = setTimeout(() => {
       this.pendingLeaveTimers.delete(key);
+      // 타이머 발화 직전에도 다시 확인한다: 위 방어에도 불구하고 두 타이머가
+      // 모두 걸린 극단적인 경우, 먼저 실행된 타이머가 재연결을 감지하지 못하고
+      // 참가자를 제거하는 것을 막아준다.
+      if (this.hasOtherActiveSocket(membership.roomId, membership.userId)) {
+        return;
+      }
       this.removeParticipant(membership).catch((err) => {
         this.logger.error(
           `유예 시간 만료 후 퇴장 처리 실패(roomId: ${membership.roomId}): ${(err as Error).message}`,
