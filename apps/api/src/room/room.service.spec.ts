@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import type { Repository } from 'typeorm';
 import { CacheService } from '../cache/cache.service';
 import { QuizAnswer } from '../quiz/entities/quiz-answer.entity';
 import { QuizArtist } from '../quiz/entities/quiz-artist.entity';
@@ -371,14 +372,66 @@ describe('RoomService', () => {
       ).toBe(false);
     });
 
-    it('퇴장하면 accessToken이 무효화된다', async () => {
+    it('같은 roomId+userId면 항상 같은 토큰이 계산된다(상태 저장 없이 결정적)', async () => {
+      const { room, userId, accessToken } = await createTestRoom();
+
+      // API 프로세스가 재시작돼도(배포 등) 같은 값이 나와야 하므로, 별도
+      // RoomService 인스턴스에서 계산해도 동일해야 한다.
+      const anotherInstance = new RoomService(
+        cacheService,
+        quizRepositoryMock as unknown as Repository<Quiz>,
+        quizArtistRepositoryMock as unknown as Repository<QuizArtist>,
+        quizSongRepositoryMock as unknown as Repository<QuizSong>,
+        quizAnswerRepositoryMock as unknown as Repository<QuizAnswer>,
+      );
+
+      expect(
+        anotherInstance.verifyMembershipToken(room.roomId, userId, accessToken),
+      ).toBe(true);
+    });
+
+    it('같은 계정이 다른 기기로 재입장해도 이전에 발급된 토큰이 계속 유효하다', async () => {
+      const { room, userId: hostUserId, accessToken: firstDeviceToken } =
+        await roomService.createRoom(
+          {
+            roomTtl: '아이유 방',
+            quizId: '1',
+            isRandom: false,
+            speedModeEnabled: false,
+            maxUserCnt: 4,
+            nickname: '방장',
+          },
+          'account-user-1',
+        );
+
+      // 같은 계정이 다른 기기(새 소켓)로 재입장 -> joinRoom이 다시 호출된다.
+      await roomService.joinRoom(
+        room.roomId,
+        { nickname: '방장' },
+        'account-user-1',
+      );
+
+      expect(
+        roomService.verifyMembershipToken(
+          room.roomId,
+          hostUserId,
+          firstDeviceToken,
+        ),
+      ).toBe(true);
+    });
+
+    it('퇴장한 뒤에도 토큰 자체는 여전히 서명이 유효하다(참가자 목록에서 빠지는 것이 실제 게이트)', async () => {
       const { room, userId, accessToken } = await createTestRoom();
       await roomService.joinRoom(room.roomId, { nickname: '참가자1' });
 
       await roomService.leaveRoom(room.roomId, userId);
+      const roomAfterLeave = await roomService.getRoom(room.roomId);
 
       expect(
         roomService.verifyMembershipToken(room.roomId, userId, accessToken),
+      ).toBe(true);
+      expect(
+        roomAfterLeave?.participants.some((p) => p.userId === userId),
       ).toBe(false);
     });
   });
