@@ -61,7 +61,11 @@ export function RoomGamePage() {
   const [songCount, setSongCount] = useState<number | null>(null);
   const [nextRoundShortcutEnabled, setNextRoundShortcutEnabled] =
     useState(true);
-  const [inquiryModalOpen, setInquiryModalOpen] = useState(false);
+  const [inquiryTarget, setInquiryTarget] = useState<{
+    quizSongId: string;
+    songNm: string;
+    atstNm: string;
+  } | null>(null);
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
   const chatPanelRef = useRef<ChatPanelHandle>(null);
   const [socket, setSocket] = useState<RoomSocket | null>(null);
@@ -377,9 +381,20 @@ export function RoomGamePage() {
     socket?.emit('game:force-skip');
   }, [socket]);
 
+  // 문의 대상 곡 정보는 모달을 여는 시점의 라운드 값을 그대로 고정해둔다.
+  // room.currentRound를 직접 참조하면 문의 작성 중 다음 라운드로 넘어갔을 때
+  // 모달이 사라지거나 문의 대상 곡이 바뀌어버린다.
   const handleOpenInquiry = useCallback(() => {
-    setInquiryModalOpen(true);
-  }, []);
+    const round = room?.currentRound;
+    if (!round?.quizSongId) {
+      return;
+    }
+    setInquiryTarget({
+      quizSongId: round.quizSongId,
+      songNm: round.songNm ?? '',
+      atstNm: round.atstNm ?? '',
+    });
+  }, [room]);
 
   const handleInquirySubmitted = useCallback((message: string) => {
     setChatEntries((prev) => [
@@ -497,14 +512,14 @@ export function RoomGamePage() {
         </div>
       </div>
 
-      {inquiryModalOpen && room.currentRound?.quizSongId && (
+      {inquiryTarget && (
         <InquiryModal
-          quizSongId={room.currentRound.quizSongId}
-          songNm={room.currentRound.songNm ?? ''}
-          atstNm={room.currentRound.atstNm ?? ''}
+          quizSongId={inquiryTarget.quizSongId}
+          songNm={inquiryTarget.songNm}
+          atstNm={inquiryTarget.atstNm}
           roomId={room.roomId}
           userId={userId}
-          onClose={() => setInquiryModalOpen(false)}
+          onClose={() => setInquiryTarget(null)}
           onSubmitted={handleInquirySubmitted}
         />
       )}
