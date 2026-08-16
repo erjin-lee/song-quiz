@@ -338,8 +338,8 @@ export function RoomListPage() {
               <li className="flex items-start gap-2.5">
                 <span className="shrink-0">⚡</span>
                 <span>
-                  스피드 모드에서는 첫 정답자가 나오면 곧바로 정답이 공개되고
-                  다음 라운드로 넘어가요.
+                  스피드 모드에서는 첫 정답자가 나오면 6초 뒤 정답이
+                  공개되고, 4초 뒤 자동으로 다음 라운드로 넘어가요.
                 </span>
               </li>
             </ul>

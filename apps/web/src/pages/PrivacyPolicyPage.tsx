@@ -74,8 +74,9 @@ export function PrivacyPolicyPage() {
                 <span className="font-semibold text-slate-700">
                   방 세션 정보
                 </span>{' '}
-                — 새로고침 후에도 게임에 재접속할 수 있도록 방 번호와
-                이용자 식별자를 브라우저 localStorage에 저장합니다.
+                — 새로고침 후에도 게임에 재접속할 수 있도록 방 번호,
+                이용자 식별자, 방 접근 토큰을 브라우저 localStorage에
+                저장합니다.
               </li>
               <li>
                 <span className="font-semibold text-slate-700">
@@ -167,8 +168,10 @@ export function PrivacyPolicyPage() {
               4. 쿠키 및 광고 맞춤 설정
             </h2>
             <p>
-              서비스는 자체적으로 쿠키를 사용하지 않으며, 닉네임·방 세션
-              정보만 브라우저 localStorage에 저장합니다. 다만 광고 게재
+              서비스는 자체적으로 쿠키를 사용하지 않으며, 위 제1항에서
+              설명한 닉네임, 인증 토큰, 방 세션 정보(방 번호·이용자
+              식별자·접근 토큰) 등만 브라우저 localStorage에 저장합니다.
+              다만 광고 게재
               과정에서 Google 및 광고 파트너가 쿠키·기기 식별자 등을 사용할
               수 있으며, 이용자는{' '}
               <a
