@@ -3,6 +3,7 @@ const ROOM_SESSION_STORAGE_KEY = 'song-quiz:room-session';
 export interface RoomSession {
   roomId: string;
   userId: string;
+  accessToken: string;
 }
 
 export function saveRoomSession(session: RoomSession): void {
@@ -19,7 +20,8 @@ export function loadRoomSession(): RoomSession | null {
     const parsed = JSON.parse(raw);
     if (
       typeof parsed?.roomId === 'string' &&
-      typeof parsed?.userId === 'string'
+      typeof parsed?.userId === 'string' &&
+      typeof parsed?.accessToken === 'string'
     ) {
       return parsed as RoomSession;
     }

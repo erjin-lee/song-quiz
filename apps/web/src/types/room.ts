@@ -60,6 +60,8 @@ export interface RoomItemDto {
 export interface RoomJoinResultDto {
   room: RoomItemDto;
   userId: string;
+  /** 이 방 참가자 본인만 아는 비공개 접근 토큰. 소켓 입장/퇴장 시 필요하다. */
+  accessToken: string;
 }
 
 export interface LeaveRoomResultDto {
@@ -82,4 +84,5 @@ export interface JoinRoomRequestDto {
 
 export interface LeaveRoomRequestDto {
   userId: string;
+  accessToken: string;
 }

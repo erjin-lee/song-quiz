@@ -110,9 +110,17 @@ export function CreateRoomPage() {
           maxUserCnt,
           nickname,
         });
-        saveRoomSession({ roomId: result.room.roomId, userId: result.userId });
+        saveRoomSession({
+          roomId: result.room.roomId,
+          userId: result.userId,
+          accessToken: result.accessToken,
+        });
         navigate(`/rooms/${result.room.roomId}`, {
-          state: { room: result.room, userId: result.userId },
+          state: {
+            room: result.room,
+            userId: result.userId,
+            accessToken: result.accessToken,
+          },
         });
       } catch (err) {
         setErrorMessage(

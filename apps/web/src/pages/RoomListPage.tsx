@@ -98,9 +98,17 @@ export function RoomListPage() {
       setIsJoinPreparingAd(false);
       try {
         const result = await joinRoom(roomId, { nickname });
-        saveRoomSession({ roomId, userId: result.userId });
+        saveRoomSession({
+          roomId,
+          userId: result.userId,
+          accessToken: result.accessToken,
+        });
         navigate(`/rooms/${roomId}`, {
-          state: { room: result.room, userId: result.userId },
+          state: {
+            room: result.room,
+            userId: result.userId,
+            accessToken: result.accessToken,
+          },
         });
       } catch (err) {
         setListError(

@@ -33,6 +33,12 @@ import type {
 interface LocationState {
   room: RoomItemDto;
   userId: string;
+  accessToken: string;
+}
+
+interface RoomMembership {
+  userId: string;
+  accessToken: string;
 }
 
 let entrySeq = 0;
@@ -47,6 +53,9 @@ export function RoomGamePage() {
 
   const [room, setRoom] = useState<RoomItemDto | null>(state?.room ?? null);
   const [userId, setUserId] = useState<string | null>(state?.userId ?? null);
+  const [accessToken, setAccessToken] = useState<string | null>(
+    state?.accessToken ?? null,
+  );
   const [loading, setLoading] = useState(true);
   const [chatEntries, setChatEntries] = useState<ChatEntry[]>([]);
   const [songCount, setSongCount] = useState<number | null>(null);
@@ -71,29 +80,36 @@ export function RoomGamePage() {
     serverTimeOffsetMsRef.current = serverTimeOffsetMs;
   }, [serverTimeOffsetMs]);
 
-  // location.state로 넘어온 userId가 없으면(새로고침 등) 로컬스토리지에 저장해둔
-  // { roomId, userId }로 이어서 입장한다. 둘 다 없으면(공유 링크로 직접 들어온
-  // 경우) 아래 두 번째 effect가 닉네임 준비 후 자동으로 방에 입장시킨다.
-  const [candidateUserId, setCandidateUserId] = useState<string | null>(
-    () => {
-      if (state?.userId) {
-        return state.userId;
+  // location.state로 넘어온 userId/accessToken이 없으면(새로고침 등) 로컬스토리지에
+  // 저장해둔 { roomId, userId, accessToken }으로 이어서 입장한다. 둘 다 없으면
+  // (공유 링크로 직접 들어온 경우) 아래 두 번째 effect가 닉네임 준비 후 자동으로
+  // 방에 입장시킨다.
+  const [candidateMembership, setCandidateMembership] =
+    useState<RoomMembership | null>(() => {
+      if (state?.userId && state?.accessToken) {
+        return { userId: state.userId, accessToken: state.accessToken };
       }
       const session = loadRoomSession();
-      return session && session.roomId === roomId ? session.userId : null;
-    },
-  );
+      return session && session.roomId === roomId
+        ? { userId: session.userId, accessToken: session.accessToken }
+        : null;
+    });
 
   useEffect(() => {
-    if (state?.userId) {
-      setCandidateUserId(state.userId);
+    if (state?.userId && state?.accessToken) {
+      setCandidateMembership({
+        userId: state.userId,
+        accessToken: state.accessToken,
+      });
       return;
     }
     const session = loadRoomSession();
-    setCandidateUserId(
-      session && session.roomId === roomId ? session.userId : null,
+    setCandidateMembership(
+      session && session.roomId === roomId
+        ? { userId: session.userId, accessToken: session.accessToken }
+        : null,
     );
-  }, [roomId, state?.userId]);
+  }, [roomId, state?.userId, state?.accessToken]);
 
   useEffect(() => {
     if (!roomId) {
@@ -101,7 +117,7 @@ export function RoomGamePage() {
       return;
     }
 
-    if (!candidateUserId) {
+    if (!candidateMembership) {
       return;
     }
 
@@ -113,20 +129,25 @@ export function RoomGamePage() {
           return;
         }
         const isParticipant = fetchedRoom.participants.some(
-          (participant) => participant.userId === candidateUserId,
+          (participant) => participant.userId === candidateMembership.userId,
         );
         if (!isParticipant) {
           // 서버에서는 이미 퇴장 처리됐지만 로컬 세션이 남아있던 경우다.
           // 방 목록으로 튕겨내지 않고, 아래 자동 입장 effect로 이어서
           // 새 참가자로 다시 입장시킨다.
           clearRoomSession();
-          setCandidateUserId(null);
+          setCandidateMembership(null);
           return;
         }
 
-        saveRoomSession({ roomId, userId: candidateUserId });
+        saveRoomSession({
+          roomId,
+          userId: candidateMembership.userId,
+          accessToken: candidateMembership.accessToken,
+        });
         setRoom(fetchedRoom);
-        setUserId(candidateUserId);
+        setUserId(candidateMembership.userId);
+        setAccessToken(candidateMembership.accessToken);
       })
       .catch(() => {
         if (!cancelled) {
@@ -144,12 +165,12 @@ export function RoomGamePage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId, candidateUserId]);
+  }, [roomId, candidateMembership]);
 
   // 참가 기록이 전혀 없는 직접 진입(공유 링크 등): 닉네임이 준비되는 대로
   // REST 입장을 호출해 게스트/로그인 유저 구분 없이 자동으로 방에 들어간다.
   useEffect(() => {
-    if (!roomId || candidateUserId) {
+    if (!roomId || candidateMembership) {
       return;
     }
     if (!isInitialized || !nickname) {
@@ -163,9 +184,14 @@ export function RoomGamePage() {
         if (cancelled) {
           return;
         }
-        saveRoomSession({ roomId, userId: result.userId });
+        saveRoomSession({
+          roomId,
+          userId: result.userId,
+          accessToken: result.accessToken,
+        });
         setRoom(result.room);
         setUserId(result.userId);
+        setAccessToken(result.accessToken);
       })
       .catch(() => {
         if (!cancelled) {
@@ -181,10 +207,10 @@ export function RoomGamePage() {
     return () => {
       cancelled = true;
     };
-  }, [roomId, candidateUserId, nickname, isInitialized, navigate]);
+  }, [roomId, candidateMembership, nickname, isInitialized, navigate]);
 
   useEffect(() => {
-    if (!roomId || !userId) {
+    if (!roomId || !userId || !accessToken) {
       return;
     }
 
@@ -262,13 +288,13 @@ export function RoomGamePage() {
     }
 
     socket.connect();
-    socket.emit('room:enter', { roomId, userId });
+    socket.emit('room:enter', { roomId, userId, accessToken });
 
     return () => {
       socket.disconnect();
       setSocket(null);
     };
-  }, [roomId, userId, nickname]);
+  }, [roomId, userId, accessToken, nickname]);
 
   const quizId = room?.quizId;
   useEffect(() => {
@@ -308,16 +334,16 @@ export function RoomGamePage() {
   // 선언해야 하므로 내부에서 null을 다시 확인한다(실제로는 얼리 리턴 이후에만 렌더되는
   // JSX에서 호출되므로 항상 non-null이다).
   const handleLeave = useCallback(async () => {
-    if (!room || !userId) {
+    if (!room || !userId || !accessToken) {
       return;
     }
     try {
-      await leaveRoom(room.roomId, userId);
+      await leaveRoom(room.roomId, userId, accessToken);
     } finally {
       clearRoomSession();
       navigate('/rooms', { replace: true });
     }
-  }, [room, userId, navigate]);
+  }, [room, userId, accessToken, navigate]);
 
   const handleSendChat = useCallback(
     (message: string) => {

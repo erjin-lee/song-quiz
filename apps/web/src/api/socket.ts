@@ -44,7 +44,11 @@ export interface TimeSyncResponse {
 }
 
 export interface RoomClientToServerEvents {
-  'room:enter': (payload: { roomId: string; userId: string }) => void;
+  'room:enter': (payload: {
+    roomId: string;
+    userId: string;
+    accessToken: string;
+  }) => void;
   'chat:message': (payload: { message: string }) => void;
   'room:leave': () => void;
   'game:start': () => void;
