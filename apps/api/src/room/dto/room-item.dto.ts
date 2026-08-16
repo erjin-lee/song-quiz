@@ -22,6 +22,16 @@ export class RoomItemDto {
   quizTtl: string;
 
   @ApiProperty({
+    description: '퀴즈 설명. 등록되지 않은 경우 null',
+    example: '아이유 노래 맞추기',
+    nullable: true,
+  })
+  quizDesc: string | null;
+
+  @ApiProperty({ description: '퀴즈 출제곡 개수', example: 140 })
+  songCount: number;
+
+  @ApiProperty({
     description: '퀴즈 썸네일 이미지 URL. 등록되지 않은 경우 null',
     example: null,
     nullable: true,

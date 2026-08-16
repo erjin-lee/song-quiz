@@ -40,6 +40,8 @@ export interface RoomItemDto {
   roomTtl: string;
   quizId: string;
   quizTtl: string;
+  quizDesc: string | null;
+  songCount: number;
   quizThumbImgUrl: string | null;
   atstIds: string[];
   atstNms: string[];
@@ -72,10 +74,12 @@ export interface CreateRoomRequestDto {
   speedModeEnabled: boolean;
   maxUserCnt: number;
   nickname: string;
+  userId?: string;
 }
 
 export interface JoinRoomRequestDto {
   nickname: string;
+  userId?: string;
 }
 
 export interface LeaveRoomRequestDto {

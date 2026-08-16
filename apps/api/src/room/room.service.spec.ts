@@ -60,6 +60,7 @@ describe('RoomService', () => {
   const quizSongRepositoryMock = {
     find: jest.fn(),
     findOne: jest.fn(),
+    count: jest.fn(),
   };
   const quizAnswerRepositoryMock = {
     find: jest.fn(),
@@ -71,12 +72,14 @@ describe('RoomService', () => {
     quizRepositoryMock.findOne.mockResolvedValue({
       quizId: '1',
       quizTtl: '아이유',
+      quizDesc: '아이유 노래 맞추기',
       useYn: 'Y',
     });
     quizArtistRepositoryMock.find.mockResolvedValue([
       { atstId: '10', artist: { atstNm: '아이유' } },
     ]);
     quizSongRepositoryMock.find.mockResolvedValue(QUIZ_SONGS);
+    quizSongRepositoryMock.count.mockResolvedValue(QUIZ_SONGS.length);
     quizSongRepositoryMock.findOne.mockImplementation(
       ({ where }: { where: { quizSongId: string } }) =>
         Promise.resolve(
@@ -136,6 +139,8 @@ describe('RoomService', () => {
       const result = await createTestRoom();
 
       expect(result.room.quizTtl).toBe('아이유');
+      expect(result.room.quizDesc).toBe('아이유 노래 맞추기');
+      expect(result.room.songCount).toBe(2);
       expect(result.room.atstIds).toEqual(['10']);
       expect(result.room.atstNms).toEqual(['아이유']);
       expect(result.room.curUserCnt).toBe(1);
@@ -145,6 +150,21 @@ describe('RoomService', () => {
       expect(result.room.participants).toEqual([
         { userId: result.userId, nickname: '방장', score: 0 },
       ]);
+    });
+
+    it('userId를 지정해 생성하면(로그인 유저) 그 값을 hostUserId로 그대로 쓴다', async () => {
+      const result = await roomService.createRoom({
+        roomTtl: '아이유 방',
+        quizId: '1',
+        isRandom: false,
+        speedModeEnabled: false,
+        maxUserCnt: 4,
+        nickname: '방장',
+        userId: 'account-user-1',
+      });
+
+      expect(result.userId).toBe('account-user-1');
+      expect(result.room.hostUserId).toBe('account-user-1');
     });
 
     it('존재하지 않는 퀴즈로 생성하면 NotFoundException', async () => {
@@ -182,6 +202,54 @@ describe('RoomService', () => {
         { userId: room.hostUserId, nickname: '방장', score: 0 },
         { userId: joinResult.userId, nickname: '참가자1', score: 0 },
       ]);
+    });
+
+    it('userId를 지정해 입장하면(로그인 유저) 그 값을 참가자 userId로 그대로 쓴다', async () => {
+      const { room } = await createTestRoom();
+
+      const joinResult = await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+        userId: 'account-user-1',
+      });
+
+      expect(joinResult.userId).toBe('account-user-1');
+      expect(joinResult.room.participants).toEqual([
+        { userId: room.hostUserId, nickname: '방장', score: 0 },
+        { userId: 'account-user-1', nickname: '참가자1', score: 0 },
+      ]);
+    });
+
+    it('이미 참가 중인 userId로 다시 입장하면 중복 추가하지 않고 그대로 재입장시킨다', async () => {
+      const { room } = await createTestRoom();
+      await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+        userId: 'account-user-1',
+      });
+
+      const rejoinResult = await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+        userId: 'account-user-1',
+      });
+
+      expect(rejoinResult.userId).toBe('account-user-1');
+      expect(rejoinResult.room.curUserCnt).toBe(2);
+      expect(rejoinResult.room.participants).toHaveLength(2);
+    });
+
+    it('방이 가득 차도 이미 참가 중인 userId면 재입장할 수 있다', async () => {
+      const { room } = await createTestRoom(2);
+      await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+        userId: 'account-user-1',
+      });
+
+      const rejoinResult = await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+        userId: 'account-user-1',
+      });
+
+      expect(rejoinResult.userId).toBe('account-user-1');
+      expect(rejoinResult.room.participants).toHaveLength(2);
     });
 
     it('정원이 가득 찬 방에 입장하면 ConflictException', async () => {

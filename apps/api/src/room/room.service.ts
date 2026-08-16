@@ -153,13 +153,18 @@ export class RoomService extends EventEmitter {
       where: { quizId: dto.quizId },
       relations: { artist: true },
     });
+    const songCount = await this.quizSongRepository.count({
+      where: { quizId: dto.quizId },
+    });
 
-    const hostUserId = randomUUID();
+    const hostUserId = dto.userId ?? randomUUID();
     const room: RoomItemDto = {
       roomId: randomUUID(),
       roomTtl: dto.roomTtl,
       quizId: dto.quizId,
       quizTtl: quiz.quizTtl,
+      quizDesc: quiz.quizDesc,
+      songCount,
       quizThumbImgUrl: quiz.thumbImgUrl,
       atstIds: quizArtists.map((quizArtist) => quizArtist.atstId),
       atstNms: quizArtists.map((quizArtist) => quizArtist.artist.atstNm),
@@ -187,11 +192,22 @@ export class RoomService extends EventEmitter {
     return this.withRoomLock(roomId, async () => {
       const room = await this.getRoomOrThrow(roomId);
 
+      // 로그인 유저는 계정 userId를 그대로 참가자 ID로 쓰므로, 같은 방에
+      // 다시 입장(재조회 등)하면 중복 참가자를 만들지 않고 그대로 재입장시킨다.
+      if (dto.userId) {
+        const existing = room.participants.find(
+          (p) => p.userId === dto.userId,
+        );
+        if (existing) {
+          return { room, userId: existing.userId };
+        }
+      }
+
       if (room.curUserCnt >= room.maxUserCnt) {
         throw new ConflictException('방 정원이 가득 찼습니다.');
       }
 
-      const userId = randomUUID();
+      const userId = dto.userId ?? randomUUID();
       room.participants.push({ userId, nickname: dto.nickname, score: 0 });
       room.curUserCnt = room.participants.length;
 
