@@ -4,18 +4,13 @@ import { AdBanner } from '../components/AdBanner';
 import { Logo } from '../components/Logo';
 import { RoomActionOverlay } from '../components/RoomActionOverlay';
 import { RoomCard } from '../components/RoomCard';
-import {
-  CreateRoomModal,
-  type CreateRoomFormValues,
-} from '../components/CreateRoomModal';
 import { useSession } from '../context/SessionContext';
 import { useDocumentMeta } from '../hooks/useDocumentMeta';
+import { useGuestNicknameFallback } from '../hooks/useGuestNicknameFallback';
 import { ApiError } from '../api/client';
 import { getAdConfig } from '../api/config';
-import { getQuizzes } from '../api/quiz';
-import { createRoom, getRooms, joinRoom } from '../api/room';
+import { getRooms, joinRoom } from '../api/room';
 import { saveRoomSession } from '../utils/roomSession';
-import type { QuizListItemDto } from '../types/quiz';
 import type { RoomItemDto } from '../types/room';
 
 const ADSENSE_SLOT_ROOM_LIST = import.meta.env.VITE_ADSENSE_SLOT_ROOM_LIST;
@@ -24,14 +19,11 @@ const ROOM_LIST_POLL_MS = 5000;
 const JOIN_AD_DELAY_MS = 3000;
 
 export function RoomListPage() {
-  const { nickname } = useSession();
+  const { nickname, isAuthenticated, accountUserId, logout } = useSession();
   const navigate = useNavigate();
+  useGuestNicknameFallback();
 
   const [rooms, setRooms] = useState<RoomItemDto[]>([]);
-  const [quizzes, setQuizzes] = useState<QuizListItemDto[]>([]);
-  const [isCreateModalOpen, setCreateModalOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
   const [joiningRoomId, setJoiningRoomId] = useState<string | null>(null);
   const [isJoinPreparingAd, setIsJoinPreparingAd] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
@@ -73,12 +65,6 @@ export function RoomListPage() {
   }, []);
 
   useEffect(() => {
-    getQuizzes()
-      .then(setQuizzes)
-      .catch(() => setQuizzes([]));
-  }, []);
-
-  useEffect(() => {
     getAdConfig()
       .then((config) => setAdEnabled(config.adEnabled))
       .catch(() => setAdEnabled(false));
@@ -96,24 +82,6 @@ export function RoomListPage() {
     );
   }, [rooms, searchQuery]);
 
-  const handleCreate = async (values: CreateRoomFormValues) => {
-    setCreating(true);
-    setCreateError(null);
-    try {
-      const result = await createRoom({ ...values, nickname });
-      saveRoomSession({ roomId: result.room.roomId, userId: result.userId });
-      navigate(`/rooms/${result.room.roomId}`, {
-        state: { room: result.room, userId: result.userId },
-      });
-    } catch (err) {
-      setCreateError(
-        err instanceof ApiError ? err.message : '방 생성에 실패했습니다.',
-      );
-    } finally {
-      setCreating(false);
-    }
-  };
-
   const handleJoin = (roomId: string) => {
     if (!nickname) {
       navigate('/');
@@ -126,7 +94,10 @@ export function RoomListPage() {
     const doJoin = async () => {
       setIsJoinPreparingAd(false);
       try {
-        const result = await joinRoom(roomId, { nickname });
+        const result = await joinRoom(roomId, {
+          nickname,
+          ...(isAuthenticated && accountUserId ? { userId: accountUserId } : {}),
+        });
         saveRoomSession({ roomId, userId: result.userId });
         navigate(`/rooms/${roomId}`, {
           state: { room: result.room, userId: result.userId },
@@ -153,7 +124,7 @@ export function RoomListPage() {
       <div className="mx-auto flex max-w-3xl flex-col gap-6">
         <header className="flex items-center justify-between">
           <Logo size="md" />
-          <span className="text-sm text-slate-500">
+          <span className="flex items-center gap-2 text-sm text-slate-500">
             {nickname ? (
               `${nickname}님 환영합니다`
             ) : (
@@ -163,6 +134,18 @@ export function RoomListPage() {
                 className="underline decoration-dotted underline-offset-2 hover:text-purple-500"
               >
                 닉네임 등록하기
+              </button>
+            )}
+            {isAuthenticated && (
+              <button
+                type="button"
+                onClick={() => {
+                  logout();
+                  navigate('/');
+                }}
+                className="underline decoration-dotted underline-offset-2 hover:text-purple-500"
+              >
+                로그아웃
               </button>
             )}
           </span>
@@ -177,7 +160,7 @@ export function RoomListPage() {
                 navigate('/');
                 return;
               }
-              setCreateModalOpen(true);
+              navigate('/rooms/new');
             }}
             className="rounded-full bg-purple-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-purple-600"
           >
@@ -220,17 +203,6 @@ export function RoomListPage() {
           <AdBanner slotId={ADSENSE_SLOT_ROOM_LIST} />
         </div>
       </div>
-
-      {isCreateModalOpen && (
-        <CreateRoomModal
-          quizzes={quizzes}
-          submitting={creating}
-          errorMessage={createError}
-          adEnabled={adEnabled}
-          onSubmit={handleCreate}
-          onClose={() => setCreateModalOpen(false)}
-        />
-      )}
 
       {isJoinPreparingAd && (
         <RoomActionOverlay message="방에 입장하는 중입니다..." />

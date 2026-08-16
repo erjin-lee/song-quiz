@@ -24,14 +24,17 @@ export function RoomCard({ room, onJoin, joining }: RoomCardProps) {
           </div>
         )}
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="truncate font-bold text-slate-800">
-              {room.roomTtl}
-            </h3>
-            <span className="shrink-0 rounded-full bg-purple-50 px-2.5 py-0.5 text-xs font-medium text-purple-600">
-              {room.quizTtl}
-            </span>
-          </div>
+          <h3 className="truncate font-bold text-slate-800">
+            {room.roomTtl}
+          </h3>
+          <p className="mt-1 truncate text-sm font-medium text-purple-600">
+            {room.quizTtl} · 총 {room.songCount}곡
+          </p>
+          {room.quizDesc && (
+            <p className="mt-0.5 truncate text-xs text-slate-400">
+              {room.quizDesc}
+            </p>
+          )}
           {room.atstNms.length > 0 && (
             <p className="mt-1 truncate text-sm text-slate-400">
               {room.atstNms.join(', ')}
