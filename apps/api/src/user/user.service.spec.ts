@@ -202,6 +202,7 @@ describe('UserService', () => {
         userId: 'random-user-id',
         loginId: 'songquiz01',
         nickNm: '노래왕',
+        status: 'ACTIVE',
       });
 
       const result = await service.getMe('random-user-id');
@@ -221,6 +222,20 @@ describe('UserService', () => {
 
       await expect(service.getMe('unknown')).rejects.toThrow(
         NotFoundException,
+      );
+    });
+
+    it('status가 ACTIVE가 아니면 UnauthorizedException을 던진다', async () => {
+      userRepositoryMock.findOne.mockResolvedValue({
+        userKey: '1',
+        userId: 'random-user-id',
+        loginId: 'songquiz01',
+        nickNm: '노래왕',
+        status: 'SUSPENDED',
+      });
+
+      await expect(service.getMe('random-user-id')).rejects.toThrow(
+        UnauthorizedException,
       );
     });
   });

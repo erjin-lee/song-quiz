@@ -120,6 +120,12 @@ export class UserService {
     if (!user) {
       throw new NotFoundException('유저를 찾을 수 없습니다.');
     }
+    if (user.status !== 'ACTIVE') {
+      // 정지/탈퇴 등으로 상태가 바뀐 뒤에도 이미 발급된 JWT는 만료 전까지
+      // 서명 검증만으로는 계속 유효하므로, /auth/me 조회 시점에 DB 상태를
+      // 다시 확인해 더 이상 인증된 것으로 취급하지 않는다.
+      throw new UnauthorizedException('계정이 비활성화되었습니다.');
+    }
     return user;
   }
 }
