@@ -74,12 +74,10 @@ export interface CreateRoomRequestDto {
   speedModeEnabled: boolean;
   maxUserCnt: number;
   nickname: string;
-  userId?: string;
 }
 
 export interface JoinRoomRequestDto {
   nickname: string;
-  userId?: string;
 }
 
 export interface LeaveRoomRequestDto {

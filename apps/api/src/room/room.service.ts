@@ -139,7 +139,10 @@ export class RoomService extends EventEmitter {
     return this.cacheService.get<RoomItemDto>(this.roomKey(roomId));
   }
 
-  async createRoom(dto: CreateRoomRequestDto): Promise<RoomJoinResultDto> {
+  async createRoom(
+    dto: CreateRoomRequestDto,
+    accountUserId?: string,
+  ): Promise<RoomJoinResultDto> {
     const quiz = await this.quizRepository.findOne({
       where: { quizId: dto.quizId, useYn: 'Y' },
     });
@@ -157,7 +160,7 @@ export class RoomService extends EventEmitter {
       where: { quizId: dto.quizId },
     });
 
-    const hostUserId = dto.userId ?? randomUUID();
+    const hostUserId = accountUserId ?? randomUUID();
     const room: RoomItemDto = {
       roomId: randomUUID(),
       roomTtl: dto.roomTtl,
@@ -188,15 +191,16 @@ export class RoomService extends EventEmitter {
   async joinRoom(
     roomId: string,
     dto: JoinRoomRequestDto,
+    accountUserId?: string,
   ): Promise<RoomJoinResultDto> {
     return this.withRoomLock(roomId, async () => {
       const room = await this.getRoomOrThrow(roomId);
 
       // 로그인 유저는 계정 userId를 그대로 참가자 ID로 쓰므로, 같은 방에
       // 다시 입장(재조회 등)하면 중복 참가자를 만들지 않고 그대로 재입장시킨다.
-      if (dto.userId) {
+      if (accountUserId) {
         const existing = room.participants.find(
-          (p) => p.userId === dto.userId,
+          (p) => p.userId === accountUserId,
         );
         if (existing) {
           return { room, userId: existing.userId };
@@ -207,7 +211,7 @@ export class RoomService extends EventEmitter {
         throw new ConflictException('방 정원이 가득 찼습니다.');
       }
 
-      const userId = dto.userId ?? randomUUID();
+      const userId = accountUserId ?? randomUUID();
       room.participants.push({ userId, nickname: dto.nickname, score: 0 });
       room.curUserCnt = room.participants.length;
 

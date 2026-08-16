@@ -152,16 +152,18 @@ describe('RoomService', () => {
       ]);
     });
 
-    it('userId를 지정해 생성하면(로그인 유저) 그 값을 hostUserId로 그대로 쓴다', async () => {
-      const result = await roomService.createRoom({
-        roomTtl: '아이유 방',
-        quizId: '1',
-        isRandom: false,
-        speedModeEnabled: false,
-        maxUserCnt: 4,
-        nickname: '방장',
-        userId: 'account-user-1',
-      });
+    it('accountUserId를 전달해 생성하면(로그인 유저) 그 값을 hostUserId로 그대로 쓴다', async () => {
+      const result = await roomService.createRoom(
+        {
+          roomTtl: '아이유 방',
+          quizId: '1',
+          isRandom: false,
+          speedModeEnabled: false,
+          maxUserCnt: 4,
+          nickname: '방장',
+        },
+        'account-user-1',
+      );
 
       expect(result.userId).toBe('account-user-1');
       expect(result.room.hostUserId).toBe('account-user-1');
@@ -204,13 +206,14 @@ describe('RoomService', () => {
       ]);
     });
 
-    it('userId를 지정해 입장하면(로그인 유저) 그 값을 참가자 userId로 그대로 쓴다', async () => {
+    it('accountUserId를 전달해 입장하면(로그인 유저) 그 값을 참가자 userId로 그대로 쓴다', async () => {
       const { room } = await createTestRoom();
 
-      const joinResult = await roomService.joinRoom(room.roomId, {
-        nickname: '참가자1',
-        userId: 'account-user-1',
-      });
+      const joinResult = await roomService.joinRoom(
+        room.roomId,
+        { nickname: '참가자1' },
+        'account-user-1',
+      );
 
       expect(joinResult.userId).toBe('account-user-1');
       expect(joinResult.room.participants).toEqual([
@@ -219,34 +222,38 @@ describe('RoomService', () => {
       ]);
     });
 
-    it('이미 참가 중인 userId로 다시 입장하면 중복 추가하지 않고 그대로 재입장시킨다', async () => {
+    it('이미 참가 중인 accountUserId로 다시 입장하면 중복 추가하지 않고 그대로 재입장시킨다', async () => {
       const { room } = await createTestRoom();
-      await roomService.joinRoom(room.roomId, {
-        nickname: '참가자1',
-        userId: 'account-user-1',
-      });
+      await roomService.joinRoom(
+        room.roomId,
+        { nickname: '참가자1' },
+        'account-user-1',
+      );
 
-      const rejoinResult = await roomService.joinRoom(room.roomId, {
-        nickname: '참가자1',
-        userId: 'account-user-1',
-      });
+      const rejoinResult = await roomService.joinRoom(
+        room.roomId,
+        { nickname: '참가자1' },
+        'account-user-1',
+      );
 
       expect(rejoinResult.userId).toBe('account-user-1');
       expect(rejoinResult.room.curUserCnt).toBe(2);
       expect(rejoinResult.room.participants).toHaveLength(2);
     });
 
-    it('방이 가득 차도 이미 참가 중인 userId면 재입장할 수 있다', async () => {
+    it('방이 가득 차도 이미 참가 중인 accountUserId면 재입장할 수 있다', async () => {
       const { room } = await createTestRoom(2);
-      await roomService.joinRoom(room.roomId, {
-        nickname: '참가자1',
-        userId: 'account-user-1',
-      });
+      await roomService.joinRoom(
+        room.roomId,
+        { nickname: '참가자1' },
+        'account-user-1',
+      );
 
-      const rejoinResult = await roomService.joinRoom(room.roomId, {
-        nickname: '참가자1',
-        userId: 'account-user-1',
-      });
+      const rejoinResult = await roomService.joinRoom(
+        room.roomId,
+        { nickname: '참가자1' },
+        'account-user-1',
+      );
 
       expect(rejoinResult.userId).toBe('account-user-1');
       expect(rejoinResult.room.participants).toHaveLength(2);
