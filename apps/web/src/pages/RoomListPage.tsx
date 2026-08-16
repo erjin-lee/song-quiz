@@ -19,7 +19,7 @@ const ROOM_LIST_POLL_MS = 5000;
 const JOIN_AD_DELAY_MS = 3000;
 
 export function RoomListPage() {
-  const { nickname, isAuthenticated, accountUserId, logout } = useSession();
+  const { nickname, isAuthenticated, isInitialized, logout } = useSession();
   const navigate = useNavigate();
   useGuestNicknameFallback();
 
@@ -83,6 +83,9 @@ export function RoomListPage() {
   }, [rooms, searchQuery]);
 
   const handleJoin = (roomId: string) => {
+    if (!isInitialized) {
+      return;
+    }
     if (!nickname) {
       navigate('/');
       return;
@@ -94,10 +97,7 @@ export function RoomListPage() {
     const doJoin = async () => {
       setIsJoinPreparingAd(false);
       try {
-        const result = await joinRoom(roomId, {
-          nickname,
-          ...(isAuthenticated && accountUserId ? { userId: accountUserId } : {}),
-        });
+        const result = await joinRoom(roomId, { nickname });
         saveRoomSession({ roomId, userId: result.userId });
         navigate(`/rooms/${roomId}`, {
           state: { room: result.room, userId: result.userId },
@@ -156,13 +156,17 @@ export function RoomListPage() {
           <button
             type="button"
             onClick={() => {
+              if (!isInitialized) {
+                return;
+              }
               if (!nickname) {
                 navigate('/');
                 return;
               }
               navigate('/rooms/new');
             }}
-            className="rounded-full bg-purple-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-purple-600"
+            disabled={!isInitialized}
+            className="rounded-full bg-purple-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-purple-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
           >
             + 새 방 만들기
           </button>
@@ -194,6 +198,7 @@ export function RoomListPage() {
               key={room.roomId}
               room={room}
               joining={joiningRoomId === room.roomId}
+              disabled={!isInitialized}
               onJoin={() => handleJoin(room.roomId)}
             />
           ))}

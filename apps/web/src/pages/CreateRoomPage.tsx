@@ -15,7 +15,7 @@ import type { QuizListItemDto } from '../types/quiz';
 const CREATE_AD_DELAY_MS = 3000;
 
 export function CreateRoomPage() {
-  const { nickname, isAuthenticated, accountUserId } = useSession();
+  const { nickname, isInitialized } = useSession();
   useGuestNicknameFallback();
   const navigate = useNavigate();
 
@@ -94,7 +94,7 @@ export function CreateRoomPage() {
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
-    if (!roomTtl.trim() || !quizId || !nickname) {
+    if (!roomTtl.trim() || !quizId || !nickname || !isInitialized) {
       return;
     }
 
@@ -109,7 +109,6 @@ export function CreateRoomPage() {
           speedModeEnabled,
           maxUserCnt,
           nickname,
-          ...(isAuthenticated && accountUserId ? { userId: accountUserId } : {}),
         });
         saveRoomSession({ roomId: result.room.roomId, userId: result.userId });
         navigate(`/rooms/${result.room.roomId}`, {
@@ -278,7 +277,7 @@ export function CreateRoomPage() {
               </button>
               <button
                 type="submit"
-                disabled={submitting || quizzes.length === 0}
+                disabled={submitting || quizzes.length === 0 || !isInitialized}
                 className="rounded-full bg-purple-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-purple-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
               >
                 {submitting ? '생성 중...' : '만들기'}

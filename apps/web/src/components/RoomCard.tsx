@@ -4,9 +4,10 @@ interface RoomCardProps {
   room: RoomItemDto;
   onJoin: () => void;
   joining: boolean;
+  disabled?: boolean;
 }
 
-export function RoomCard({ room, onJoin, joining }: RoomCardProps) {
+export function RoomCard({ room, onJoin, joining, disabled }: RoomCardProps) {
   const isFull = room.curUserCnt >= room.maxUserCnt;
 
   return (
@@ -52,7 +53,7 @@ export function RoomCard({ room, onJoin, joining }: RoomCardProps) {
         <button
           type="button"
           onClick={onJoin}
-          disabled={isFull || joining}
+          disabled={isFull || joining || disabled}
           className="rounded-full bg-purple-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-purple-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
         >
           {isFull ? '정원 초과' : joining ? '입장 중...' : '입장하기'}

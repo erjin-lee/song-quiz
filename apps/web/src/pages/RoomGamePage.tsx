@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Logo } from '../components/Logo';
 import { ParticipantList } from '../components/ParticipantList';
@@ -56,8 +56,7 @@ export function RoomGamePage() {
   const chatPanelRef = useRef<ChatPanelHandle>(null);
   const [socket, setSocket] = useState<RoomSocket | null>(null);
   const serverTimeOffsetMs = useServerClockOffset(socket);
-  const { nickname, isAuthenticated, isInitialized, accountUserId } =
-    useSession();
+  const { nickname, isInitialized } = useSession();
   useGuestNicknameFallback();
 
   useDocumentMeta({
@@ -75,12 +74,25 @@ export function RoomGamePage() {
   // location.state로 넘어온 userId가 없으면(새로고침 등) 로컬스토리지에 저장해둔
   // { roomId, userId }로 이어서 입장한다. 둘 다 없으면(공유 링크로 직접 들어온
   // 경우) 아래 두 번째 effect가 닉네임 준비 후 자동으로 방에 입장시킨다.
-  const candidateUserId = useMemo(() => {
+  const [candidateUserId, setCandidateUserId] = useState<string | null>(
+    () => {
+      if (state?.userId) {
+        return state.userId;
+      }
+      const session = loadRoomSession();
+      return session && session.roomId === roomId ? session.userId : null;
+    },
+  );
+
+  useEffect(() => {
     if (state?.userId) {
-      return state.userId;
+      setCandidateUserId(state.userId);
+      return;
     }
     const session = loadRoomSession();
-    return session && session.roomId === roomId ? session.userId : null;
+    setCandidateUserId(
+      session && session.roomId === roomId ? session.userId : null,
+    );
   }, [roomId, state?.userId]);
 
   useEffect(() => {
@@ -104,8 +116,11 @@ export function RoomGamePage() {
           (participant) => participant.userId === candidateUserId,
         );
         if (!isParticipant) {
+          // 서버에서는 이미 퇴장 처리됐지만 로컬 세션이 남아있던 경우다.
+          // 방 목록으로 튕겨내지 않고, 아래 자동 입장 effect로 이어서
+          // 새 참가자로 다시 입장시킨다.
           clearRoomSession();
-          navigate('/rooms', { replace: true });
+          setCandidateUserId(null);
           return;
         }
 
@@ -143,10 +158,7 @@ export function RoomGamePage() {
 
     let cancelled = false;
 
-    joinRoom(roomId, {
-      nickname,
-      ...(isAuthenticated && accountUserId ? { userId: accountUserId } : {}),
-    })
+    joinRoom(roomId, { nickname })
       .then((result) => {
         if (cancelled) {
           return;
@@ -169,15 +181,7 @@ export function RoomGamePage() {
     return () => {
       cancelled = true;
     };
-  }, [
-    roomId,
-    candidateUserId,
-    nickname,
-    isAuthenticated,
-    isInitialized,
-    accountUserId,
-    navigate,
-  ]);
+  }, [roomId, candidateUserId, nickname, isInitialized, navigate]);
 
   useEffect(() => {
     if (!roomId || !userId) {
