@@ -241,7 +241,7 @@ describe('AdminService', () => {
     it('신규 loginId면 ADMIN 계정을 생성하고 임시 비밀번호를 반환한다', async () => {
       userRepositoryMock.findOne.mockResolvedValue(null);
       userRepositoryMock.save.mockResolvedValue({
-        userId: '3',
+        userKey: '3',
         loginId: 'admin2',
         nickNm: '운영자2',
       });
@@ -254,6 +254,7 @@ describe('AdminService', () => {
       expect(bcrypt.hash).toHaveBeenCalledWith('temp-password-123', 10);
       expect(userRepositoryMock.save).toHaveBeenCalledWith(
         expect.objectContaining({
+          userId: expect.any(String),
           loginId: 'admin2',
           nickNm: '운영자2',
           pwdHash: 'hashed-password',
@@ -292,7 +293,7 @@ describe('AdminService', () => {
     it('role=ADMIN 필터로 최신순 조회하고 비밀번호 관련 필드를 포함하지 않는다', async () => {
       userRepositoryMock.find.mockResolvedValue([
         {
-          userId: '1',
+          userKey: '1',
           loginId: 'admin',
           nickNm: '관리자',
           pwdHash: 'secret-hash',
@@ -322,7 +323,7 @@ describe('AdminService', () => {
 
   describe('login', () => {
     const admin = {
-      userId: '1',
+      userKey: '1',
       loginId: 'admin',
       nickNm: '관리자',
       pwdHash: 'hashed-password',
@@ -403,7 +404,7 @@ describe('AdminService', () => {
   describe('getMe', () => {
     it('userId+role=ADMIN으로 조회해 본인 정보를 반환한다', async () => {
       userRepositoryMock.findOne.mockResolvedValue({
-        userId: '1',
+        userKey: '1',
         loginId: 'admin',
         nickNm: '관리자',
       });
@@ -411,7 +412,7 @@ describe('AdminService', () => {
       const result = await service.getMe('1');
 
       expect(userRepositoryMock.findOne).toHaveBeenCalledWith({
-        where: { userId: '1', role: 'ADMIN' },
+        where: { userKey: '1', role: 'ADMIN' },
       });
       expect(result).toEqual({
         userId: '1',
@@ -430,7 +431,7 @@ describe('AdminService', () => {
   describe('updateMyProfile', () => {
     it('닉네임을 수정하고 갱신된 정보를 반환한다', async () => {
       userRepositoryMock.findOne.mockResolvedValue({
-        userId: '1',
+        userKey: '1',
         loginId: 'admin',
         nickNm: '관리자',
       });
@@ -459,7 +460,7 @@ describe('AdminService', () => {
 
   describe('changeMyPassword', () => {
     const admin = {
-      userId: '1',
+      userKey: '1',
       loginId: 'admin',
       nickNm: '관리자',
       pwdHash: 'hashed-password',

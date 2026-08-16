@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
@@ -34,6 +35,7 @@ export class AdminSeedService implements OnApplicationBootstrap {
     const now = new Date();
     await this.userRepository.save(
       this.userRepository.create({
+        userId: randomUUID(),
         loginId,
         nickNm: '관리자',
         pwdHash: await bcrypt.hash(password, BCRYPT_SALT_ROUNDS),

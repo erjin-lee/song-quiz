@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import {
   ConflictException,
   Injectable,
@@ -125,6 +126,7 @@ export class AdminService {
     try {
       saved = await this.userRepository.save(
         this.userRepository.create({
+          userId: randomUUID(),
           loginId: dto.loginId,
           nickNm: dto.nickNm,
           pwdHash,
@@ -144,7 +146,7 @@ export class AdminService {
     }
 
     return {
-      userId: saved.userId,
+      userId: saved.userKey,
       loginId: saved.loginId,
       nickNm: saved.nickNm,
       temporaryPassword,
@@ -157,7 +159,7 @@ export class AdminService {
       order: { crtDt: 'DESC' },
     });
     return admins.map((admin) => ({
-      userId: admin.userId,
+      userId: admin.userKey,
       loginId: admin.loginId,
       nickNm: admin.nickNm,
       status: admin.status,
@@ -181,8 +183,8 @@ export class AdminService {
     }
 
     const payload: AdminJwtPayload = {
-      sub: admin.userId,
-      userId: admin.userId,
+      sub: admin.userKey,
+      userId: admin.userKey,
       loginId: admin.loginId,
       nickNm: admin.nickNm,
       role: 'ADMIN',
@@ -192,14 +194,14 @@ export class AdminService {
       expiresIn: ADMIN_JWT_EXPIRES_IN,
     });
 
-    await this.userRepository.update(admin.userId, { lastLoginDt: new Date() });
+    await this.userRepository.update(admin.userKey, { lastLoginDt: new Date() });
     return { accessToken, loginId: admin.loginId, nickNm: admin.nickNm };
   }
 
   async getMe(userId: string): Promise<AdminMeDto> {
     const admin = await this.findAdminByUserIdOrThrow(userId);
     return {
-      userId: admin.userId,
+      userId: admin.userKey,
       loginId: admin.loginId,
       nickNm: admin.nickNm,
     };
@@ -210,8 +212,8 @@ export class AdminService {
     dto: UpdateAdminProfileRequestDto,
   ): Promise<AdminMeDto> {
     const admin = await this.findAdminByUserIdOrThrow(userId);
-    await this.userRepository.update(admin.userId, { nickNm: dto.nickNm });
-    return { userId: admin.userId, loginId: admin.loginId, nickNm: dto.nickNm };
+    await this.userRepository.update(admin.userKey, { nickNm: dto.nickNm });
+    return { userId: admin.userKey, loginId: admin.loginId, nickNm: dto.nickNm };
   }
 
   async changeMyPassword(
@@ -223,12 +225,12 @@ export class AdminService {
       throw new UnauthorizedException('현재 비밀번호가 올바르지 않습니다.');
     }
     const pwdHash = await bcrypt.hash(dto.newPassword, BCRYPT_SALT_ROUNDS);
-    await this.userRepository.update(admin.userId, { pwdHash });
+    await this.userRepository.update(admin.userKey, { pwdHash });
   }
 
   private async findAdminByUserIdOrThrow(userId: string): Promise<User> {
     const admin = await this.userRepository.findOne({
-      where: { userId, role: ADMIN_ROLE },
+      where: { userKey: userId, role: ADMIN_ROLE },
     });
     if (!admin) {
       throw new NotFoundException('관리자 계정을 찾을 수 없습니다.');

@@ -2,7 +2,10 @@ import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
 
 @Entity('SQ_USER')
 export class User {
-  @PrimaryGeneratedColumn({ name: 'USER_ID', type: 'bigint', unsigned: true })
+  @PrimaryGeneratedColumn({ name: 'USER_KEY', type: 'bigint', unsigned: true })
+  userKey: string;
+
+  @Column({ name: 'USER_ID', type: 'varchar', length: 255, unique: true })
   userId: string;
 
   @Column({ name: 'LOGIN_ID', type: 'varchar', length: 100 })
