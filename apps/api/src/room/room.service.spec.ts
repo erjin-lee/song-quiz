@@ -797,6 +797,60 @@ describe('RoomService', () => {
     });
   });
 
+  describe('다시하기(restartGame)', () => {
+    async function finishTestGame(hostUserId: string, roomId: string) {
+      await roomService.startGame(roomId, hostUserId);
+      await roomService.markReady(roomId, hostUserId);
+      await roomService.submitChatMessage(roomId, hostUserId, '노래1');
+      await roomService.nextRound(roomId, hostUserId);
+
+      await roomService.markReady(roomId, hostUserId);
+      await roomService.submitChatMessage(roomId, hostUserId, '노래2');
+      return roomService.nextRound(roomId, hostUserId);
+    }
+
+    it('게임 종료 후 방장이 다시하기를 하면 점수가 초기화되고 첫 라운드부터 다시 시작된다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom(1);
+      const finished = await finishTestGame(hostUserId, room.roomId);
+      expect(
+        finished.participants.find((p) => p.userId === hostUserId)?.score,
+      ).toBeGreaterThan(0);
+
+      const restarted = await roomService.restartGame(
+        room.roomId,
+        hostUserId,
+      );
+
+      expect(restarted.gameStatus).toBe('LOADING');
+      expect(restarted.currentRound?.roundIndex).toBe(0);
+      expect(restarted.currentRound?.totalRounds).toBe(2);
+      expect(
+        restarted.participants.find((p) => p.userId === hostUserId)?.score,
+      ).toBe(0);
+    });
+
+    it('방장이 아니면 다시하기를 할 수 없다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom(2);
+      await finishTestGame(hostUserId, room.roomId);
+      const { userId: guestUserId } = await roomService.joinRoom(
+        room.roomId,
+        { nickname: '참가자1' },
+      );
+
+      await expect(
+        roomService.restartGame(room.roomId, guestUserId),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('게임이 종료되지 않은 상태에서는 다시하기를 할 수 없다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom();
+
+      await expect(
+        roomService.restartGame(room.roomId, hostUserId),
+      ).rejects.toThrow(ConflictException);
+    });
+  });
+
   describe('스피드 모드', () => {
     it('한 명만 정답을 맞혀도 6초 뒤 자동으로 정답이 공개되고, 공개 4초 뒤 자동으로 다음 라운드로 넘어간다', async () => {
       jest.useFakeTimers();

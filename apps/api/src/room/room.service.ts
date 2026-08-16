@@ -302,34 +302,65 @@ export class RoomService extends EventEmitter {
         throw new ConflictException('이미 시작되었거나 진행 중인 게임입니다.');
       }
 
-      const songOrder = await this.buildSongOrder(
-        room.quizId,
-        room.isRandom,
-        room.songLimit,
-      );
-      if (songOrder.length === 0) {
-        throw new NotFoundException('퀴즈에 출제곡이 없습니다.');
-      }
-
-      await this.quizRepository.increment(
-        { quizId: room.quizId },
-        'playCnt',
-        1,
-      );
-
-      this.songOrders.set(roomId, songOrder);
-      room.gameStatus = 'LOADING';
-      room.currentRound = await this.prepareRoundData(
-        roomId,
-        songOrder[0],
-        0,
-        songOrder.length,
-      );
+      await this.prepareFirstRound(roomId, room);
 
       await this.saveRoom(room);
       this.emit('room-updated', room);
       return room;
     });
+  }
+
+  /** 방장이 종료된 게임을 같은 방/설정으로 다시 시작한다. 점수를 초기화하고 첫 라운드부터 다시 준비한다. */
+  async restartGame(
+    roomId: string,
+    requesterUserId: string,
+  ): Promise<RoomItemDto> {
+    return this.withRoomLock(roomId, async () => {
+      const room = await this.getRoomOrThrow(roomId);
+      this.assertHost(room, requesterUserId);
+
+      if (room.gameStatus !== 'FINISHED') {
+        throw new ConflictException('게임이 종료된 후에만 다시 시작할 수 있습니다.');
+      }
+
+      room.participants = room.participants.map((participant) => ({
+        ...participant,
+        score: 0,
+      }));
+
+      await this.prepareFirstRound(roomId, room);
+
+      await this.saveRoom(room);
+      this.emit('room-updated', room);
+      return room;
+    });
+  }
+
+  /** songOrder를 새로 구성하고 첫 라운드를 준비해 room을 LOADING 상태로 만든다(room을 직접 변경한다). */
+  private async prepareFirstRound(roomId: string, room: RoomItemDto): Promise<void> {
+    const songOrder = await this.buildSongOrder(
+      room.quizId,
+      room.isRandom,
+      room.songLimit,
+    );
+    if (songOrder.length === 0) {
+      throw new NotFoundException('퀴즈에 출제곡이 없습니다.');
+    }
+
+    await this.quizRepository.increment(
+      { quizId: room.quizId },
+      'playCnt',
+      1,
+    );
+
+    this.songOrders.set(roomId, songOrder);
+    room.gameStatus = 'LOADING';
+    room.currentRound = await this.prepareRoundData(
+      roomId,
+      songOrder[0],
+      0,
+      songOrder.length,
+    );
   }
 
   /** 참가자가 현재 라운드 영상 로딩을 마쳤음을 알린다. */

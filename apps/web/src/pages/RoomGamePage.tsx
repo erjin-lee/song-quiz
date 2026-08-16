@@ -350,6 +350,10 @@ export function RoomGamePage() {
     socket?.emit('game:start');
   }, [socket]);
 
+  const handleRestartGame = useCallback(() => {
+    socket?.emit('game:restart');
+  }, [socket]);
+
   const handleGameReady = useCallback(() => {
     socket?.emit('game:ready');
   }, [socket]);
@@ -477,6 +481,7 @@ export function RoomGamePage() {
               myUserId={userId}
               serverTimeOffsetMs={serverTimeOffsetMs}
               onStartGame={handleStartGame}
+              onRestartGame={handleRestartGame}
               onReady={handleGameReady}
               onNextRound={handleNextRound}
               onSkip={handleSkip}

@@ -199,6 +199,21 @@ export class RoomGateway implements OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('game:restart')
+  async handleGameRestart(@ConnectedSocket() client: Socket): Promise<void> {
+    const membership = this.requireMembership(client);
+    if (!membership) return;
+
+    try {
+      await this.roomService.restartGame(
+        membership.roomId,
+        membership.userId,
+      );
+    } catch (err) {
+      client.emit('room:error', { message: (err as Error).message });
+    }
+  }
+
   @SubscribeMessage('game:ready')
   async handleGameReady(@ConnectedSocket() client: Socket): Promise<void> {
     const membership = this.requireMembership(client);
