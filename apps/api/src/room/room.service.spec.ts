@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
@@ -124,7 +125,11 @@ describe('RoomService', () => {
     await cacheService.onModuleDestroy();
   });
 
-  async function createTestRoom(maxUserCnt = 4, speedModeEnabled = false) {
+  async function createTestRoom(
+    maxUserCnt = 4,
+    speedModeEnabled = false,
+    songLimit?: number,
+  ) {
     return roomService.createRoom({
       roomTtl: '아이유 방',
       quizId: '1',
@@ -132,6 +137,7 @@ describe('RoomService', () => {
       speedModeEnabled,
       maxUserCnt,
       nickname: '방장',
+      songLimit,
     });
   }
 
@@ -142,6 +148,7 @@ describe('RoomService', () => {
       expect(result.room.quizTtl).toBe('아이유');
       expect(result.room.quizDesc).toBe('아이유 노래 맞추기');
       expect(result.room.songCount).toBe(2);
+      expect(result.room.songLimit).toBe(2);
       expect(result.room.atstIds).toEqual(['10']);
       expect(result.room.atstNms).toEqual(['아이유']);
       expect(result.room.curUserCnt).toBe(1);
@@ -168,6 +175,25 @@ describe('RoomService', () => {
 
       expect(result.userId).toBe('account-user-1');
       expect(result.room.hostUserId).toBe('account-user-1');
+    });
+
+    it('songLimit을 지정하지 않으면 퀴즈 전체 출제곡 수를 그대로 쓴다', async () => {
+      const result = await createTestRoom();
+
+      expect(result.room.songLimit).toBe(2);
+    });
+
+    it('songLimit을 지정하면 방에 그 값이 저장된다', async () => {
+      const result = await createTestRoom(4, false, 1);
+
+      expect(result.room.songLimit).toBe(1);
+      expect(result.room.songCount).toBe(2);
+    });
+
+    it('songLimit이 퀴즈 전체 출제곡 수를 초과하면 BadRequestException', async () => {
+      await expect(createTestRoom(4, false, 3)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('존재하지 않는 퀴즈로 생성하면 NotFoundException', async () => {
@@ -447,6 +473,18 @@ describe('RoomService', () => {
         roomService.startGame(room.roomId, guestUserId),
       ).rejects.toThrow(ForbiddenException);
       expect(quizRepositoryMock.increment).not.toHaveBeenCalled();
+    });
+
+    it('songLimit을 지정해 방을 만들면 게임 시작 시 그만큼만 라운드가 진행된다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom(
+        4,
+        false,
+        1,
+      );
+
+      const started = await roomService.startGame(room.roomId, hostUserId);
+
+      expect(started.currentRound?.totalRounds).toBe(1);
     });
 
     it('게임을 시작하면 첫 라운드가 준비되고 정답 정보는 노출하지 않는다', async () => {

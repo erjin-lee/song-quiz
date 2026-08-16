@@ -1,6 +1,7 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'crypto';
 import { EventEmitter } from 'events';
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -160,6 +161,13 @@ export class RoomService extends EventEmitter {
       where: { quizId: dto.quizId },
     });
 
+    const songLimit = dto.songLimit ?? songCount;
+    if (songLimit > songCount) {
+      throw new BadRequestException(
+        `출제곡 수는 퀴즈 전체 출제곡 수(${songCount}곡)를 초과할 수 없습니다.`,
+      );
+    }
+
     const hostUserId = accountUserId ?? randomUUID();
     const room: RoomItemDto = {
       roomId: randomUUID(),
@@ -168,6 +176,7 @@ export class RoomService extends EventEmitter {
       quizTtl: quiz.quizTtl,
       quizDesc: quiz.quizDesc,
       songCount,
+      songLimit,
       quizThumbImgUrl: quiz.thumbImgUrl,
       atstIds: quizArtists.map((quizArtist) => quizArtist.atstId),
       atstNms: quizArtists.map((quizArtist) => quizArtist.artist.atstNm),
@@ -293,7 +302,11 @@ export class RoomService extends EventEmitter {
         throw new ConflictException('이미 시작되었거나 진행 중인 게임입니다.');
       }
 
-      const songOrder = await this.buildSongOrder(room.quizId, room.isRandom);
+      const songOrder = await this.buildSongOrder(
+        room.quizId,
+        room.isRandom,
+        room.songLimit,
+      );
       if (songOrder.length === 0) {
         throw new NotFoundException('퀴즈에 출제곡이 없습니다.');
       }
@@ -705,13 +718,15 @@ export class RoomService extends EventEmitter {
   private async buildSongOrder(
     quizId: string,
     isRandom: boolean,
+    songLimit: number,
   ): Promise<string[]> {
     const quizSongs = await this.quizSongRepository.find({
       where: { quizId },
       order: { quizSeq: 'ASC' },
     });
     const ids = quizSongs.map((quizSong) => quizSong.quizSongId);
-    return isRandom ? this.shuffle(ids) : ids;
+    const ordered = isRandom ? this.shuffle(ids) : ids;
+    return ordered.slice(0, songLimit);
   }
 
   private shuffle<T>(items: T[]): T[] {

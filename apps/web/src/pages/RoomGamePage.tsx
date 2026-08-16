@@ -10,7 +10,6 @@ import {
   type ChatPanelHandle,
 } from '../components/ChatPanel';
 import { getRoomById, joinRoom, leaveRoom } from '../api/room';
-import { getQuizSongCount } from '../api/quiz';
 import { createRoomSocket, type RoomSocket } from '../api/socket';
 import { useServerClockOffset } from '../hooks/useServerClockOffset';
 import { useDocumentMeta } from '../hooks/useDocumentMeta';
@@ -58,7 +57,6 @@ export function RoomGamePage() {
   );
   const [loading, setLoading] = useState(true);
   const [chatEntries, setChatEntries] = useState<ChatEntry[]>([]);
-  const [songCount, setSongCount] = useState<number | null>(null);
   const [nextRoundShortcutEnabled, setNextRoundShortcutEnabled] =
     useState(true);
   const [inquiryTarget, setInquiryTarget] = useState<{
@@ -301,16 +299,6 @@ export function RoomGamePage() {
     };
   }, [roomId, userId, accessToken, nickname]);
 
-  const quizId = room?.quizId;
-  useEffect(() => {
-    if (!quizId) {
-      return;
-    }
-    getQuizSongCount(quizId)
-      .then(setSongCount)
-      .catch(() => setSongCount(null));
-  }, [quizId]);
-
   // 내가 방금 정답을 맞혔을 때만 효과음을 재생한다. room:state는 전체 라운드 상태를
   // 통째로 내려주므로, 이전에 내 userId가 없다가 새로 추가된 순간(전환)만 감지한다.
   // prevCorrectUserIdsRef가 null인 최초 렌더(새로고침 등으로 이미 맞춘 상태로 진입한
@@ -465,7 +453,7 @@ export function RoomGamePage() {
 
         <div className="flex items-center justify-between rounded-2xl bg-white px-5 py-3 text-sm text-slate-500 shadow-sm">
           <span>{room.quizTtl}</span>
-          <span>{songCount !== null ? `총 출제곡 ${songCount}곡` : ''}</span>
+          <span>총 출제곡 {room.songLimit}곡</span>
         </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_1fr]">
