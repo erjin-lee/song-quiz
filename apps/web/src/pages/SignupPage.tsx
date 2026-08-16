@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { Logo } from '../components/Logo';
 import { useSession } from '../context/SessionContext';
 import { useDocumentMeta } from '../hooks/useDocumentMeta';
@@ -86,6 +86,18 @@ export function SignupPage() {
             className={INPUT_CLASS}
           />
           {error && <p className="text-sm text-rose-500">{error}</p>}
+          <p className="text-center text-[11px] text-slate-400">
+            가입 시{' '}
+            <Link
+              to="/privacy"
+              className="underline hover:text-purple-500"
+              target="_blank"
+              rel="noreferrer"
+            >
+              개인정보처리방침
+            </Link>
+            에 동의하는 것으로 간주됩니다.
+          </p>
           <button
             type="submit"
             disabled={!isValid || submitting}

@@ -149,7 +149,7 @@ export function CreateRoomPage() {
     <div className="min-h-screen px-4 py-8 sm:px-8">
       <div className="mx-auto flex max-w-lg flex-col gap-6">
         <header className="flex items-center justify-between">
-          <Logo size="md" />
+          <Logo size="md" to="/rooms" />
         </header>
 
         <div className="rounded-3xl bg-white p-6 shadow-lg">
@@ -157,7 +157,7 @@ export function CreateRoomPage() {
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <label className="flex flex-col gap-1 text-sm text-slate-600">
-              방 제목
+              방 제목 <span className="text-rose-400">*</span>
               <input
                 autoFocus
                 value={roomTtl}
@@ -171,32 +171,15 @@ export function CreateRoomPage() {
             <div className="flex flex-col gap-1 text-sm text-slate-600">
               퀴즈 선택
               {selectedQuiz && (
-                <div className="flex flex-col gap-2 rounded-xl border border-purple-200 bg-purple-50 px-3 py-2.5">
-                  <div className="flex items-center gap-3">
-                    {selectedQuiz.thumbImgUrl ? (
-                      <img
-                        src={selectedQuiz.thumbImgUrl}
-                        alt={selectedQuiz.quizTtl}
-                        className="h-10 w-10 shrink-0 rounded-lg object-cover"
-                      />
-                    ) : (
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-base">
-                        🎵
-                      </div>
-                    )}
-                    <div className="min-w-0">
-                      <p className="truncate font-semibold text-purple-700">
-                        {selectedQuiz.quizTtl}
-                      </p>
-                      <p className="text-xs text-purple-500">
-                        {selectedQuizSongCount !== null
-                          ? `총 ${selectedQuizSongCount}곡`
-                          : '곡 수 확인 중...'}
-                      </p>
-                    </div>
-                  </div>
+                <div className="flex flex-col gap-1 rounded-xl border border-purple-200 bg-purple-50 px-3 py-2.5">
+                  <p className="truncate text-xs font-semibold text-purple-700">
+                    {selectedQuiz.quizTtl} ·{' '}
+                    {selectedQuizSongCount !== null
+                      ? `총 ${selectedQuizSongCount}곡`
+                      : '곡 수 확인 중...'}
+                  </p>
                   {selectedQuiz.quizDesc && (
-                    <p className="text-xs text-purple-600">
+                    <p className="text-xs text-purple-500">
                       {selectedQuiz.quizDesc}
                     </p>
                   )}
@@ -238,6 +221,11 @@ export function CreateRoomPage() {
                       </div>
                     )}
                     <span className="truncate">{quiz.quizTtl}</span>
+                    {quiz.quizId === quizId && (
+                      <span className="ml-auto shrink-0 text-purple-500">
+                        ✓
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -285,7 +273,12 @@ export function CreateRoomPage() {
               </button>
               <button
                 type="submit"
-                disabled={submitting || quizzes.length === 0 || !isInitialized}
+                disabled={
+                  submitting ||
+                  quizzes.length === 0 ||
+                  !isInitialized ||
+                  !roomTtl.trim()
+                }
                 className="rounded-full bg-purple-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-purple-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
               >
                 {submitting ? '생성 중...' : '만들기'}

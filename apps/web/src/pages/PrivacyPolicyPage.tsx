@@ -3,6 +3,7 @@ import { useDocumentMeta } from '../hooks/useDocumentMeta';
 
 const CONTACT_EMAIL = 'noraemat.site@gmail.com';
 const EFFECTIVE_DATE = '2026년 8월 13일';
+const REVISED_DATE = '2026년 8월 16일';
 
 export function PrivacyPolicyPage() {
   useDocumentMeta({
@@ -24,15 +25,16 @@ export function PrivacyPolicyPage() {
               개인정보처리방침
             </h1>
             <p className="mt-2 text-slate-400">
-              시행일자: {EFFECTIVE_DATE}
+              시행일자: {EFFECTIVE_DATE} · 최종 개정일: {REVISED_DATE}
             </p>
           </div>
 
           <p>
-            노래맞히기(이하 &ldquo;서비스&rdquo;)는 별도의 회원가입 없이
-            닉네임만으로 이용할 수 있는 실시간 노래 맞히기 게임 서비스입니다.
-            서비스는 이용자의 개인정보를 소중히 다루며, 아래와 같이
-            개인정보를 수집·이용합니다.
+            노래맞히기(이하 &ldquo;서비스&rdquo;)는 회원가입 없이 닉네임만으로도
+            이용할 수 있는 실시간 노래 맞히기 게임 서비스이며, 선택적으로
+            회원가입을 통해 계정을 만들어 이용할 수도 있습니다. 서비스는
+            이용자의 개인정보를 소중히 다루며, 아래와 같이 개인정보를
+            수집·이용합니다.
           </p>
 
           <section className="flex flex-col gap-2">
@@ -42,23 +44,39 @@ export function PrivacyPolicyPage() {
             <ul className="list-disc space-y-2 pl-5">
               <li>
                 <span className="font-semibold text-slate-700">닉네임</span> —
-                이용자가 서비스 이용을 위해 직접 입력하며, 브라우저
+                게스트 이용자가 서비스 이용을 위해 직접 입력하며, 브라우저
                 localStorage에 저장되고 방 입장 시 서버로 전송되어 참가자
-                표시·채팅 등에 사용됩니다.
+                표시·채팅 등에 사용됩니다. 회원의 경우 가입 시 등록한 계정
+                닉네임을 동일한 용도로 사용합니다.
+              </li>
+              <li>
+                <span className="font-semibold text-slate-700">
+                  로그인 아이디 및 비밀번호(해시)
+                </span>{' '}
+                — 회원가입 시에만 수집하며, 비밀번호는 원문이 아닌 해시 값으로
+                저장됩니다.
+              </li>
+              <li>
+                <span className="font-semibold text-slate-700">
+                  인증 토큰
+                </span>{' '}
+                — 로그인 상태 유지를 위해 발급되며 브라우저 localStorage에
+                저장되고, 이후 요청 시 서버로 전송되어 본인 확인에 사용됩니다.
               </li>
               <li>
                 <span className="font-semibold text-slate-700">
                   이용자 식별자(userId)
                 </span>{' '}
-                — 방 입장 시 서버가 실명·계정과 무관하게 임의로 발급하는
-                식별값입니다.
+                — 게스트는 방 입장 시, 회원은 가입 시 서버가 실명과 무관하게
+                임의로 발급하는 식별값입니다.
               </li>
               <li>
                 <span className="font-semibold text-slate-700">
                   방 세션 정보
                 </span>{' '}
-                — 새로고침 후에도 게임에 재접속할 수 있도록 방 번호와
-                이용자 식별자를 브라우저 localStorage에 저장합니다.
+                — 새로고침 후에도 게임에 재접속할 수 있도록 방 번호,
+                이용자 식별자, 방 접근 토큰을 브라우저 localStorage에
+                저장합니다.
               </li>
               <li>
                 <span className="font-semibold text-slate-700">
@@ -90,8 +108,9 @@ export function PrivacyPolicyPage() {
             </p>
             <ul className="list-disc space-y-2 pl-5">
               <li>
-                닉네임과 방 세션 정보는 이용자의 브라우저에만 저장되며,
-                이용자가 직접 브라우저 데이터를 삭제하기 전까지 유지됩니다.
+                게스트 닉네임과 방 세션 정보는 이용자의 브라우저에만
+                저장되며, 이용자가 직접 브라우저 데이터를 삭제하기 전까지
+                유지됩니다.
               </li>
               <li>
                 채팅 메시지는 방이 종료되면 즉시 삭제됩니다.
@@ -99,6 +118,15 @@ export function PrivacyPolicyPage() {
               <li>
                 곡 문의 내용은 문의 처리가 완료된 후에도 문의 이력 관리 및
                 서비스 개선 목적으로 일정 기간 보관 후 파기합니다.
+              </li>
+              <li>
+                회원의 계정 정보(로그인 아이디, 비밀번호 해시, 닉네임)는
+                회원 탈퇴 요청 시까지 보관되며, 탈퇴 요청 시 지체 없이
+                파기합니다.
+              </li>
+              <li>
+                인증 토큰은 발급일로부터 최대 30일간 유효하며, 만료 후에는
+                재로그인이 필요합니다.
               </li>
             </ul>
           </section>
@@ -140,8 +168,10 @@ export function PrivacyPolicyPage() {
               4. 쿠키 및 광고 맞춤 설정
             </h2>
             <p>
-              서비스는 자체적으로 쿠키를 사용하지 않으며, 닉네임·방 세션
-              정보만 브라우저 localStorage에 저장합니다. 다만 광고 게재
+              서비스는 자체적으로 쿠키를 사용하지 않으며, 위 제1항에서
+              설명한 닉네임, 인증 토큰, 방 세션 정보(방 번호·이용자
+              식별자·접근 토큰) 등만 브라우저 localStorage에 저장합니다.
+              다만 광고 게재
               과정에서 Google 및 광고 파트너가 쿠키·기기 식별자 등을 사용할
               수 있으며, 이용자는{' '}
               <a
@@ -159,9 +189,11 @@ export function PrivacyPolicyPage() {
           <section className="flex flex-col gap-2">
             <h2 className="font-bold text-slate-800">5. 이용자의 권리</h2>
             <p>
-              닉네임 등 브라우저에 저장된 정보는 브라우저 설정에서 직접
-              삭제할 수 있습니다. 문의 내용 등 서버에 보관 중인 개인정보의
-              열람·정정·삭제를 원하는 경우 아래 연락처로 요청할 수 있습니다.
+              게스트 닉네임 등 브라우저에 저장된 정보는 브라우저 설정에서
+              직접 삭제할 수 있습니다. 문의 내용, 회원 계정 정보 등 서버에
+              보관 중인 개인정보의 열람·정정·삭제를 원하는 경우 아래
+              연락처로 요청할 수 있으며, 회원은 언제든지 계정 탈퇴를
+              요청할 수 있습니다.
             </p>
           </section>
 

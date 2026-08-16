@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AdBanner } from '../components/AdBanner';
 import { Logo } from '../components/Logo';
@@ -19,7 +19,8 @@ const ROOM_LIST_POLL_MS = 5000;
 const JOIN_AD_DELAY_MS = 3000;
 
 export function RoomListPage() {
-  const { nickname, isAuthenticated, isInitialized, logout } = useSession();
+  const { nickname, setNickname, isAuthenticated, isInitialized, logout } =
+    useSession();
   const navigate = useNavigate();
   useGuestNicknameFallback();
 
@@ -29,6 +30,9 @@ export function RoomListPage() {
   const [listError, setListError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [adEnabled, setAdEnabled] = useState(false);
+  const [editingNickname, setEditingNickname] = useState(false);
+  const [nicknameDraft, setNicknameDraft] = useState('');
+  const [showHelp, setShowHelp] = useState(false);
 
   useDocumentMeta({
     title: '방 목록 | 노래맞히기',
@@ -82,6 +86,27 @@ export function RoomListPage() {
     );
   }, [rooms, searchQuery]);
 
+  const handleNicknameSave = (event: FormEvent) => {
+    event.preventDefault();
+    const trimmed = nicknameDraft.trim();
+    if (!trimmed) {
+      return;
+    }
+    setNickname(trimmed);
+    setEditingNickname(false);
+  };
+
+  const handleCreateClick = () => {
+    if (!isInitialized) {
+      return;
+    }
+    if (!nickname) {
+      navigate('/');
+      return;
+    }
+    navigate('/rooms/new');
+  };
+
   const handleJoin = (roomId: string) => {
     if (!isInitialized) {
       return;
@@ -130,49 +155,99 @@ export function RoomListPage() {
   return (
     <div className="min-h-screen px-4 py-8 sm:px-8">
       <div className="mx-auto flex max-w-3xl flex-col gap-6">
-        <header className="flex items-center justify-between">
-          <Logo size="md" />
-          <span className="flex items-center gap-2 text-sm text-slate-500">
-            {nickname ? (
-              `${nickname}님 환영합니다`
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <Logo size="md" to="/rooms" />
+          <div className="flex flex-col items-end gap-1">
+            {editingNickname ? (
+              <form
+                onSubmit={handleNicknameSave}
+                className="flex items-center gap-1.5"
+              >
+                <input
+                  autoFocus
+                  value={nicknameDraft}
+                  onChange={(event) => setNicknameDraft(event.target.value)}
+                  maxLength={30}
+                  className="w-28 rounded-full border border-purple-200 bg-purple-50/60 px-3 py-1 text-xs text-slate-700 outline-none focus:border-purple-400"
+                />
+                <button
+                  type="submit"
+                  disabled={!nicknameDraft.trim()}
+                  className="rounded-full bg-purple-500 px-3 py-1 text-xs font-semibold text-white transition hover:bg-purple-600 disabled:bg-slate-200 disabled:text-slate-400"
+                >
+                  저장
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingNickname(false)}
+                  className="text-xs text-slate-400 hover:text-slate-500"
+                >
+                  취소
+                </button>
+              </form>
+            ) : nickname && !isAuthenticated ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setNicknameDraft(nickname);
+                  setEditingNickname(true);
+                }}
+                title="클릭해서 닉네임 수정"
+                className="group flex items-center gap-1 text-sm font-medium text-slate-600 transition hover:text-purple-600"
+              >
+                <span className="underline decoration-dotted decoration-slate-300 underline-offset-2 group-hover:decoration-purple-400">
+                  {nickname}님 환영합니다
+                </span>
+                <span className="text-xs text-slate-300 transition group-hover:text-purple-400">
+                  ✏️
+                </span>
+              </button>
+            ) : nickname ? (
+              <span className="text-sm font-medium text-slate-600">
+                {nickname}님 환영합니다
+              </span>
             ) : (
               <button
                 type="button"
                 onClick={() => navigate('/')}
-                className="underline decoration-dotted underline-offset-2 hover:text-purple-500"
+                className="text-sm text-slate-500 underline decoration-dotted underline-offset-2 hover:text-purple-500"
               >
                 닉네임 등록하기
               </button>
             )}
-            {isAuthenticated && (
+
+            <div className="flex items-center gap-2 text-xs text-slate-400">
               <button
                 type="button"
-                onClick={() => {
-                  logout();
-                  navigate('/');
-                }}
-                className="underline decoration-dotted underline-offset-2 hover:text-purple-500"
+                onClick={() => setShowHelp(true)}
+                className="transition hover:text-purple-500"
               >
-                로그아웃
+                게임 방법
               </button>
-            )}
-          </span>
+              {isAuthenticated && (
+                <>
+                  <span className="text-slate-200">·</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      logout();
+                      navigate('/');
+                    }}
+                    className="transition hover:text-purple-500"
+                  >
+                    로그아웃
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
         </header>
 
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-bold text-slate-700">방 목록</h1>
           <button
             type="button"
-            onClick={() => {
-              if (!isInitialized) {
-                return;
-              }
-              if (!nickname) {
-                navigate('/');
-                return;
-              }
-              navigate('/rooms/new');
-            }}
+            onClick={handleCreateClick}
             disabled={!isInitialized}
             className="rounded-full bg-purple-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-purple-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
           >
@@ -192,9 +267,23 @@ export function RoomListPage() {
 
         <div className="flex flex-col gap-3">
           {rooms.length === 0 && (
-            <p className="rounded-2xl bg-white/60 px-5 py-10 text-center text-sm text-slate-400">
-              아직 열린 방이 없어요. 새 방을 만들어보세요.
-            </p>
+            <div className="flex flex-col items-center gap-3 rounded-2xl bg-white/60 px-5 py-12 text-center">
+              <span className="text-3xl">🎤</span>
+              <p className="text-sm font-semibold text-slate-500">
+                아직 열린 방이 없어요
+              </p>
+              <p className="text-xs text-slate-400">
+                새 방을 만들어 친구들을 초대해보세요.
+              </p>
+              <button
+                type="button"
+                onClick={handleCreateClick}
+                disabled={!isInitialized}
+                className="mt-1 rounded-full bg-purple-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-purple-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+              >
+                + 새 방 만들기
+              </button>
+            </div>
           )}
           {rooms.length > 0 && filteredRooms.length === 0 && (
             <p className="rounded-2xl bg-white/60 px-5 py-10 text-center text-sm text-slate-400">
@@ -219,6 +308,50 @@ export function RoomListPage() {
 
       {isJoinPreparingAd && (
         <RoomActionOverlay message="방에 입장하는 중입니다..." />
+      )}
+
+      {showHelp && (
+        <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40 px-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
+            <h2 className="mb-4 text-base font-bold text-slate-800">
+              게임 방법
+            </h2>
+            <ul className="flex flex-col gap-3 text-sm text-slate-600">
+              <li className="flex items-start gap-2.5">
+                <span className="shrink-0">💬</span>
+                <span>정답은 채팅창에 입력해서 맞혀요.</span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="shrink-0">⏱️</span>
+                <span>한 라운드는 최대 30초 동안 진행돼요.</span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="shrink-0">🏆</span>
+                <span>
+                  맞힌 순서에 따라 6점, 4점, 3점, 이후 전원 1점을 받아요.
+                </span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="shrink-0">⏭️</span>
+                <span>참가자 과반수가 스킵을 누르면 라운드가 종료돼요.</span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="shrink-0">⚡</span>
+                <span>
+                  스피드 모드에서는 첫 정답자가 나오면 6초 뒤 정답이
+                  공개되고, 4초 뒤 자동으로 다음 라운드로 넘어가요.
+                </span>
+              </li>
+            </ul>
+            <button
+              type="button"
+              onClick={() => setShowHelp(false)}
+              className="mt-5 w-full rounded-full bg-purple-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-purple-600"
+            >
+              확인
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

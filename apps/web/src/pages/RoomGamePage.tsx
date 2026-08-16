@@ -62,6 +62,7 @@ export function RoomGamePage() {
   const [nextRoundShortcutEnabled, setNextRoundShortcutEnabled] =
     useState(true);
   const [inquiryModalOpen, setInquiryModalOpen] = useState(false);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
   const chatPanelRef = useRef<ChatPanelHandle>(null);
   const [socket, setSocket] = useState<RoomSocket | null>(null);
   const serverTimeOffsetMs = useServerClockOffset(socket);
@@ -337,6 +338,7 @@ export function RoomGamePage() {
     if (!room || !userId || !accessToken) {
       return;
     }
+    setLeaveConfirmOpen(false);
     try {
       await leaveRoom(room.roomId, userId, accessToken);
     } finally {
@@ -432,14 +434,14 @@ export function RoomGamePage() {
       <div className="mx-auto flex max-w-5xl flex-col gap-4">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
-            <Logo size="md" />
+            <Logo size="md" onClick={() => setLeaveConfirmOpen(true)} />
             <span className="rounded-full bg-white px-4 py-1.5 text-sm font-medium text-slate-600 shadow-sm">
               {room.roomTtl}
             </span>
           </div>
           <button
             type="button"
-            onClick={handleLeave}
+            onClick={() => setLeaveConfirmOpen(true)}
             className="rounded-full bg-white px-5 py-2 text-sm font-semibold text-slate-500 shadow-sm hover:bg-slate-50"
           >
             나가기
@@ -505,6 +507,32 @@ export function RoomGamePage() {
           onClose={() => setInquiryModalOpen(false)}
           onSubmitted={handleInquirySubmitted}
         />
+      )}
+
+      {leaveConfirmOpen && (
+        <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40 px-4">
+          <div className="w-full max-w-xs rounded-2xl bg-white p-6 text-center shadow-xl">
+            <p className="mb-5 text-sm font-medium text-slate-700">
+              정말 방을 나가시겠어요?
+            </p>
+            <div className="flex justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setLeaveConfirmOpen(false)}
+                className="rounded-full border border-slate-200 px-5 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-50"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={handleLeave}
+                className="rounded-full bg-rose-500 px-5 py-2 text-sm font-semibold text-white hover:bg-rose-600"
+              >
+                나가기
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
