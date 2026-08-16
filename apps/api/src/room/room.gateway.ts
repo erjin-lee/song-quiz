@@ -263,6 +263,12 @@ export class RoomGateway implements OnGatewayDisconnect {
       return;
     }
 
+    // 로그인 유저는 여러 탭/기기가 같은 userId(계정)로 접속할 수 있다. 그중
+    // 하나만 끊긴 것이라면 다른 소켓이 아직 방에 남아 있으므로 퇴장 처리하지 않는다.
+    if (this.hasOtherActiveSocket(membership.roomId, membership.userId)) {
+      return;
+    }
+
     const key = this.membershipKey(membership.roomId, membership.userId);
     const timer = setTimeout(() => {
       this.pendingLeaveTimers.delete(key);
@@ -287,6 +293,16 @@ export class RoomGateway implements OnGatewayDisconnect {
 
   private membershipKey(roomId: string, userId: string): string {
     return `${roomId}:${userId}`;
+  }
+
+  /** 같은 roomId+userId로 아직 연결되어 있는 다른 소켓이 있는지 확인한다. */
+  private hasOtherActiveSocket(roomId: string, userId: string): boolean {
+    for (const membership of this.socketMemberships.values()) {
+      if (membership.roomId === roomId && membership.userId === userId) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /** 유저별 개인 알림 채널(방 전체 브로드캐스트가 아닌 특정 유저 타겟팅용). */
