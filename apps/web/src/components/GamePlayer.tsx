@@ -447,6 +447,11 @@ export function GamePlayer({
             key={`${room.roomId}-${round.roundIndex}`}
             ref={playerRef}
             videoId={round.youtubeVideoId}
+            // title을 안 넘기면 react-youtube가 초기 생성 시 자체 title 설정을
+            // 건너뛰어, 유튜브 IFrame API가 기본으로 넣는 실제 영상 제목(정답)이
+            // 그대로 iframe title 속성에 노출된다. 정답 스포일러를 막기 위해
+            // 곡 정보와 무관한 고정 문구로 덮어쓴다.
+            title="노래맞히기 영상 플레이어"
             opts={{
               width: '320',
               height: '180',
