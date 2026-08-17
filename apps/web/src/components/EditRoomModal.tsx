@@ -53,7 +53,14 @@ export function EditRoomModal({
   );
 
   useEffect(() => {
-    if (!quizId || quizId === room.quizId) {
+    if (!quizId) {
+      return;
+    }
+    // 원래 방의 퀴즈로 되돌아온 경우 다른 퀴즈를 조회했을 때 남은 곡 수를 그대로
+    // 쓰지 않도록, 방에 저장된 원본 곡 수/출제곡 수로 복원한다.
+    if (quizId === room.quizId) {
+      setSelectedQuizSongCount(room.songCount);
+      setSongLimit(room.songLimit);
       return;
     }
     let cancelled = false;

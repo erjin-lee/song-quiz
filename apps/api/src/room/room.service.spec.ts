@@ -157,7 +157,12 @@ describe('RoomService', () => {
       expect(result.room.gameStatus).toBe('WAITING');
       expect(result.room.currentRound).toBeNull();
       expect(result.room.participants).toEqual([
-        { userId: result.userId, nickname: '방장', score: 0 },
+        {
+          userId: result.userId,
+          nickname: '방장',
+          score: 0,
+          isAccount: false,
+        },
       ]);
     });
 
@@ -229,8 +234,18 @@ describe('RoomService', () => {
 
       expect(joinResult.room.curUserCnt).toBe(2);
       expect(joinResult.room.participants).toEqual([
-        { userId: room.hostUserId, nickname: '방장', score: 0 },
-        { userId: joinResult.userId, nickname: '참가자1', score: 0 },
+        {
+          userId: room.hostUserId,
+          nickname: '방장',
+          score: 0,
+          isAccount: false,
+        },
+        {
+          userId: joinResult.userId,
+          nickname: '참가자1',
+          score: 0,
+          isAccount: false,
+        },
       ]);
     });
 
@@ -245,8 +260,18 @@ describe('RoomService', () => {
 
       expect(joinResult.userId).toBe('account-user-1');
       expect(joinResult.room.participants).toEqual([
-        { userId: room.hostUserId, nickname: '방장', score: 0 },
-        { userId: 'account-user-1', nickname: '참가자1', score: 0 },
+        {
+          userId: room.hostUserId,
+          nickname: '방장',
+          score: 0,
+          isAccount: false,
+        },
+        {
+          userId: 'account-user-1',
+          nickname: '참가자1',
+          score: 0,
+          isAccount: true,
+        },
       ]);
     });
 
@@ -441,6 +466,42 @@ describe('RoomService', () => {
       });
 
       expect(joinResult.room.curUserCnt).toBe(2);
+    });
+  });
+
+  describe('레거시 방 데이터 하위 호환(배포 전에 생성된 방)', () => {
+    it('isPrivate/isUnlisted/참가자 isAccount가 없는 캐시 데이터도 false로 보정해 조회/수정된다', async () => {
+      const { room, userId: hostUserId, accessToken } = await createTestRoom();
+
+      // 비공개방/비밀방 기능 배포 이전에 만들어진 방을 흉내내, 해당 필드들을
+      // 캐시에서 지운다(JSON 직렬화 캐시라 실제로도 이런 모양으로 남아있을 수 있다).
+      const legacyRoom = await cacheService.get<Record<string, unknown>>(
+        `room:${room.roomId}`,
+      );
+      delete legacyRoom!.isPrivate;
+      delete legacyRoom!.isUnlisted;
+      delete legacyRoom!.pwdHash;
+      legacyRoom!.participants = (
+        legacyRoom!.participants as Record<string, unknown>[]
+      ).map(({ isAccount: _isAccount, ...rest }) => rest);
+      await cacheService.set(`room:${room.roomId}`, legacyRoom);
+
+      const fetched = await roomService.getRoom(room.roomId);
+      expect(fetched?.isPrivate).toBe(false);
+      expect(fetched?.isUnlisted).toBe(false);
+
+      const updated = await roomService.updateRoom(room.roomId, {
+        userId: hostUserId,
+        accessToken,
+        roomTtl: '레거시 방 수정',
+        quizId: room.quizId,
+        isRandom: false,
+        speedModeEnabled: false,
+        maxUserCnt: room.maxUserCnt,
+        isUnlisted: false,
+        isPrivate: false,
+      });
+      expect(updated.roomTtl).toBe('레거시 방 수정');
     });
   });
 
@@ -1077,6 +1138,19 @@ describe('RoomService', () => {
           '새닉네임',
         ),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('로그인 계정으로 참가한 유저가 닉네임 변경을 시도하면 ForbiddenException(헤더 생략으로 우회 불가)', async () => {
+      const { room } = await createTestRoom();
+      const { userId: accountUserId } = await roomService.joinRoom(
+        room.roomId,
+        { nickname: '계정유저' },
+        'account-user-1',
+      );
+
+      await expect(
+        roomService.updateNickname(room.roomId, accountUserId, '새닉네임'),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('기존과 같은 닉네임으로 변경하면 room-updated 이벤트 없이 그대로 반환한다', async () => {

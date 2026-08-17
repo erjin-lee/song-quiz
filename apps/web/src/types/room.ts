@@ -2,6 +2,8 @@ export interface RoomParticipantDto {
   userId: string;
   nickname: string;
   score: number;
+  /** 로그인 계정으로 참가했는지 여부. true면 방 안에서 닉네임을 바꿀 수 없다. */
+  isAccount: boolean;
 }
 
 export type GameStatus =

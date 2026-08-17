@@ -222,7 +222,14 @@ export class RoomService extends EventEmitter {
       maxUserCnt: dto.maxUserCnt,
       curUserCnt: 1,
       hostUserId,
-      participants: [{ userId: hostUserId, nickname: dto.nickname, score: 0 }],
+      participants: [
+        {
+          userId: hostUserId,
+          nickname: dto.nickname,
+          score: 0,
+          isAccount: Boolean(accountUserId),
+        },
+      ],
       crtDt: new Date().toISOString(),
       gameStatus: 'WAITING',
       currentRound: null,
@@ -276,7 +283,12 @@ export class RoomService extends EventEmitter {
       }
 
       const userId = accountUserId ?? randomUUID();
-      room.participants.push({ userId, nickname: dto.nickname, score: 0 });
+      room.participants.push({
+        userId,
+        nickname: dto.nickname,
+        score: 0,
+        isAccount: Boolean(accountUserId),
+      });
       room.curUserCnt = room.participants.length;
 
       await this.saveRoom(room);
@@ -354,6 +366,13 @@ export class RoomService extends EventEmitter {
       const participant = room.participants.find((p) => p.userId === userId);
       if (!participant) {
         throw new NotFoundException('방에 참가 중인 유저가 아닙니다.');
+      }
+      // 컨트롤러의 Authorization 헤더 기반 게스트 판별은 헤더를 생략하면 우회할 수
+      // 있으므로, 입장 시 서버가 결정해 저장해둔 participant.isAccount로 다시 검증한다.
+      if (participant.isAccount) {
+        throw new ForbiddenException(
+          '로그인 유저는 방 안에서 닉네임을 변경할 수 없습니다.',
+        );
       }
 
       const oldNickname = participant.nickname;
@@ -994,8 +1013,26 @@ export class RoomService extends EventEmitter {
   }
 
   /** pwdHash를 포함한 내부 표현을 반환한다. 응답/브로드캐스트 직전에는 반드시 toPublicRoom을 거쳐야 한다. */
+  /**
+   * 캐시에서 읽은 값을 그대로 신뢰하지 않고, 배포 전에 만들어진(비공개방/비밀방 기능
+   * 추가 이전) 방 데이터에 없는 필드를 기본값으로 보정한다. 보정하지 않으면 이런 방을
+   * 수정할 때 클라이언트가 undefined를 보내 @IsBoolean() 검증에서 400이 발생한다.
+   */
   private async getRoomRecord(roomId: string): Promise<RoomRecord | undefined> {
-    return this.cacheService.get<RoomRecord>(this.roomKey(roomId));
+    const room = await this.cacheService.get<RoomRecord>(this.roomKey(roomId));
+    if (!room) {
+      return undefined;
+    }
+    return {
+      ...room,
+      isUnlisted: room.isUnlisted ?? false,
+      isPrivate: room.isPrivate ?? false,
+      pwdHash: room.pwdHash ?? null,
+      participants: room.participants.map((participant) => ({
+        ...participant,
+        isAccount: participant.isAccount ?? false,
+      })),
+    };
   }
 
   private async getRoomOrThrow(roomId: string): Promise<RoomRecord> {
