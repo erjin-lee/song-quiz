@@ -6,8 +6,8 @@ const YOUTUBE_BASE_URL = 'https://www.youtube.com';
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const YT_INITIAL_DATA_MARKER = 'var ytInitialData = ';
-const MAX_FETCH_ATTEMPTS = 3;
-const FETCH_RETRY_DELAY_MS = 1300;
+const MAX_FETCH_ATTEMPTS = 4;
+const FETCH_RETRY_DELAY_MS = 1500;
 const FETCH_TIMEOUT_MS = 10_000;
 const LENGTH_SECONDS_PATTERN = /"lengthSeconds":"(\d+)"/;
 
@@ -179,8 +179,10 @@ export class YoutubeScraperClient {
         this.logger.warn(
           `유튜브 요청 실패(시도 ${attempt}/${MAX_FETCH_ATTEMPTS}): ${url}${logSuffix}`,
         );
-        if (attempt < MAX_FETCH_ATTEMPTS) {
-          await delay(FETCH_RETRY_DELAY_MS * attempt);
+        if (attempt == MAX_FETCH_ATTEMPTS - 1) {
+          await delay(FETCH_RETRY_DELAY_MS * 5);
+        } else if (attempt < MAX_FETCH_ATTEMPTS) {
+          await delay(FETCH_RETRY_DELAY_MS * attempt + 4000);
         }
       }
     }
