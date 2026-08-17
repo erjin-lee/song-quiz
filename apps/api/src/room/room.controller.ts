@@ -9,7 +9,6 @@ import {
   Post,
   Req,
   UnauthorizedException,
-  UseGuards,
 } from '@nestjs/common';
 import {
   ApiConflictResponse,
@@ -19,7 +18,6 @@ import {
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
-import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { Request } from 'express';
 import { UserService } from '../user/user.service';
 import { CreateRoomRequestDto } from './dto/create-room-request.dto';
@@ -87,8 +85,6 @@ export class RoomController {
   }
 
   @Post(':roomId/join')
-  @UseGuards(ThrottlerGuard)
-  @Throttle({ 'room-join': { limit: 10, ttl: 60_000 } })
   @ApiOperation({ summary: '퀴즈 방 입장' })
   @ApiParam({ name: 'roomId', description: '방 ID' })
   @ApiOkResponse({ description: '입장 결과', type: RoomJoinResultDto })
@@ -100,7 +96,12 @@ export class RoomController {
     @Req() req: Request,
   ): Promise<RoomJoinResultDto> {
     const accountUserId = await this.resolveAccountUserId(req);
-    return this.roomService.joinRoom(roomId, joinRoomRequestDto, accountUserId);
+    return this.roomService.joinRoom(
+      roomId,
+      joinRoomRequestDto,
+      accountUserId,
+      req.ip,
+    );
   }
 
   @Patch(':roomId')

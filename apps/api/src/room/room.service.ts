@@ -5,6 +5,8 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Injectable,
   Logger,
   NotFoundException,
@@ -27,9 +29,16 @@ import { UpdateRoomRequestDto } from './dto/update-room-request.dto';
 import { normalizeAnswer, pointsForRank } from './game-scoring.util';
 
 const BCRYPT_SALT_ROUNDS = 10;
+/**
+ * 비밀방 비밀번호 대입 시도 제한. 공개방 입장이나 성공한 입장까지 함께 제한되지
+ * 않도록, "실패한 비밀번호 시도"만 방(roomId) + 요청 IP 기준으로 집계한다.
+ */
+const PASSWORD_ATTEMPT_LIMIT = 5;
+const PASSWORD_ATTEMPT_WINDOW_SECONDS = 60;
 
 const ROOM_INDEX_CACHE_KEY = 'room:index';
 const ROOM_CACHE_KEY_PREFIX = 'room:';
+const PASSWORD_ATTEMPT_CACHE_KEY_PREFIX = 'room:pwd-attempts:';
 /** 방은 활동(생성/입장/퇴장/게임 진행)이 있을 때마다 TTL이 갱신되는 슬라이딩 방식이다. */
 const ROOM_TTL_SECONDS = 6 * 60 * 60;
 /** 한 라운드의 제한 시간. 이 시간이 지나면 전원이 못 맞춰도 라운드가 강제 종료된다. */
@@ -246,6 +255,7 @@ export class RoomService extends EventEmitter {
     roomId: string,
     dto: JoinRoomRequestDto,
     accountUserId?: string,
+    clientIp?: string,
   ): Promise<RoomJoinResultDto> {
     return this.withRoomLock(roomId, async () => {
       const room = await this.getRoomOrThrow(roomId);
@@ -274,12 +284,16 @@ export class RoomService extends EventEmitter {
       }
 
       if (room.isPrivate) {
+        await this.assertPasswordAttemptAllowed(roomId, clientIp);
+
         const matches =
           room.pwdHash !== null &&
           (await bcrypt.compare(dto.password ?? '', room.pwdHash));
         if (!matches) {
+          await this.recordFailedPasswordAttempt(roomId, clientIp);
           throw new UnauthorizedException('비밀번호가 올바르지 않습니다.');
         }
+        await this.clearPasswordAttempts(roomId, clientIp);
       }
 
       const userId = accountUserId ?? randomUUID();
@@ -1104,6 +1118,42 @@ export class RoomService extends EventEmitter {
     return (
       expected.length === actual.length && timingSafeEqual(expected, actual)
     );
+  }
+
+  private passwordAttemptKey(roomId: string, clientIp: string | undefined): string {
+    return `${PASSWORD_ATTEMPT_CACHE_KEY_PREFIX}${roomId}:${clientIp ?? 'unknown'}`;
+  }
+
+  /** 이 방+IP 조합의 최근 실패 횟수가 한도를 넘었으면 429를 던진다(비밀번호 확인 전에 먼저 확인). */
+  private async assertPasswordAttemptAllowed(
+    roomId: string,
+    clientIp: string | undefined,
+  ): Promise<void> {
+    const key = this.passwordAttemptKey(roomId, clientIp);
+    const attempts = (await this.cacheService.get<number>(key)) ?? 0;
+    if (attempts >= PASSWORD_ATTEMPT_LIMIT) {
+      throw new HttpException(
+        '비밀번호 시도 횟수를 초과했습니다. 잠시 후 다시 시도해주세요.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
+  /** 비밀번호가 틀렸을 때만 호출한다. 성공한 시도나 공개방 입장은 집계하지 않는다. */
+  private async recordFailedPasswordAttempt(
+    roomId: string,
+    clientIp: string | undefined,
+  ): Promise<void> {
+    const key = this.passwordAttemptKey(roomId, clientIp);
+    const attempts = ((await this.cacheService.get<number>(key)) ?? 0) + 1;
+    await this.cacheService.set(key, attempts, PASSWORD_ATTEMPT_WINDOW_SECONDS);
+  }
+
+  private async clearPasswordAttempts(
+    roomId: string,
+    clientIp: string | undefined,
+  ): Promise<void> {
+    await this.cacheService.del(this.passwordAttemptKey(roomId, clientIp));
   }
 
   private async getRoomIndex(): Promise<string[]> {

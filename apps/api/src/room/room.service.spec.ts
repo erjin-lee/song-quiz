@@ -4,6 +4,8 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -466,6 +468,100 @@ describe('RoomService', () => {
       });
 
       expect(joinResult.room.curUserCnt).toBe(2);
+    });
+
+    it('같은 방+IP에서 비밀번호를 5회 틀리면 429(TOO_MANY_REQUESTS)를 던지고, 다른 IP는 영향받지 않는다', async () => {
+      const { room } = await roomService.createRoom({
+        roomTtl: '비밀방',
+        quizId: '1',
+        isRandom: false,
+        speedModeEnabled: false,
+        maxUserCnt: 50,
+        nickname: '방장',
+        isPrivate: true,
+        password: 'secret1234',
+      });
+
+      for (let i = 0; i < 5; i++) {
+        await expect(
+          roomService.joinRoom(
+            room.roomId,
+            { nickname: `참가자${i}`, password: '틀린비번' },
+            undefined,
+            '1.2.3.4',
+          ),
+        ).rejects.toThrow(UnauthorizedException);
+      }
+
+      const sixthAttempt = roomService.joinRoom(
+        room.roomId,
+        { nickname: '참가자6', password: 'secret1234' },
+        undefined,
+        '1.2.3.4',
+      );
+      await expect(sixthAttempt).rejects.toThrow(HttpException);
+      await expect(sixthAttempt).rejects.toMatchObject({
+        status: HttpStatus.TOO_MANY_REQUESTS,
+      });
+
+      // 다른 IP는 별도로 집계되므로 정상 입장할 수 있다.
+      const otherIpResult = await roomService.joinRoom(
+        room.roomId,
+        { nickname: '참가자7', password: 'secret1234' },
+        undefined,
+        '5.6.7.8',
+      );
+      expect(otherIpResult.room.curUserCnt).toBe(2);
+    });
+
+    it('비밀번호를 맞히면 실패 횟수 집계가 초기화된다', async () => {
+      const { room } = await roomService.createRoom({
+        roomTtl: '비밀방',
+        quizId: '1',
+        isRandom: false,
+        speedModeEnabled: false,
+        maxUserCnt: 50,
+        nickname: '방장',
+        isPrivate: true,
+        password: 'secret1234',
+      });
+      const attemptCacheKey = `room:pwd-attempts:${room.roomId}:1.2.3.4`;
+
+      for (let i = 0; i < 4; i++) {
+        await expect(
+          roomService.joinRoom(
+            room.roomId,
+            { nickname: `참가자${i}`, password: '틀린비번' },
+            undefined,
+            '1.2.3.4',
+          ),
+        ).rejects.toThrow(UnauthorizedException);
+      }
+      expect(await cacheService.get(attemptCacheKey)).toBe(4);
+
+      await roomService.joinRoom(
+        room.roomId,
+        { nickname: '참가자성공', password: 'secret1234' },
+        undefined,
+        '1.2.3.4',
+      );
+
+      expect(await cacheService.get(attemptCacheKey)).toBeUndefined();
+    });
+
+    it('공개방 입장은 같은 IP로 여러 번 반복해도 429가 발생하지 않는다', async () => {
+      const { room } = await createTestRoom(50);
+
+      for (let i = 0; i < 12; i++) {
+        await expect(
+          roomService.joinRoom(
+            room.roomId,
+            { nickname: `참가자${i}` },
+            undefined,
+            '1.2.3.4',
+          ),
+        ).resolves.toBeDefined();
+      }
     });
   });
 

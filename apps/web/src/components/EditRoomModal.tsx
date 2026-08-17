@@ -5,6 +5,8 @@ import { updateRoom } from '../api/room';
 import type { RoomItemDto } from '../types/room';
 import type { QuizListItemDto } from '../types/quiz';
 
+const ROOM_PASSWORD_MIN_LENGTH = 4;
+
 interface EditRoomModalProps {
   room: RoomItemDto;
   userId: string;
@@ -93,12 +95,22 @@ export function EditRoomModal({
     );
   }, [quizzes, quizSearch]);
 
+  const passwordTrimmed = password.trim();
+  // 공개방 -> 비밀방으로 새로 전환할 때는 비밀번호가 반드시 있어야 하고, 이미
+  // 비밀방이어도 비밀번호를 입력했다면(변경 의도) 최소 길이를 만족해야 한다.
+  const passwordMissing = isPrivate && !room.isPrivate && !passwordTrimmed;
+  const passwordTooShort =
+    isPrivate &&
+    passwordTrimmed.length > 0 &&
+    passwordTrimmed.length < ROOM_PASSWORD_MIN_LENGTH;
+  const passwordInvalid = passwordMissing || passwordTooShort;
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (!roomTtl.trim() || !quizId || !songLimit || songLimit < 1) {
       return;
     }
-    if (isPrivate && room.isPrivate === false && !password.trim()) {
+    if (passwordInvalid) {
       return;
     }
 
@@ -116,7 +128,7 @@ export function EditRoomModal({
         songLimit,
         isUnlisted,
         isPrivate,
-        password: isPrivate && password.trim() ? password.trim() : undefined,
+        password: isPrivate && passwordTrimmed ? passwordTrimmed : undefined,
       });
       onUpdated(updated);
       onClose();
@@ -128,9 +140,6 @@ export function EditRoomModal({
       setSubmitting(false);
     }
   };
-
-  const passwordRequiredButMissing =
-    isPrivate && !room.isPrivate && !password.trim();
 
   return (
     <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40 px-4">
@@ -282,10 +291,20 @@ export function EditRoomModal({
                 type="text"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
+                minLength={ROOM_PASSWORD_MIN_LENGTH}
                 maxLength={50}
-                placeholder={room.isPrivate ? '변경할 비밀번호(선택)' : '입장 비밀번호'}
+                placeholder={
+                  room.isPrivate
+                    ? `변경할 비밀번호(선택, ${ROOM_PASSWORD_MIN_LENGTH}자 이상)`
+                    : `${ROOM_PASSWORD_MIN_LENGTH}자 이상 입력`
+                }
                 className="rounded-xl border border-slate-200 px-4 py-2.5 outline-none focus:border-purple-300"
               />
+              {passwordTooShort && (
+                <span className="text-xs text-rose-500">
+                  비밀번호는 {ROOM_PASSWORD_MIN_LENGTH}자 이상이어야 합니다.
+                </span>
+              )}
             </label>
           )}
 
@@ -310,7 +329,7 @@ export function EditRoomModal({
                 songLimit < 1 ||
                 (selectedQuizSongCount !== null &&
                   songLimit > selectedQuizSongCount) ||
-                passwordRequiredButMissing
+                passwordInvalid
               }
               className="rounded-full bg-purple-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-purple-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
             >
