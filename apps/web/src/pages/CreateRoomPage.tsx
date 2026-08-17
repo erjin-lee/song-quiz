@@ -35,6 +35,7 @@ export function CreateRoomPage() {
   const [selectedQuizSongCount, setSelectedQuizSongCount] = useState<
     number | null
   >(null);
+  const [songLimit, setSongLimit] = useState<number | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [isPreparingAd, setIsPreparingAd] = useState(false);
@@ -70,11 +71,14 @@ export function CreateRoomPage() {
       .then((count) => {
         if (!cancelled) {
           setSelectedQuizSongCount(count);
+          // 퀴즈를 바꾸면 출제곡 수 기본값도 새 퀴즈의 전체 곡수로 초기화한다.
+          setSongLimit(count);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setSelectedQuizSongCount(null);
+          setSongLimit(null);
         }
       });
     return () => {
@@ -109,6 +113,7 @@ export function CreateRoomPage() {
           speedModeEnabled,
           maxUserCnt,
           nickname,
+          songLimit: songLimit ?? undefined,
         });
         saveRoomSession({
           roomId: result.room.roomId,
@@ -232,6 +237,22 @@ export function CreateRoomPage() {
             </div>
 
             <label className="flex flex-col gap-1 text-sm text-slate-600">
+              출제곡 수
+              {selectedQuizSongCount !== null
+                ? `(1~${selectedQuizSongCount})`
+                : ''}
+              <input
+                type="number"
+                min={1}
+                max={selectedQuizSongCount ?? 1}
+                value={songLimit ?? ''}
+                onChange={(event) => setSongLimit(Number(event.target.value))}
+                disabled={!selectedQuizSongCount}
+                className="rounded-xl border border-slate-200 px-4 py-2.5 outline-none focus:border-purple-300 disabled:bg-slate-50 disabled:text-slate-400"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
               최대 인원(2~50)
               <input
                 type="number"
@@ -277,7 +298,11 @@ export function CreateRoomPage() {
                   submitting ||
                   quizzes.length === 0 ||
                   !isInitialized ||
-                  !roomTtl.trim()
+                  !roomTtl.trim() ||
+                  !songLimit ||
+                  songLimit < 1 ||
+                  (selectedQuizSongCount !== null &&
+                    songLimit > selectedQuizSongCount)
                 }
                 className="rounded-full bg-purple-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-purple-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
               >

@@ -28,8 +28,11 @@ export class RoomItemDto {
   })
   quizDesc: string | null;
 
-  @ApiProperty({ description: '퀴즈 출제곡 개수', example: 140 })
+  @ApiProperty({ description: '퀴즈 전체 출제곡 개수', example: 140 })
   songCount: number;
+
+  @ApiProperty({ description: '이번 게임에서 실제로 출제할 곡 수', example: 10 })
+  songLimit: number;
 
   @ApiProperty({
     description: '퀴즈 썸네일 이미지 URL. 등록되지 않은 경우 null',

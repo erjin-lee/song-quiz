@@ -4,6 +4,7 @@ import {
   IsInt,
   IsNotEmpty,
   IsNumberString,
+  IsOptional,
   IsString,
   Max,
   MaxLength,
@@ -38,6 +39,17 @@ export class CreateRoomRequestDto {
   @Min(2)
   @Max(50)
   maxUserCnt: number;
+
+  @ApiProperty({
+    description:
+      '출제곡 수. 미지정 시 퀴즈 전체 출제곡 수를 사용한다. 퀴즈 전체 출제곡 수를 초과할 수 없다.',
+    example: 10,
+    required: false,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  songLimit?: number;
 
   @ApiProperty({ description: '방장 닉네임', example: '홍길동' })
   @IsString()

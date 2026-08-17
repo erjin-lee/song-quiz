@@ -29,7 +29,7 @@ export function RoomCard({ room, onJoin, joining, disabled }: RoomCardProps) {
             {room.roomTtl}
           </h3>
           <p className="mt-1 truncate text-sm font-medium text-purple-600">
-            {room.quizTtl} · 총 {room.songCount}곡
+            {room.quizTtl} · 총 {room.songLimit}곡
           </p>
           {room.quizDesc && (
             <p className="mt-0.5 truncate text-xs text-slate-400">

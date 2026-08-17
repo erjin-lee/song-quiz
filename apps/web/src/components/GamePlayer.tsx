@@ -63,6 +63,7 @@ interface GamePlayerProps {
   serverTimeOffsetMs: number;
   onReady: () => void;
   onStartGame: () => void;
+  onRestartGame: () => void;
   onNextRound: () => void;
   onSkip: () => void;
   onForceSkip: () => void;
@@ -109,6 +110,7 @@ export function GamePlayer({
   serverTimeOffsetMs,
   onReady,
   onStartGame,
+  onRestartGame,
   onNextRound,
   onSkip,
   onForceSkip,
@@ -422,6 +424,19 @@ export function GamePlayer({
             </li>
           ))}
         </ol>
+        {isHost ? (
+          <button
+            type="button"
+            onClick={onRestartGame}
+            className="rounded-full bg-purple-500 px-6 py-3 text-sm font-semibold text-white transition hover:bg-purple-600"
+          >
+            다시하기
+          </button>
+        ) : (
+          <p className="text-xs text-slate-400">
+            방장이 다시하기를 누르면 새 게임이 시작돼요.
+          </p>
+        )}
       </div>
     );
   }

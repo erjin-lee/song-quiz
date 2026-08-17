@@ -42,6 +42,7 @@ export interface RoomItemDto {
   quizTtl: string;
   quizDesc: string | null;
   songCount: number;
+  songLimit: number;
   quizThumbImgUrl: string | null;
   atstIds: string[];
   atstNms: string[];
@@ -76,6 +77,8 @@ export interface CreateRoomRequestDto {
   speedModeEnabled: boolean;
   maxUserCnt: number;
   nickname: string;
+  /** 출제곡 수. 미지정 시 퀴즈 전체 출제곡 수를 사용한다. */
+  songLimit?: number;
 }
 
 export interface JoinRoomRequestDto {

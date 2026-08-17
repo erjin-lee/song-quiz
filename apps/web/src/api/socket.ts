@@ -52,6 +52,7 @@ export interface RoomClientToServerEvents {
   'chat:message': (payload: { message: string }) => void;
   'room:leave': () => void;
   'game:start': () => void;
+  'game:restart': () => void;
   'game:ready': () => void;
   'game:next-round': () => void;
   'game:skip': () => void;
