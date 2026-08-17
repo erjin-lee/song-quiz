@@ -1,5 +1,6 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'crypto';
 import { EventEmitter } from 'events';
+import * as bcrypt from 'bcrypt';
 import {
   BadRequestException,
   ConflictException,
@@ -7,6 +8,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -21,7 +23,10 @@ import { LeaveRoomResultDto } from './dto/leave-room-result.dto';
 import { RoomItemDto } from './dto/room-item.dto';
 import { RoomJoinResultDto } from './dto/room-join-result.dto';
 import { RoundPublicStateDto } from './dto/round-public-state.dto';
+import { UpdateRoomRequestDto } from './dto/update-room-request.dto';
 import { normalizeAnswer, pointsForRank } from './game-scoring.util';
+
+const BCRYPT_SALT_ROUNDS = 10;
 
 const ROOM_INDEX_CACHE_KEY = 'room:index';
 const ROOM_CACHE_KEY_PREFIX = 'room:';
@@ -71,12 +76,28 @@ export interface ChatHistoryEntry {
   sentAt: string;
 }
 
+/** 참가자 닉네임이 바뀌었을 때 발생하는 이벤트. RoomGateway가 구독해 채팅 시스템 메시지로 안내한다. */
+export interface NicknameChangedEvent {
+  roomId: string;
+  userId: string;
+  oldNickname: string;
+  newNickname: string;
+}
+
 interface RoundRevealInfo {
   quizSongId: string;
   songNm: string;
   atstNm: string;
   albmNm: string;
 }
+
+/**
+ * 캐시에 저장하는 내부 표현. pwdHash는 절대 클라이언트로 나가면 안 되므로(비밀방
+ * 비밀번호 해시가 노출되면 오프라인 대입 공격이 가능해진다), RoomItemDto(공개 응답
+ * 타입)에는 포함하지 않고 이 내부 타입에만 둔다. toPublicRoom을 거치지 않은 값을
+ * 절대 컨트롤러 반환값/소켓 브로드캐스트로 내보내지 않는다.
+ */
+type RoomRecord = RoomItemDto & { pwdHash: string | null };
 
 /**
  * 방/게임 상태가 바뀔 때마다 'room-updated' 이벤트로 최신 RoomItemDto를 전파한다.
@@ -127,17 +148,20 @@ export class RoomService extends EventEmitter {
 
   async getRooms(): Promise<RoomItemDto[]> {
     const roomIds = await this.getRoomIndex();
-    const rooms = await Promise.all(
-      roomIds.map((roomId) =>
-        this.cacheService.get<RoomItemDto>(this.roomKey(roomId)),
-      ),
+    const records = await Promise.all(
+      roomIds.map((roomId) => this.getRoomRecord(roomId)),
     );
 
-    return rooms.filter((room): room is RoomItemDto => room !== undefined);
+    return records
+      .filter(
+        (room): room is RoomRecord => room !== undefined && !room.isUnlisted,
+      )
+      .map((room) => this.toPublicRoom(room));
   }
 
   async getRoom(roomId: string): Promise<RoomItemDto | undefined> {
-    return this.cacheService.get<RoomItemDto>(this.roomKey(roomId));
+    const record = await this.getRoomRecord(roomId);
+    return record ? this.toPublicRoom(record) : undefined;
   }
 
   async createRoom(
@@ -168,8 +192,18 @@ export class RoomService extends EventEmitter {
       );
     }
 
+    if (dto.isPrivate && !dto.password) {
+      throw new BadRequestException(
+        '비밀방으로 설정하려면 비밀번호를 입력해야 합니다.',
+      );
+    }
+    const pwdHash =
+      dto.isPrivate && dto.password
+        ? await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS)
+        : null;
+
     const hostUserId = accountUserId ?? randomUUID();
-    const room: RoomItemDto = {
+    const room: RoomRecord = {
       roomId: randomUUID(),
       roomTtl: dto.roomTtl,
       quizId: dto.quizId,
@@ -181,6 +215,9 @@ export class RoomService extends EventEmitter {
       atstIds: quizArtists.map((quizArtist) => quizArtist.atstId),
       atstNms: quizArtists.map((quizArtist) => quizArtist.artist.atstNm),
       isRandom: dto.isRandom,
+      isUnlisted: dto.isUnlisted ?? false,
+      isPrivate: dto.isPrivate ?? false,
+      pwdHash,
       speedModeEnabled: dto.speedModeEnabled,
       maxUserCnt: dto.maxUserCnt,
       curUserCnt: 1,
@@ -195,7 +232,7 @@ export class RoomService extends EventEmitter {
     await this.addToIndex(room.roomId);
 
     const accessToken = this.computeMembershipToken(room.roomId, hostUserId);
-    return { room, userId: hostUserId, accessToken };
+    return { room: this.toPublicRoom(room), userId: hostUserId, accessToken };
   }
 
   async joinRoom(
@@ -217,7 +254,11 @@ export class RoomService extends EventEmitter {
             roomId,
             existing.userId,
           );
-          return { room, userId: existing.userId, accessToken };
+          return {
+            room: this.toPublicRoom(room),
+            userId: existing.userId,
+            accessToken,
+          };
         }
       }
 
@@ -225,15 +266,24 @@ export class RoomService extends EventEmitter {
         throw new ConflictException('방 정원이 가득 찼습니다.');
       }
 
+      if (room.isPrivate) {
+        const matches =
+          room.pwdHash !== null &&
+          (await bcrypt.compare(dto.password ?? '', room.pwdHash));
+        if (!matches) {
+          throw new UnauthorizedException('비밀번호가 올바르지 않습니다.');
+        }
+      }
+
       const userId = accountUserId ?? randomUUID();
       room.participants.push({ userId, nickname: dto.nickname, score: 0 });
       room.curUserCnt = room.participants.length;
 
       await this.saveRoom(room);
-      this.emit('room-updated', room);
+      this.emit('room-updated', this.toPublicRoom(room));
 
       const accessToken = this.computeMembershipToken(roomId, userId);
-      return { room, userId, accessToken };
+      return { room: this.toPublicRoom(room), userId, accessToken };
     });
   }
 
@@ -283,9 +333,130 @@ export class RoomService extends EventEmitter {
       }
 
       await this.saveRoom(room);
-      this.emit('room-updated', room);
+      this.emit('room-updated', this.toPublicRoom(room));
 
-      return { roomDeleted: false, room };
+      return { roomDeleted: false, room: this.toPublicRoom(room) };
+    });
+  }
+
+  /**
+   * 방 안에서 참가자 본인의 닉네임을 바꾼다(게스트 전용 여부는 컨트롤러에서 검증한다).
+   * 변경 사실은 'nickname-changed' 이벤트로 알려 RoomGateway가 채팅 시스템 메시지로
+   * 안내하게 한다.
+   */
+  async updateNickname(
+    roomId: string,
+    userId: string,
+    nickname: string,
+  ): Promise<RoomItemDto> {
+    return this.withRoomLock(roomId, async () => {
+      const room = await this.getRoomOrThrow(roomId);
+      const participant = room.participants.find((p) => p.userId === userId);
+      if (!participant) {
+        throw new NotFoundException('방에 참가 중인 유저가 아닙니다.');
+      }
+
+      const oldNickname = participant.nickname;
+      if (oldNickname === nickname) {
+        return this.toPublicRoom(room);
+      }
+
+      participant.nickname = nickname;
+      await this.saveRoom(room);
+
+      const publicRoom = this.toPublicRoom(room);
+      this.emit('room-updated', publicRoom);
+      this.emit('nickname-changed', {
+        roomId,
+        userId,
+        oldNickname,
+        newNickname: nickname,
+      } satisfies NicknameChangedEvent);
+      return publicRoom;
+    });
+  }
+
+  /**
+   * 방장이 게임 시작 전(WAITING) 또는 게임 종료 후(FINISHED)에 방 설정을 수정한다.
+   * CreateRoomRequestDto와 동일한 필드 구성을 그대로 다시 제출받아 통째로 교체하는
+   * 방식이라(부분 patch가 아님), quizId가 그대로여도 매번 퀴즈 정보를 다시 조회해
+   * songCount/atstNms 등을 최신 상태로 맞춘다.
+   */
+  async updateRoom(
+    roomId: string,
+    dto: UpdateRoomRequestDto,
+  ): Promise<RoomItemDto> {
+    return this.withRoomLock(roomId, async () => {
+      const room = await this.getRoomOrThrow(roomId);
+      this.assertHost(room, dto.userId);
+
+      if (room.gameStatus !== 'WAITING' && room.gameStatus !== 'FINISHED') {
+        throw new ConflictException(
+          '게임 시작 전이나 종료 후에만 방 정보를 수정할 수 있습니다.',
+        );
+      }
+
+      if (dto.maxUserCnt < room.curUserCnt) {
+        throw new BadRequestException(
+          `최대 인원은 현재 참가 인원(${room.curUserCnt}명) 미만으로 설정할 수 없습니다.`,
+        );
+      }
+
+      const quiz = await this.quizRepository.findOne({
+        where: { quizId: dto.quizId, useYn: 'Y' },
+      });
+      if (!quiz) {
+        throw new NotFoundException(
+          `퀴즈를 찾을 수 없습니다. (quizId: ${dto.quizId})`,
+        );
+      }
+      const quizArtists = await this.quizArtistRepository.find({
+        where: { quizId: dto.quizId },
+        relations: { artist: true },
+      });
+      const songCount = await this.quizSongRepository.count({
+        where: { quizId: dto.quizId },
+      });
+      const songLimit = dto.songLimit ?? songCount;
+      if (songLimit > songCount) {
+        throw new BadRequestException(
+          `출제곡 수는 퀴즈 전체 출제곡 수(${songCount}곡)를 초과할 수 없습니다.`,
+        );
+      }
+
+      let pwdHash: string | null = null;
+      if (dto.isPrivate) {
+        if (dto.password) {
+          pwdHash = await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS);
+        } else if (room.isPrivate) {
+          pwdHash = room.pwdHash;
+        } else {
+          throw new BadRequestException(
+            '비밀방으로 설정하려면 비밀번호를 입력해야 합니다.',
+          );
+        }
+      }
+
+      room.roomTtl = dto.roomTtl;
+      room.quizId = dto.quizId;
+      room.quizTtl = quiz.quizTtl;
+      room.quizDesc = quiz.quizDesc;
+      room.quizThumbImgUrl = quiz.thumbImgUrl;
+      room.atstIds = quizArtists.map((quizArtist) => quizArtist.atstId);
+      room.atstNms = quizArtists.map((quizArtist) => quizArtist.artist.atstNm);
+      room.songCount = songCount;
+      room.songLimit = songLimit;
+      room.isRandom = dto.isRandom;
+      room.speedModeEnabled = dto.speedModeEnabled;
+      room.maxUserCnt = dto.maxUserCnt;
+      room.isUnlisted = dto.isUnlisted;
+      room.isPrivate = dto.isPrivate;
+      room.pwdHash = pwdHash;
+
+      await this.saveRoom(room);
+      const publicRoom = this.toPublicRoom(room);
+      this.emit('room-updated', publicRoom);
+      return publicRoom;
     });
   }
 
@@ -305,7 +476,7 @@ export class RoomService extends EventEmitter {
       await this.prepareFirstRound(roomId, room);
 
       await this.saveRoom(room);
-      this.emit('room-updated', room);
+      this.emit('room-updated', this.toPublicRoom(room));
       return room;
     });
   }
@@ -320,7 +491,9 @@ export class RoomService extends EventEmitter {
       this.assertHost(room, requesterUserId);
 
       if (room.gameStatus !== 'FINISHED') {
-        throw new ConflictException('게임이 종료된 후에만 다시 시작할 수 있습니다.');
+        throw new ConflictException(
+          '게임이 종료된 후에만 다시 시작할 수 있습니다.',
+        );
       }
 
       room.participants = room.participants.map((participant) => ({
@@ -331,13 +504,16 @@ export class RoomService extends EventEmitter {
       await this.prepareFirstRound(roomId, room);
 
       await this.saveRoom(room);
-      this.emit('room-updated', room);
+      this.emit('room-updated', this.toPublicRoom(room));
       return room;
     });
   }
 
   /** songOrder를 새로 구성하고 첫 라운드를 준비해 room을 LOADING 상태로 만든다(room을 직접 변경한다). */
-  private async prepareFirstRound(roomId: string, room: RoomItemDto): Promise<void> {
+  private async prepareFirstRound(
+    roomId: string,
+    room: RoomItemDto,
+  ): Promise<void> {
     const songOrder = await this.buildSongOrder(
       room.quizId,
       room.isRandom,
@@ -347,11 +523,7 @@ export class RoomService extends EventEmitter {
       throw new NotFoundException('퀴즈에 출제곡이 없습니다.');
     }
 
-    await this.quizRepository.increment(
-      { quizId: room.quizId },
-      'playCnt',
-      1,
-    );
+    await this.quizRepository.increment({ quizId: room.quizId }, 'playCnt', 1);
 
     this.songOrders.set(roomId, songOrder);
     room.gameStatus = 'LOADING';
@@ -379,7 +551,7 @@ export class RoomService extends EventEmitter {
       this.recomputeReadyStatus(room);
 
       await this.saveRoom(room);
-      this.emit('room-updated', room);
+      this.emit('room-updated', this.toPublicRoom(room));
       return room;
     });
   }
@@ -401,7 +573,7 @@ export class RoomService extends EventEmitter {
       await this.advanceToNextRound(room);
 
       await this.saveRoom(room);
-      this.emit('room-updated', room);
+      this.emit('room-updated', this.toPublicRoom(room));
       return room;
     });
   }
@@ -476,7 +648,7 @@ export class RoomService extends EventEmitter {
       }
 
       await this.saveRoom(room);
-      this.emit('room-updated', room);
+      this.emit('room-updated', this.toPublicRoom(room));
 
       return {
         action: 'correct',
@@ -509,7 +681,7 @@ export class RoomService extends EventEmitter {
       }
 
       await this.saveRoom(room);
-      this.emit('room-updated', room);
+      this.emit('room-updated', this.toPublicRoom(room));
       return room;
     });
   }
@@ -537,7 +709,7 @@ export class RoomService extends EventEmitter {
       this.scheduleRoundTimer(roomId, FORCE_SKIP_DELAY_SECONDS);
 
       await this.saveRoom(room);
-      this.emit('room-updated', room);
+      this.emit('room-updated', this.toPublicRoom(room));
       return room;
     });
   }
@@ -659,13 +831,13 @@ export class RoomService extends EventEmitter {
   /** 스피드 모드: 첫 정답자가 나온 뒤 예약된 시간이 지나면 아직 전원이 못 맞췄어도 정답을 공개한다. */
   private async handleSpeedModeReveal(roomId: string): Promise<void> {
     await this.withRoomLock(roomId, async () => {
-      const room = await this.getRoom(roomId);
+      const room = await this.getRoomRecord(roomId);
       if (!room || room.gameStatus !== 'PLAYING') {
         return;
       }
       this.finalizeRoundEnd(room);
       await this.saveRoom(room);
-      this.emit('room-updated', room);
+      this.emit('room-updated', this.toPublicRoom(room));
     }).catch((err) => {
       this.logger.error(
         `스피드 모드 정답 자동 공개 처리 실패(roomId: ${roomId}): ${(err as Error).message}`,
@@ -676,13 +848,13 @@ export class RoomService extends EventEmitter {
   /** 스피드 모드: 정답 공개 후 예약된 시간이 지나면 방장 조작 없이 자동으로 다음 라운드로 넘어간다. */
   private async handleAutoNextRound(roomId: string): Promise<void> {
     await this.withRoomLock(roomId, async () => {
-      const room = await this.getRoom(roomId);
+      const room = await this.getRoomRecord(roomId);
       if (!room || room.gameStatus !== 'ROUND_ENDED') {
         return;
       }
       await this.advanceToNextRound(room);
       await this.saveRoom(room);
-      this.emit('room-updated', room);
+      this.emit('room-updated', this.toPublicRoom(room));
     }).catch((err) => {
       this.logger.error(
         `스피드 모드 자동 다음 라운드 처리 실패(roomId: ${roomId}): ${(err as Error).message}`,
@@ -736,13 +908,13 @@ export class RoomService extends EventEmitter {
 
   private async handleRoundTimeout(roomId: string): Promise<void> {
     await this.withRoomLock(roomId, async () => {
-      const room = await this.getRoom(roomId);
+      const room = await this.getRoomRecord(roomId);
       if (!room || room.gameStatus !== 'PLAYING') {
         return;
       }
       this.finalizeRoundEnd(room);
       await this.saveRoom(room);
-      this.emit('room-updated', room);
+      this.emit('room-updated', this.toPublicRoom(room));
     });
   }
 
@@ -821,12 +993,22 @@ export class RoomService extends EventEmitter {
     };
   }
 
-  private async getRoomOrThrow(roomId: string): Promise<RoomItemDto> {
-    const room = await this.getRoom(roomId);
+  /** pwdHash를 포함한 내부 표현을 반환한다. 응답/브로드캐스트 직전에는 반드시 toPublicRoom을 거쳐야 한다. */
+  private async getRoomRecord(roomId: string): Promise<RoomRecord | undefined> {
+    return this.cacheService.get<RoomRecord>(this.roomKey(roomId));
+  }
+
+  private async getRoomOrThrow(roomId: string): Promise<RoomRecord> {
+    const room = await this.getRoomRecord(roomId);
     if (!room) {
       throw new NotFoundException(`방을 찾을 수 없습니다. (roomId: ${roomId})`);
     }
     return room;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private toPublicRoom({ pwdHash, ...publicRoom }: RoomRecord): RoomItemDto {
+    return publicRoom;
   }
 
   private async saveRoom(room: RoomItemDto): Promise<void> {
@@ -875,7 +1057,11 @@ export class RoomService extends EventEmitter {
   }
 
   /** 소켓 room:enter, REST 퇴장 요청에서 요청자가 실제 그 참가자 본인인지 검증한다. */
-  verifyMembershipToken(roomId: string, userId: string, token: string): boolean {
+  verifyMembershipToken(
+    roomId: string,
+    userId: string,
+    token: string,
+  ): boolean {
     const expected = Buffer.from(this.computeMembershipToken(roomId, userId));
     const actual = Buffer.from(token);
     return (

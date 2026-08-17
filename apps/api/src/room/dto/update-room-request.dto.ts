@@ -6,12 +6,28 @@ import {
   IsNumberString,
   IsOptional,
   IsString,
+  IsUUID,
   Max,
   MaxLength,
   Min,
 } from 'class-validator';
 
-export class CreateRoomRequestDto {
+export class UpdateRoomRequestDto {
+  @ApiProperty({
+    description: '수정을 요청하는 유저 ID(방장이어야 한다)',
+    example: 'b3f1c2e0-1234-4a5b-9c6d-abcdef123456',
+  })
+  @IsUUID()
+  userId: string;
+
+  @ApiProperty({
+    description: '입장/생성 시 함께 발급받은 비공개 접근 토큰(본인 확인용)',
+    example: 'c4d2e3f1-...',
+  })
+  @IsString()
+  @IsNotEmpty()
+  accessToken: string;
+
   @ApiProperty({ description: '방 제목', example: '아이유 노래 맞추기 방' })
   @IsString()
   @IsNotEmpty()
@@ -51,33 +67,24 @@ export class CreateRoomRequestDto {
   @Min(1)
   songLimit?: number;
 
-  @ApiProperty({ description: '방장 닉네임', example: '홍길동' })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(30)
-  nickname: string;
-
   @ApiProperty({
     description:
       '비공개방 여부. true면 방 목록에 노출되지 않고 링크로만 입장할 수 있다.',
     example: false,
-    required: false,
   })
-  @IsOptional()
   @IsBoolean()
-  isUnlisted?: boolean;
+  isUnlisted: boolean;
 
   @ApiProperty({
     description: '비밀방 여부. true면 입장 시 password가 일치해야 한다.',
     example: false,
-    required: false,
   })
-  @IsOptional()
   @IsBoolean()
-  isPrivate?: boolean;
+  isPrivate: boolean;
 
   @ApiProperty({
-    description: 'isPrivate가 true일 때 필요한 입장 비밀번호.',
+    description:
+      'isPrivate가 true일 때의 입장 비밀번호. 비밀방을 유지하면서 비밀번호를 바꾸지 않을 때는 비워둔다(기존 비밀번호가 그대로 유지된다).',
     example: '1234',
     required: false,
   })

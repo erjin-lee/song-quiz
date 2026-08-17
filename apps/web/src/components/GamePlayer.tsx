@@ -68,6 +68,7 @@ interface GamePlayerProps {
   onSkip: () => void;
   onForceSkip: () => void;
   onOpenInquiry: () => void;
+  onEditRoom: () => void;
   shortcutEnabled: boolean;
   onShortcutEnabledChange: (enabled: boolean) => void;
   /** 동시 재생 디버깅용: 실제로 playVideo()를 호출한 시점마다 호출된다(선택). */
@@ -115,6 +116,7 @@ export function GamePlayer({
   onSkip,
   onForceSkip,
   onOpenInquiry,
+  onEditRoom,
   shortcutEnabled,
   onShortcutEnabledChange,
   onPlaybackTriggered,
@@ -392,13 +394,22 @@ export function GamePlayer({
             : '방장이 게임을 시작하길 기다리는 중...'}
         </p>
         {isHost && (
-          <button
-            type="button"
-            onClick={onStartGame}
-            className="rounded-full bg-purple-500 px-6 py-3 text-sm font-semibold text-white transition hover:bg-purple-600"
-          >
-            게임 시작
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onStartGame}
+              className="rounded-full bg-purple-500 px-6 py-3 text-sm font-semibold text-white transition hover:bg-purple-600"
+            >
+              게임 시작
+            </button>
+            <button
+              type="button"
+              onClick={onEditRoom}
+              className="rounded-full bg-white px-5 py-3 text-sm font-semibold text-slate-500 shadow-sm transition hover:bg-slate-50"
+            >
+              방 정보 수정
+            </button>
+          </div>
         )}
       </div>
     );
@@ -425,13 +436,22 @@ export function GamePlayer({
           ))}
         </ol>
         {isHost ? (
-          <button
-            type="button"
-            onClick={onRestartGame}
-            className="rounded-full bg-purple-500 px-6 py-3 text-sm font-semibold text-white transition hover:bg-purple-600"
-          >
-            다시하기
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onRestartGame}
+              className="rounded-full bg-purple-500 px-6 py-3 text-sm font-semibold text-white transition hover:bg-purple-600"
+            >
+              다시하기
+            </button>
+            <button
+              type="button"
+              onClick={onEditRoom}
+              className="rounded-full bg-white px-5 py-3 text-sm font-semibold text-slate-500 shadow-sm transition hover:bg-slate-50"
+            >
+              방 정보 수정
+            </button>
+          </div>
         ) : (
           <p className="text-xs text-slate-400">
             방장이 다시하기를 누르면 새 게임이 시작돼요.

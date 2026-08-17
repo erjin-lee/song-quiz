@@ -18,7 +18,7 @@ import { YoutubeScraperClient } from './youtube-scraper.client';
 
 const YOUTUBE_REQUEST_DELAY_MS = 300;
 const YOUTUBE_BATCH_SIZE = 10;
-const YOUTUBE_BATCH_DELAY_MS = 5000;
+const YOUTUBE_BATCH_DELAY_MS = 3000;
 const QUIZ_SONG_CLIP_SEC = 30;
 
 @Injectable()

@@ -25,8 +25,13 @@ export function RoomCard({ room, onJoin, joining, disabled }: RoomCardProps) {
           </div>
         )}
         <div className="min-w-0">
-          <h3 className="truncate font-bold text-slate-800">
-            {room.roomTtl}
+          <h3 className="flex items-center gap-1 truncate font-bold text-slate-800">
+            {room.isPrivate && (
+              <span title="비밀번호가 필요한 방입니다" className="shrink-0">
+                🔒
+              </span>
+            )}
+            <span className="truncate">{room.roomTtl}</span>
           </h3>
           <p className="mt-1 truncate text-sm font-medium text-purple-600">
             {room.quizTtl} · 총 {room.songLimit}곡

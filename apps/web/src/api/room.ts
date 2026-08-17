@@ -1,10 +1,12 @@
-import { apiGet, apiPost } from './client';
+import { apiGet, apiPatch, apiPost } from './client';
 import type {
   CreateRoomRequestDto,
   JoinRoomRequestDto,
   LeaveRoomResultDto,
   RoomItemDto,
   RoomJoinResultDto,
+  UpdateNicknameRequestDto,
+  UpdateRoomRequestDto,
 } from '../types/room';
 
 export function getRooms(): Promise<RoomItemDto[]> {
@@ -26,6 +28,20 @@ export function joinRoom(
   body: JoinRoomRequestDto,
 ): Promise<RoomJoinResultDto> {
   return apiPost<RoomJoinResultDto>(`/rooms/${roomId}/join`, body);
+}
+
+export function updateRoom(
+  roomId: string,
+  body: UpdateRoomRequestDto,
+): Promise<RoomItemDto> {
+  return apiPatch<RoomItemDto>(`/rooms/${roomId}`, body);
+}
+
+export function updateNickname(
+  roomId: string,
+  body: UpdateNicknameRequestDto,
+): Promise<RoomItemDto> {
+  return apiPost<RoomItemDto>(`/rooms/${roomId}/nickname`, body);
 }
 
 export function leaveRoom(

@@ -1,14 +1,23 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Logo } from '../components/Logo';
 import { ParticipantList } from '../components/ParticipantList';
 import { GamePlayer } from '../components/GamePlayer';
 import { InquiryModal } from '../components/InquiryModal';
+import { EditRoomModal } from '../components/EditRoomModal';
+import { ChangeNicknameModal } from '../components/ChangeNicknameModal';
 import {
   ChatPanel,
   type ChatEntry,
   type ChatPanelHandle,
 } from '../components/ChatPanel';
+import { ApiError } from '../api/client';
 import { getRoomById, joinRoom, leaveRoom } from '../api/room';
 import { createRoomSocket, type RoomSocket } from '../api/socket';
 import { useServerClockOffset } from '../hooks/useServerClockOffset';
@@ -20,7 +29,6 @@ import {
   loadRoomSession,
   saveRoomSession,
 } from '../utils/roomSession';
-import { sortParticipantsByScore } from '../utils/participants';
 import { playCorrectAnswerSound } from '../utils/sound';
 import { isDebugUser, truncateForDebugChat } from '../utils/debugUser';
 import type { RoomItemDto } from '../types/room';
@@ -65,10 +73,17 @@ export function RoomGamePage() {
     atstNm: string;
   } | null>(null);
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  const [editRoomOpen, setEditRoomOpen] = useState(false);
+  const [nicknameModalOpen, setNicknameModalOpen] = useState(false);
+  const [passwordRequired, setPasswordRequired] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [passwordSubmitting, setPasswordSubmitting] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const chatPanelRef = useRef<ChatPanelHandle>(null);
   const [socket, setSocket] = useState<RoomSocket | null>(null);
   const serverTimeOffsetMs = useServerClockOffset(socket);
-  const { nickname, isInitialized } = useSession();
+  const { nickname, isInitialized, isAuthenticated, setNickname } =
+    useSession();
   useGuestNicknameFallback();
 
   useDocumentMeta({
@@ -196,10 +211,15 @@ export function RoomGamePage() {
         setUserId(result.userId);
         setAccessToken(result.accessToken);
       })
-      .catch(() => {
-        if (!cancelled) {
-          navigate('/rooms', { replace: true });
+      .catch((err) => {
+        if (cancelled) {
+          return;
         }
+        if (err instanceof ApiError && err.status === 401) {
+          setPasswordRequired(true);
+          return;
+        }
+        navigate('/rooms', { replace: true });
       })
       .finally(() => {
         if (!cancelled) {
@@ -211,6 +231,40 @@ export function RoomGamePage() {
       cancelled = true;
     };
   }, [roomId, candidateMembership, nickname, isInitialized, navigate]);
+
+  // 비밀방을 공유 링크로 직접 열었을 때(참가 기록 없음) 비밀번호를 입력받아 재시도한다.
+  const handlePasswordSubmit = useCallback(
+    async (event: FormEvent) => {
+      event.preventDefault();
+      if (!roomId || passwordSubmitting) {
+        return;
+      }
+      setPasswordSubmitting(true);
+      setPasswordError(null);
+      try {
+        const result = await joinRoom(roomId, {
+          nickname,
+          password: passwordInput,
+        });
+        saveRoomSession({
+          roomId,
+          userId: result.userId,
+          accessToken: result.accessToken,
+        });
+        setRoom(result.room);
+        setUserId(result.userId);
+        setAccessToken(result.accessToken);
+        setPasswordRequired(false);
+      } catch (err) {
+        setPasswordError(
+          err instanceof ApiError ? err.message : '입장에 실패했습니다.',
+        );
+      } finally {
+        setPasswordSubmitting(false);
+      }
+    },
+    [roomId, nickname, passwordInput, passwordSubmitting],
+  );
 
   useEffect(() => {
     if (!roomId || !userId || !accessToken) {
@@ -297,7 +351,10 @@ export function RoomGamePage() {
       socket.disconnect();
       setSocket(null);
     };
-  }, [roomId, userId, accessToken, nickname]);
+    // nickname은 최초 연결 시점의 디버그 모드 판별에만 쓴다. 방 안에서 닉네임을
+    // 바꿨다고 소켓을 재연결하면 채팅/방 상태가 불필요하게 깜빡이므로 deps에서 뺀다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId, userId, accessToken]);
 
   // 내가 방금 정답을 맞혔을 때만 효과음을 재생한다. room:state는 전체 라운드 상태를
   // 통째로 내려주므로, 이전에 내 userId가 없다가 새로 추가된 순간(전환)만 감지한다.
@@ -373,6 +430,27 @@ export function RoomGamePage() {
     socket?.emit('game:force-skip');
   }, [socket]);
 
+  const handleOpenEditRoom = useCallback(() => {
+    setEditRoomOpen(true);
+  }, []);
+
+  const handleRoomUpdated = useCallback((updatedRoom: RoomItemDto) => {
+    setRoom(updatedRoom);
+  }, []);
+
+  const handleOpenNicknameModal = useCallback(() => {
+    setNicknameModalOpen(true);
+  }, []);
+
+  // 방 안에서 바꾼 닉네임을 기본 게스트 닉네임으로도 반영해, 다음에 만들거나
+  // 입장하는 방에서도 유지되게 한다(room 상태 자체는 소켓 room:state로 갱신됨).
+  const handleNicknameChanged = useCallback(
+    (newNickname: string) => {
+      setNickname(newNickname);
+    },
+    [setNickname],
+  );
+
   // 문의 대상 곡 정보는 모달을 여는 시점의 라운드 값을 그대로 고정해둔다.
   // room.currentRound를 직접 참조하면 문의 작성 중 다음 라운드로 넘어갔을 때
   // 모달이 사라지거나 문의 대상 곡이 바뀌어버린다.
@@ -423,6 +501,54 @@ export function RoomGamePage() {
     [socket, nickname],
   );
 
+  if (passwordRequired && (!room || !userId)) {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-4">
+        <div className="w-full max-w-xs rounded-2xl bg-white p-6 shadow-xl">
+          <h2 className="mb-1 text-base font-bold text-slate-800">
+            🔒 비밀번호가 필요해요
+          </h2>
+          <p className="mb-4 text-sm text-slate-500">
+            비밀방입니다. 입장 비밀번호를 입력해주세요.
+          </p>
+          <form
+            onSubmit={handlePasswordSubmit}
+            className="flex flex-col gap-2"
+          >
+            <input
+              autoFocus
+              type="text"
+              value={passwordInput}
+              onChange={(event) => setPasswordInput(event.target.value)}
+              maxLength={50}
+              placeholder="비밀번호"
+              className="rounded-xl border border-slate-200 px-4 py-2.5 outline-none focus:border-purple-300"
+            />
+            {passwordError && (
+              <p className="text-sm text-rose-500">{passwordError}</p>
+            )}
+            <div className="mt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => navigate('/rooms', { replace: true })}
+                className="rounded-full px-5 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100"
+              >
+                취소
+              </button>
+              <button
+                type="submit"
+                disabled={passwordSubmitting || !passwordInput}
+                className="rounded-full bg-purple-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-purple-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+              >
+                {passwordSubmitting ? '입장 중...' : '입장하기'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   if (!room || !userId) {
     return (
       <div className="flex min-h-screen items-center justify-center text-sm text-slate-400">
@@ -463,15 +589,13 @@ export function RoomGamePage() {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_1fr]">
           <aside className="max-h-[40vh] overflow-y-auto pr-1 sm:max-h-[55vh] lg:max-h-[calc(100vh-11rem)]">
             <ParticipantList
-              participants={
-                room.gameStatus === 'WAITING'
-                  ? room.participants
-                  : sortParticipantsByScore(room.participants)
-              }
+              participants={room.participants}
               hostUserId={room.hostUserId}
               currentUserId={userId}
               maxUserCnt={room.maxUserCnt}
               correctUserIds={room.currentRound?.correctUserIds ?? []}
+              canEditNickname={!isAuthenticated}
+              onEditNickname={handleOpenNicknameModal}
             />
           </aside>
 
@@ -487,6 +611,7 @@ export function RoomGamePage() {
               onSkip={handleSkip}
               onForceSkip={handleForceSkip}
               onOpenInquiry={handleOpenInquiry}
+              onEditRoom={handleOpenEditRoom}
               onPlaybackTriggered={handlePlaybackTriggered}
               onPlaybackStarted={handlePlaybackStarted}
               shortcutEnabled={nextRoundShortcutEnabled}
@@ -504,6 +629,30 @@ export function RoomGamePage() {
           </main>
         </div>
       </div>
+
+      {editRoomOpen && (
+        <EditRoomModal
+          room={room}
+          userId={userId}
+          accessToken={accessToken ?? ''}
+          onClose={() => setEditRoomOpen(false)}
+          onUpdated={handleRoomUpdated}
+        />
+      )}
+
+      {nicknameModalOpen && (
+        <ChangeNicknameModal
+          roomId={room.roomId}
+          userId={userId}
+          accessToken={accessToken ?? ''}
+          currentNickname={
+            room.participants.find((p) => p.userId === userId)?.nickname ??
+            nickname
+          }
+          onClose={() => setNicknameModalOpen(false)}
+          onChanged={handleNicknameChanged}
+        />
+      )}
 
       {inquiryTarget && (
         <InquiryModal
