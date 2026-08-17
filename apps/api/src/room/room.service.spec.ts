@@ -5,6 +5,7 @@ import {
   ConflictException,
   ForbiddenException,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import type { Repository } from 'typeorm';
 import { CacheService } from '../cache/cache.service';
@@ -352,6 +353,97 @@ describe('RoomService', () => {
     });
   });
 
+  describe('비공개방/비밀방', () => {
+    it('isUnlisted로 생성한 방은 목록 조회에 나타나지 않지만 단건 조회는 그대로 된다', async () => {
+      const { room } = await roomService.createRoom({
+        roomTtl: '비공개방',
+        quizId: '1',
+        isRandom: false,
+        speedModeEnabled: false,
+        maxUserCnt: 4,
+        nickname: '방장',
+        isUnlisted: true,
+      });
+
+      const rooms = await roomService.getRooms();
+      expect(rooms.map((r) => r.roomId)).not.toContain(room.roomId);
+
+      const fetched = await roomService.getRoom(room.roomId);
+      expect(fetched?.roomId).toBe(room.roomId);
+    });
+
+    it('isPrivate만 켜고 비밀번호를 지정하지 않으면 BadRequestException', async () => {
+      await expect(
+        roomService.createRoom({
+          roomTtl: '비밀방',
+          quizId: '1',
+          isRandom: false,
+          speedModeEnabled: false,
+          maxUserCnt: 4,
+          nickname: '방장',
+          isPrivate: true,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('비밀방 생성 응답과 목록/단건 조회 응답에 비밀번호 해시가 노출되지 않는다', async () => {
+      const { room } = await roomService.createRoom({
+        roomTtl: '비밀방',
+        quizId: '1',
+        isRandom: false,
+        speedModeEnabled: false,
+        maxUserCnt: 4,
+        nickname: '방장',
+        isPrivate: true,
+        password: 'secret1234',
+      });
+
+      expect(room).not.toHaveProperty('pwdHash');
+      const fetched = await roomService.getRoom(room.roomId);
+      expect(fetched).not.toHaveProperty('pwdHash');
+    });
+
+    it('비밀방에 잘못된 비밀번호로 입장하면 UnauthorizedException', async () => {
+      const { room } = await roomService.createRoom({
+        roomTtl: '비밀방',
+        quizId: '1',
+        isRandom: false,
+        speedModeEnabled: false,
+        maxUserCnt: 4,
+        nickname: '방장',
+        isPrivate: true,
+        password: 'secret1234',
+      });
+
+      await expect(
+        roomService.joinRoom(room.roomId, {
+          nickname: '참가자1',
+          password: '틀린비번',
+        }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('비밀방에 올바른 비밀번호로 입장하면 정상 입장된다', async () => {
+      const { room } = await roomService.createRoom({
+        roomTtl: '비밀방',
+        quizId: '1',
+        isRandom: false,
+        speedModeEnabled: false,
+        maxUserCnt: 4,
+        nickname: '방장',
+        isPrivate: true,
+        password: 'secret1234',
+      });
+
+      const joinResult = await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+        password: 'secret1234',
+      });
+
+      expect(joinResult.room.curUserCnt).toBe(2);
+    });
+  });
+
   describe('참가자 접근 토큰(accessToken)', () => {
     it('방을 생성하면 accessToken이 함께 발급되고 verifyMembershipToken으로 검증된다', async () => {
       const { room, userId, accessToken } = await createTestRoom();
@@ -384,10 +476,9 @@ describe('RoomService', () => {
 
     it('다른 참가자의 userId로는 내 accessToken이 검증되지 않는다', async () => {
       const { room, accessToken: hostAccessToken } = await createTestRoom();
-      const { userId: guestUserId } = await roomService.joinRoom(
-        room.roomId,
-        { nickname: '참가자1' },
-      );
+      const { userId: guestUserId } = await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+      });
 
       expect(
         roomService.verifyMembershipToken(
@@ -417,18 +508,21 @@ describe('RoomService', () => {
     });
 
     it('같은 계정이 다른 기기로 재입장해도 이전에 발급된 토큰이 계속 유효하다', async () => {
-      const { room, userId: hostUserId, accessToken: firstDeviceToken } =
-        await roomService.createRoom(
-          {
-            roomTtl: '아이유 방',
-            quizId: '1',
-            isRandom: false,
-            speedModeEnabled: false,
-            maxUserCnt: 4,
-            nickname: '방장',
-          },
-          'account-user-1',
-        );
+      const {
+        room,
+        userId: hostUserId,
+        accessToken: firstDeviceToken,
+      } = await roomService.createRoom(
+        {
+          roomTtl: '아이유 방',
+          quizId: '1',
+          isRandom: false,
+          speedModeEnabled: false,
+          maxUserCnt: 4,
+          nickname: '방장',
+        },
+        'account-user-1',
+      );
 
       // 같은 계정이 다른 기기(새 소켓)로 재입장 -> joinRoom이 다시 호출된다.
       await roomService.joinRoom(
@@ -476,11 +570,7 @@ describe('RoomService', () => {
     });
 
     it('songLimit을 지정해 방을 만들면 게임 시작 시 그만큼만 라운드가 진행된다', async () => {
-      const { room, userId: hostUserId } = await createTestRoom(
-        4,
-        false,
-        1,
-      );
+      const { room, userId: hostUserId } = await createTestRoom(4, false, 1);
 
       const started = await roomService.startGame(room.roomId, hostUserId);
 
@@ -816,10 +906,7 @@ describe('RoomService', () => {
         finished.participants.find((p) => p.userId === hostUserId)?.score,
       ).toBeGreaterThan(0);
 
-      const restarted = await roomService.restartGame(
-        room.roomId,
-        hostUserId,
-      );
+      const restarted = await roomService.restartGame(room.roomId, hostUserId);
 
       expect(restarted.gameStatus).toBe('LOADING');
       expect(restarted.currentRound?.roundIndex).toBe(0);
@@ -832,10 +919,9 @@ describe('RoomService', () => {
     it('방장이 아니면 다시하기를 할 수 없다', async () => {
       const { room, userId: hostUserId } = await createTestRoom(2);
       await finishTestGame(hostUserId, room.roomId);
-      const { userId: guestUserId } = await roomService.joinRoom(
-        room.roomId,
-        { nickname: '참가자1' },
-      );
+      const { userId: guestUserId } = await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+      });
 
       await expect(
         roomService.restartGame(room.roomId, guestUserId),
@@ -963,6 +1049,243 @@ describe('RoomService', () => {
       } finally {
         jest.useRealTimers();
       }
+    });
+  });
+
+  describe('닉네임 변경(updateNickname)', () => {
+    it('참가자가 닉네임을 변경하면 참가자 목록에 반영된다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom();
+
+      const updated = await roomService.updateNickname(
+        room.roomId,
+        hostUserId,
+        '새닉네임',
+      );
+
+      expect(
+        updated.participants.find((p) => p.userId === hostUserId)?.nickname,
+      ).toBe('새닉네임');
+    });
+
+    it('방에 없는 유저가 닉네임 변경을 시도하면 NotFoundException', async () => {
+      const { room } = await createTestRoom();
+
+      await expect(
+        roomService.updateNickname(
+          room.roomId,
+          '존재하지-않는-유저',
+          '새닉네임',
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('기존과 같은 닉네임으로 변경하면 room-updated 이벤트 없이 그대로 반환한다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom();
+      const listener = jest.fn();
+      roomService.on('room-updated', listener);
+
+      const updated = await roomService.updateNickname(
+        room.roomId,
+        hostUserId,
+        '방장',
+      );
+
+      expect(updated.hostUserId).toBe(hostUserId);
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it('닉네임을 변경하면 nickname-changed 이벤트가 이전/새 닉네임과 함께 발생한다', async () => {
+      const { room, userId: hostUserId } = await createTestRoom();
+      const listener = jest.fn();
+      roomService.on('nickname-changed', listener);
+
+      await roomService.updateNickname(room.roomId, hostUserId, '새닉네임');
+
+      expect(listener).toHaveBeenCalledWith({
+        roomId: room.roomId,
+        userId: hostUserId,
+        oldNickname: '방장',
+        newNickname: '새닉네임',
+      });
+    });
+  });
+
+  describe('방 정보 수정(updateRoom)', () => {
+    function updateDto(
+      room: { quizId: string },
+      userId: string,
+      accessToken: string,
+      overrides: Partial<{
+        roomTtl: string;
+        maxUserCnt: number;
+        speedModeEnabled: boolean;
+        isUnlisted: boolean;
+        isPrivate: boolean;
+        password?: string;
+        songLimit?: number;
+      }> = {},
+    ) {
+      return {
+        userId,
+        accessToken,
+        roomTtl: overrides.roomTtl ?? '수정된 방 제목',
+        quizId: room.quizId,
+        isRandom: false,
+        speedModeEnabled: overrides.speedModeEnabled ?? false,
+        maxUserCnt: overrides.maxUserCnt ?? 4,
+        songLimit: overrides.songLimit,
+        isUnlisted: overrides.isUnlisted ?? false,
+        isPrivate: overrides.isPrivate ?? false,
+        password: overrides.password,
+      };
+    }
+
+    it('WAITING 상태에서 방장이 방 정보를 수정할 수 있다', async () => {
+      const { room, userId, accessToken } = await createTestRoom();
+
+      const updated = await roomService.updateRoom(
+        room.roomId,
+        updateDto(room, userId, accessToken, { roomTtl: '새 제목' }),
+      );
+
+      expect(updated.roomTtl).toBe('새 제목');
+    });
+
+    it('FINISHED 상태에서도 방 정보를 수정할 수 있다', async () => {
+      const { room, userId, accessToken } = await createTestRoom(1);
+      await roomService.startGame(room.roomId, userId);
+      await roomService.markReady(room.roomId, userId);
+      await roomService.submitChatMessage(room.roomId, userId, '노래1');
+      await roomService.nextRound(room.roomId, userId);
+      await roomService.markReady(room.roomId, userId);
+      await roomService.submitChatMessage(room.roomId, userId, '노래2');
+      await roomService.nextRound(room.roomId, userId);
+
+      const midRoom = await roomService.getRoom(room.roomId);
+      expect(midRoom?.gameStatus).toBe('FINISHED');
+
+      const updated = await roomService.updateRoom(
+        room.roomId,
+        updateDto(room, userId, accessToken, { roomTtl: '새 제목' }),
+      );
+      expect(updated.roomTtl).toBe('새 제목');
+    });
+
+    it('게임 진행 중(WAITING/FINISHED가 아님)에는 ConflictException', async () => {
+      const { room, userId, accessToken } = await createTestRoom();
+      await roomService.startGame(room.roomId, userId);
+
+      await expect(
+        roomService.updateRoom(
+          room.roomId,
+          updateDto(room, userId, accessToken),
+        ),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('방장이 아니면 ForbiddenException', async () => {
+      const { room } = await createTestRoom();
+      const { userId: guestUserId, accessToken: guestToken } =
+        await roomService.joinRoom(room.roomId, { nickname: '참가자1' });
+
+      await expect(
+        roomService.updateRoom(
+          room.roomId,
+          updateDto(room, guestUserId, guestToken),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('maxUserCnt를 현재 참가 인원 미만으로 줄이면 BadRequestException', async () => {
+      const { room, userId, accessToken } = await createTestRoom(4);
+      await roomService.joinRoom(room.roomId, { nickname: '참가자1' });
+      await roomService.joinRoom(room.roomId, { nickname: '참가자2' });
+
+      await expect(
+        roomService.updateRoom(
+          room.roomId,
+          updateDto(room, userId, accessToken, { maxUserCnt: 1 }),
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('공개방을 비밀번호 없이 비밀방으로 바꾸려 하면 BadRequestException', async () => {
+      const { room, userId, accessToken } = await createTestRoom();
+
+      await expect(
+        roomService.updateRoom(
+          room.roomId,
+          updateDto(room, userId, accessToken, { isPrivate: true }),
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('비밀방으로 수정한 뒤에는 비밀번호가 있어야 입장할 수 있다', async () => {
+      const { room, userId, accessToken } = await createTestRoom();
+
+      await roomService.updateRoom(
+        room.roomId,
+        updateDto(room, userId, accessToken, {
+          isPrivate: true,
+          password: 'newpass1',
+        }),
+      );
+
+      await expect(
+        roomService.joinRoom(room.roomId, { nickname: '참가자1' }),
+      ).rejects.toThrow(UnauthorizedException);
+
+      const joinResult = await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+        password: 'newpass1',
+      });
+      expect(joinResult.room.curUserCnt).toBe(2);
+    });
+
+    it('비밀방을 비밀번호 재입력 없이 다시 수정해도 기존 비밀번호가 유지된다', async () => {
+      const { room, userId, accessToken } = await createTestRoom();
+      await roomService.updateRoom(
+        room.roomId,
+        updateDto(room, userId, accessToken, {
+          isPrivate: true,
+          password: 'keepme1',
+        }),
+      );
+
+      await roomService.updateRoom(
+        room.roomId,
+        updateDto(room, userId, accessToken, {
+          isPrivate: true,
+          roomTtl: '제목만 변경',
+        }),
+      );
+
+      const joinResult = await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+        password: 'keepme1',
+      });
+      expect(joinResult.room.curUserCnt).toBe(2);
+    });
+
+    it('비밀방을 공개로 전환하면 비밀번호 없이 입장할 수 있다', async () => {
+      const { room, userId, accessToken } = await createTestRoom();
+      await roomService.updateRoom(
+        room.roomId,
+        updateDto(room, userId, accessToken, {
+          isPrivate: true,
+          password: 'keepme1',
+        }),
+      );
+
+      await roomService.updateRoom(
+        room.roomId,
+        updateDto(room, userId, accessToken, { isPrivate: false }),
+      );
+
+      const joinResult = await roomService.joinRoom(room.roomId, {
+        nickname: '참가자1',
+      });
+      expect(joinResult.room.curUserCnt).toBe(2);
     });
   });
 });

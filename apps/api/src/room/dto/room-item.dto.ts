@@ -31,7 +31,10 @@ export class RoomItemDto {
   @ApiProperty({ description: '퀴즈 전체 출제곡 개수', example: 140 })
   songCount: number;
 
-  @ApiProperty({ description: '이번 게임에서 실제로 출제할 곡 수', example: 10 })
+  @ApiProperty({
+    description: '이번 게임에서 실제로 출제할 곡 수',
+    example: 10,
+  })
   songLimit: number;
 
   @ApiProperty({
@@ -57,6 +60,19 @@ export class RoomItemDto {
 
   @ApiProperty({ description: '출제곡 랜덤 여부', example: false })
   isRandom: boolean;
+
+  @ApiProperty({
+    description:
+      '비공개방 여부. true면 방 목록에 노출되지 않고 링크로만 입장할 수 있다.',
+    example: false,
+  })
+  isUnlisted: boolean;
+
+  @ApiProperty({
+    description: '비밀방 여부. true면 입장 시 비밀번호가 필요하다.',
+    example: false,
+  })
+  isPrivate: boolean;
 
   @ApiProperty({
     description:

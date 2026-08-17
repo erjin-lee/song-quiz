@@ -47,6 +47,10 @@ export interface RoomItemDto {
   atstIds: string[];
   atstNms: string[];
   isRandom: boolean;
+  /** 비공개방 여부. true면 방 목록에 노출되지 않고 링크로만 입장할 수 있다 */
+  isUnlisted: boolean;
+  /** 비밀방 여부. true면 입장 시 비밀번호가 필요하다 */
+  isPrivate: boolean;
   /** 스피드 모드: 켜면 한 명이라도 정답을 맞히면 6초 뒤 자동 공개, 공개 4초 뒤 자동으로 다음 라운드로 진행 */
   speedModeEnabled: boolean;
   maxUserCnt: number;
@@ -79,13 +83,42 @@ export interface CreateRoomRequestDto {
   nickname: string;
   /** 출제곡 수. 미지정 시 퀴즈 전체 출제곡 수를 사용한다. */
   songLimit?: number;
+  /** 비공개방 여부. true면 방 목록에 노출되지 않고 링크로만 입장할 수 있다. */
+  isUnlisted?: boolean;
+  /** 비밀방 여부. true면 입장 시 password가 일치해야 한다. */
+  isPrivate?: boolean;
+  /** isPrivate가 true일 때 필요한 입장 비밀번호. */
+  password?: string;
 }
 
 export interface JoinRoomRequestDto {
   nickname: string;
+  /** 비밀방 입장 비밀번호. 비밀방이 아니면 무시된다. */
+  password?: string;
 }
 
 export interface LeaveRoomRequestDto {
   userId: string;
   accessToken: string;
+}
+
+export interface UpdateNicknameRequestDto {
+  userId: string;
+  accessToken: string;
+  nickname: string;
+}
+
+export interface UpdateRoomRequestDto {
+  userId: string;
+  accessToken: string;
+  roomTtl: string;
+  quizId: string;
+  isRandom: boolean;
+  speedModeEnabled: boolean;
+  maxUserCnt: number;
+  songLimit?: number;
+  isUnlisted: boolean;
+  isPrivate: boolean;
+  /** isPrivate가 true일 때의 입장 비밀번호. 비워두면 기존 비밀번호가 유지된다. */
+  password?: string;
 }

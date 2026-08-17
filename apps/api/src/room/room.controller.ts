@@ -1,9 +1,11 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Req,
   UnauthorizedException,
@@ -24,6 +26,8 @@ import { LeaveRoomRequestDto } from './dto/leave-room-request.dto';
 import { LeaveRoomResultDto } from './dto/leave-room-result.dto';
 import { RoomItemDto } from './dto/room-item.dto';
 import { RoomJoinResultDto } from './dto/room-join-result.dto';
+import { UpdateNicknameRequestDto } from './dto/update-nickname-request.dto';
+import { UpdateRoomRequestDto } from './dto/update-room-request.dto';
 import { RoomService } from './room.service';
 
 @ApiTags('room')
@@ -92,10 +96,64 @@ export class RoomController {
     @Req() req: Request,
   ): Promise<RoomJoinResultDto> {
     const accountUserId = await this.resolveAccountUserId(req);
-    return this.roomService.joinRoom(
+    return this.roomService.joinRoom(roomId, joinRoomRequestDto, accountUserId);
+  }
+
+  @Patch(':roomId')
+  @ApiOperation({
+    summary: '방장이 게임 시작 전/종료 후 방 정보를 수정',
+  })
+  @ApiParam({ name: 'roomId', description: '방 ID' })
+  @ApiOkResponse({ description: '수정된 방 정보', type: RoomItemDto })
+  @ApiNotFoundResponse({ description: '방 또는 퀴즈를 찾을 수 없음' })
+  @ApiConflictResponse({ description: '게임 진행 중이라 수정할 수 없음' })
+  async updateRoom(
+    @Param('roomId') roomId: string,
+    @Body() updateRoomRequestDto: UpdateRoomRequestDto,
+  ): Promise<RoomItemDto> {
+    const isValid = this.roomService.verifyMembershipToken(
       roomId,
-      joinRoomRequestDto,
-      accountUserId,
+      updateRoomRequestDto.userId,
+      updateRoomRequestDto.accessToken,
+    );
+    if (!isValid) {
+      throw new UnauthorizedException('유효하지 않은 접근입니다.');
+    }
+    return this.roomService.updateRoom(roomId, updateRoomRequestDto);
+  }
+
+  @Post(':roomId/nickname')
+  @ApiOperation({
+    summary:
+      '방 안에서 닉네임 변경(게스트 전용). 로그인 유저는 계정 닉네임을 사용하므로 변경할 수 없다.',
+  })
+  @ApiParam({ name: 'roomId', description: '방 ID' })
+  @ApiOkResponse({ description: '변경된 방 정보', type: RoomItemDto })
+  @ApiNotFoundResponse({ description: '방 또는 참가자를 찾을 수 없음' })
+  async updateNickname(
+    @Param('roomId') roomId: string,
+    @Body() updateNicknameRequestDto: UpdateNicknameRequestDto,
+    @Req() req: Request,
+  ): Promise<RoomItemDto> {
+    const accountUserId = await this.resolveAccountUserId(req);
+    if (accountUserId) {
+      throw new ForbiddenException(
+        '로그인 유저는 방 안에서 닉네임을 변경할 수 없습니다.',
+      );
+    }
+
+    const isValid = this.roomService.verifyMembershipToken(
+      roomId,
+      updateNicknameRequestDto.userId,
+      updateNicknameRequestDto.accessToken,
+    );
+    if (!isValid) {
+      throw new UnauthorizedException('유효하지 않은 접근입니다.');
+    }
+    return this.roomService.updateNickname(
+      roomId,
+      updateNicknameRequestDto.userId,
+      updateNicknameRequestDto.nickname,
     );
   }
 

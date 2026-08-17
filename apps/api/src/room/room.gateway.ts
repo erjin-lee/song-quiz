@@ -9,7 +9,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { RoomItemDto } from './dto/room-item.dto';
-import { RoomService } from './room.service';
+import { NicknameChangedEvent, RoomService } from './room.service';
 
 interface EnterRoomPayload {
   roomId: string;
@@ -72,6 +72,23 @@ export class RoomGateway implements OnGatewayDisconnect {
   constructor(private readonly roomService: RoomService) {
     this.roomService.on('room-updated', (room: RoomItemDto) => {
       this.server?.to(room.roomId).emit('room:state', room);
+    });
+    this.roomService.on('nickname-changed', (event: NicknameChangedEvent) => {
+      // 이미 연결된 소켓들이 이전 닉네임을 들고 있으면 이후 채팅에 옛 닉네임이
+      // 찍히므로, 같은 참가자의 소켓 멤버십도 함께 갱신한다.
+      for (const membership of this.socketMemberships.values()) {
+        if (
+          membership.roomId === event.roomId &&
+          membership.userId === event.userId
+        ) {
+          membership.nickname = event.newNickname;
+        }
+      }
+      this.broadcastSystemMessage(
+        event.roomId,
+        undefined,
+        `${event.oldNickname}님이 닉네임을 ${event.newNickname}(으)로 변경했습니다.`,
+      );
     });
   }
 

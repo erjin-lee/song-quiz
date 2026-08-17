@@ -33,6 +33,11 @@ export function RoomListPage() {
   const [editingNickname, setEditingNickname] = useState(false);
   const [nicknameDraft, setNicknameDraft] = useState('');
   const [showHelp, setShowHelp] = useState(false);
+  const [passwordPromptRoom, setPasswordPromptRoom] =
+    useState<RoomItemDto | null>(null);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [passwordSubmitting, setPasswordSubmitting] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
 
   useDocumentMeta({
     title: '방 목록 | 노래맞히기',
@@ -107,6 +112,34 @@ export function RoomListPage() {
     navigate('/rooms/new');
   };
 
+  const runJoin = async (
+    roomId: string,
+    password: string | undefined,
+    onError: (message: string) => void,
+  ): Promise<boolean> => {
+    try {
+      const result = await joinRoom(roomId, { nickname, password });
+      saveRoomSession({
+        roomId,
+        userId: result.userId,
+        accessToken: result.accessToken,
+      });
+      navigate(`/rooms/${roomId}`, {
+        state: {
+          room: result.room,
+          userId: result.userId,
+          accessToken: result.accessToken,
+        },
+      });
+      return true;
+    } catch (err) {
+      onError(
+        err instanceof ApiError ? err.message : '방 입장에 실패했습니다.',
+      );
+      return false;
+    }
+  };
+
   const handleJoin = (roomId: string) => {
     if (!isInitialized) {
       return;
@@ -116,32 +149,21 @@ export function RoomListPage() {
       return;
     }
 
+    const room = rooms.find((r) => r.roomId === roomId);
+    if (room?.isPrivate) {
+      setPasswordPromptRoom(room);
+      setPasswordInput('');
+      setPasswordError(null);
+      return;
+    }
+
     setJoiningRoomId(roomId);
     setListError(null);
 
     const doJoin = async () => {
       setIsJoinPreparingAd(false);
-      try {
-        const result = await joinRoom(roomId, { nickname });
-        saveRoomSession({
-          roomId,
-          userId: result.userId,
-          accessToken: result.accessToken,
-        });
-        navigate(`/rooms/${roomId}`, {
-          state: {
-            room: result.room,
-            userId: result.userId,
-            accessToken: result.accessToken,
-          },
-        });
-      } catch (err) {
-        setListError(
-          err instanceof ApiError ? err.message : '방 입장에 실패했습니다.',
-        );
-      } finally {
-        setJoiningRoomId(null);
-      }
+      await runJoin(roomId, undefined, setListError);
+      setJoiningRoomId(null);
     };
 
     if (!adEnabled) {
@@ -150,6 +172,24 @@ export function RoomListPage() {
     }
     setIsJoinPreparingAd(true);
     setTimeout(doJoin, JOIN_AD_DELAY_MS);
+  };
+
+  const handlePasswordSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!passwordPromptRoom || passwordSubmitting) {
+      return;
+    }
+    setPasswordSubmitting(true);
+    setPasswordError(null);
+    const succeeded = await runJoin(
+      passwordPromptRoom.roomId,
+      passwordInput,
+      setPasswordError,
+    );
+    setPasswordSubmitting(false);
+    if (succeeded) {
+      setPasswordPromptRoom(null);
+    }
   };
 
   return (
@@ -308,6 +348,52 @@ export function RoomListPage() {
 
       {isJoinPreparingAd && (
         <RoomActionOverlay message="방에 입장하는 중입니다..." />
+      )}
+
+      {passwordPromptRoom && (
+        <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40 px-4">
+          <div className="w-full max-w-xs rounded-2xl bg-white p-6 shadow-xl">
+            <h2 className="mb-1 text-base font-bold text-slate-800">
+              🔒 비밀번호가 필요해요
+            </h2>
+            <p className="mb-4 text-sm text-slate-500">
+              {passwordPromptRoom.roomTtl}
+            </p>
+            <form
+              onSubmit={handlePasswordSubmit}
+              className="flex flex-col gap-2"
+            >
+              <input
+                autoFocus
+                type="text"
+                value={passwordInput}
+                onChange={(event) => setPasswordInput(event.target.value)}
+                maxLength={50}
+                placeholder="비밀번호"
+                className="rounded-xl border border-slate-200 px-4 py-2.5 outline-none focus:border-purple-300"
+              />
+              {passwordError && (
+                <p className="text-sm text-rose-500">{passwordError}</p>
+              )}
+              <div className="mt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPasswordPromptRoom(null)}
+                  className="rounded-full px-5 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100"
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  disabled={passwordSubmitting || !passwordInput}
+                  className="rounded-full bg-purple-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-purple-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+                >
+                  {passwordSubmitting ? '입장 중...' : '입장하기'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {showHelp && (

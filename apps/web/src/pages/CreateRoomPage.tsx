@@ -30,8 +30,11 @@ export function CreateRoomPage() {
   const [roomTtl, setRoomTtl] = useState('');
   const [quizId, setQuizId] = useState('');
   const [quizSearch, setQuizSearch] = useState('');
-  const [maxUserCnt, setMaxUserCnt] = useState(8);
+  const [maxUserCnt, setMaxUserCnt] = useState(4);
   const [speedModeEnabled, setSpeedModeEnabled] = useState(false);
+  const [isUnlisted, setIsUnlisted] = useState(false);
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [password, setPassword] = useState('');
   const [selectedQuizSongCount, setSelectedQuizSongCount] = useState<
     number | null
   >(null);
@@ -114,6 +117,9 @@ export function CreateRoomPage() {
           maxUserCnt,
           nickname,
           songLimit: songLimit ?? undefined,
+          isUnlisted,
+          isPrivate,
+          password: isPrivate ? password.trim() : undefined,
         });
         saveRoomSession({
           roomId: result.room.roomId,
@@ -162,7 +168,7 @@ export function CreateRoomPage() {
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <label className="flex flex-col gap-1 text-sm text-slate-600">
-              방 제목 <span className="text-rose-400">*</span>
+              <span>방 제목 <span className="text-rose-400">*</span></span>
               <input
                 autoFocus
                 value={roomTtl}
@@ -253,7 +259,7 @@ export function CreateRoomPage() {
             </label>
 
             <label className="flex flex-col gap-1 text-sm text-slate-600">
-              최대 인원(2~50)
+              최대 인원(2~50)대
               <input
                 type="number"
                 min={2}
@@ -280,6 +286,56 @@ export function CreateRoomPage() {
               </span>
             </label>
 
+            <label className="flex items-start gap-2 text-sm text-slate-600">
+              <input
+                type="checkbox"
+                checked={isUnlisted}
+                onChange={(event) => setIsUnlisted(event.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-purple-500 focus:ring-purple-300"
+              />
+              <span>
+                비공개방
+                <span className="block text-xs text-slate-400">
+                  방 목록에 노출되지 않고, 링크를 아는 사람만 입장할 수
+                  있습니다.
+                </span>
+              </span>
+            </label>
+
+            <label className="flex items-start gap-2 text-sm text-slate-600">
+              <input
+                type="checkbox"
+                checked={isPrivate}
+                onChange={(event) => {
+                  setIsPrivate(event.target.checked);
+                  if (!event.target.checked) {
+                    setPassword('');
+                  }
+                }}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-purple-500 focus:ring-purple-300"
+              />
+              <span>
+                비밀번호 설정
+                <span className="block text-xs text-slate-400">
+                  입장 시 비밀번호를 입력해야 들어올 수 있습니다.
+                </span>
+              </span>
+            </label>
+
+            {isPrivate && (
+              <label className="flex flex-col gap-1 text-sm text-slate-600">
+                <span>비밀번호 <span className="text-rose-400">*</span></span>
+                <input
+                  type="text"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  maxLength={50}
+                  placeholder="입장 비밀번호"
+                  className="rounded-xl border border-slate-200 px-4 py-2.5 outline-none focus:border-purple-300"
+                />
+              </label>
+            )}
+
             {errorMessage && (
               <p className="text-sm text-rose-500">{errorMessage}</p>
             )}
@@ -302,7 +358,8 @@ export function CreateRoomPage() {
                   !songLimit ||
                   songLimit < 1 ||
                   (selectedQuizSongCount !== null &&
-                    songLimit > selectedQuizSongCount)
+                    songLimit > selectedQuizSongCount) ||
+                  (isPrivate && !password.trim())
                 }
                 className="rounded-full bg-purple-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-purple-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
               >
