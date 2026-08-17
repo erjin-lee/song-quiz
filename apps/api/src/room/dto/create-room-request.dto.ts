@@ -9,6 +9,7 @@ import {
   Max,
   MaxLength,
   Min,
+  MinLength,
 } from 'class-validator';
 
 export class CreateRoomRequestDto {
@@ -77,12 +78,13 @@ export class CreateRoomRequestDto {
   isPrivate?: boolean;
 
   @ApiProperty({
-    description: 'isPrivate가 true일 때 필요한 입장 비밀번호.',
+    description: 'isPrivate가 true일 때 필요한 입장 비밀번호(4~50자).',
     example: '1234',
     required: false,
   })
   @IsOptional()
   @IsString()
+  @MinLength(4)
   @MaxLength(50)
   password?: string;
 }

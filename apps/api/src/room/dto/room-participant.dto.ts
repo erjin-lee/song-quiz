@@ -12,4 +12,11 @@ export class RoomParticipantDto {
 
   @ApiProperty({ description: '누적 점수', example: 0 })
   score: number;
+
+  @ApiProperty({
+    description:
+      '로그인 계정으로 참가했는지 여부. true면 닉네임이 계정 닉네임이므로 방 안에서 변경할 수 없다.',
+    example: false,
+  })
+  isAccount: boolean;
 }

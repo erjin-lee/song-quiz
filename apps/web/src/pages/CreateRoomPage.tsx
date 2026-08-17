@@ -13,6 +13,7 @@ import { saveRoomSession } from '../utils/roomSession';
 import type { QuizListItemDto } from '../types/quiz';
 
 const CREATE_AD_DELAY_MS = 3000;
+const ROOM_PASSWORD_MIN_LENGTH = 4;
 
 export function CreateRoomPage() {
   const { nickname, isInitialized } = useSession();
@@ -324,13 +325,16 @@ export function CreateRoomPage() {
 
             {isPrivate && (
               <label className="flex flex-col gap-1 text-sm text-slate-600">
-                <span>비밀번호 <span className="text-rose-400">*</span></span>
+                <span>
+                  비밀번호 <span className="text-rose-400">*</span>
+                </span>
                 <input
                   type="text"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
+                  minLength={ROOM_PASSWORD_MIN_LENGTH}
                   maxLength={50}
-                  placeholder="입장 비밀번호"
+                  placeholder={`${ROOM_PASSWORD_MIN_LENGTH}자 이상 입력`}
                   className="rounded-xl border border-slate-200 px-4 py-2.5 outline-none focus:border-purple-300"
                 />
               </label>
@@ -359,7 +363,8 @@ export function CreateRoomPage() {
                   songLimit < 1 ||
                   (selectedQuizSongCount !== null &&
                     songLimit > selectedQuizSongCount) ||
-                  (isPrivate && !password.trim())
+                  (isPrivate &&
+                    password.trim().length < ROOM_PASSWORD_MIN_LENGTH)
                 }
                 className="rounded-full bg-purple-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-purple-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
               >

@@ -138,7 +138,9 @@ describe('YoutubeScraperClient', () => {
         );
 
       const promise = client.search('검색어');
-      await jest.advanceTimersByTimeAsync(5000);
+      // 1번째 시도 실패 후 대기(FETCH_RETRY_DELAY_MS * 1 + 4000 = 5500ms)를 넘겨야
+      // 2번째 시도(성공)로 넘어간다.
+      await jest.advanceTimersByTimeAsync(6000);
       const result = await promise;
 
       expect(fetchSpy).toHaveBeenCalledTimes(2);
@@ -151,10 +153,12 @@ describe('YoutubeScraperClient', () => {
 
       const promise = client.search('검색어');
       const assertion = expect(promise).rejects.toThrow('지속 오류');
-      await jest.advanceTimersByTimeAsync(5000);
+      // MAX_FETCH_ATTEMPTS(4)회 모두 실패하는 동안의 대기 총합
+      // (5500 + 7000 + 7500 = 20000ms)을 넘겨야 마지막 시도까지 끝난다.
+      await jest.advanceTimersByTimeAsync(21000);
       await assertion;
 
-      expect(fetchSpy).toHaveBeenCalledTimes(3);
+      expect(fetchSpy).toHaveBeenCalledTimes(4);
     });
 
     it('logContext가 주어지면 재시도 경고와 최종 실패 로그에 포함한다', async () => {
@@ -163,7 +167,7 @@ describe('YoutubeScraperClient', () => {
 
       const promise = client.search('검색어', 'quizSongId: qs-1');
       const assertion = expect(promise).rejects.toThrow('지속 오류');
-      await jest.advanceTimersByTimeAsync(5000);
+      await jest.advanceTimersByTimeAsync(21000);
       await assertion;
 
       expect(Logger.prototype.warn).toHaveBeenCalledWith(
@@ -181,7 +185,7 @@ describe('YoutubeScraperClient', () => {
 
       const promise = client.search('검색어');
       const assertion = expect(promise).rejects.toThrow(YoutubeFetchError);
-      await jest.advanceTimersByTimeAsync(5000);
+      await jest.advanceTimersByTimeAsync(21000);
       await assertion;
     });
 

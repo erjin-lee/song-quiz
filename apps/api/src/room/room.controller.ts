@@ -96,7 +96,12 @@ export class RoomController {
     @Req() req: Request,
   ): Promise<RoomJoinResultDto> {
     const accountUserId = await this.resolveAccountUserId(req);
-    return this.roomService.joinRoom(roomId, joinRoomRequestDto, accountUserId);
+    return this.roomService.joinRoom(
+      roomId,
+      joinRoomRequestDto,
+      accountUserId,
+      req.ip,
+    );
   }
 
   @Patch(':roomId')

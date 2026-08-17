@@ -10,6 +10,7 @@ import {
   Max,
   MaxLength,
   Min,
+  MinLength,
 } from 'class-validator';
 
 export class UpdateRoomRequestDto {
@@ -84,12 +85,13 @@ export class UpdateRoomRequestDto {
 
   @ApiProperty({
     description:
-      'isPrivate가 true일 때의 입장 비밀번호. 비밀방을 유지하면서 비밀번호를 바꾸지 않을 때는 비워둔다(기존 비밀번호가 그대로 유지된다).',
+      'isPrivate가 true일 때의 입장 비밀번호(4~50자). 비밀방을 유지하면서 비밀번호를 바꾸지 않을 때는 비워둔다(기존 비밀번호가 그대로 유지된다).',
     example: '1234',
     required: false,
   })
   @IsOptional()
   @IsString()
+  @MinLength(4)
   @MaxLength(50)
   password?: string;
 }
