@@ -194,7 +194,9 @@ export class AdminService {
       expiresIn: ADMIN_JWT_EXPIRES_IN,
     });
 
-    await this.userRepository.update(admin.userKey, { lastLoginDt: new Date() });
+    await this.userRepository.update(admin.userKey, {
+      lastLoginDt: new Date(),
+    });
     return { accessToken, loginId: admin.loginId, nickNm: admin.nickNm };
   }
 
@@ -213,7 +215,11 @@ export class AdminService {
   ): Promise<AdminMeDto> {
     const admin = await this.findAdminByUserIdOrThrow(userId);
     await this.userRepository.update(admin.userKey, { nickNm: dto.nickNm });
-    return { userId: admin.userKey, loginId: admin.loginId, nickNm: dto.nickNm };
+    return {
+      userId: admin.userKey,
+      loginId: admin.loginId,
+      nickNm: dto.nickNm,
+    };
   }
 
   async changeMyPassword(
