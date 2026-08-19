@@ -1,0 +1,2 @@
+export const EMAIL_AUTH_CODE_TTL_MINUTES = 5;
+export const EMAIL_AUTH_MAX_TRY_COUNT = 5;

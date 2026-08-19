@@ -2,22 +2,28 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { MailModule } from '../mail/mail.module';
+import { EmailAuth } from './entities/email-auth.entity';
 import { User } from './entities/user.entity';
+import { EmailAuthService } from './email-auth.service';
 import { UserAuthController } from './user-auth.controller';
 import { UserAuthGuard } from './guards/user-auth.guard';
 import { UserService } from './user.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User]),
+    TypeOrmModule.forFeature([User, EmailAuth]),
     JwtModule.register({}),
+    MailModule,
     ThrottlerModule.forRoot([
       { name: 'user-login', ttl: 60_000, limit: 5 },
       { name: 'user-signup', ttl: 60_000, limit: 5 },
+      { name: 'email-send-code', ttl: 60_000, limit: 5 },
+      { name: 'email-verify-code', ttl: 60_000, limit: 10 },
     ]),
   ],
   controllers: [UserAuthController],
-  providers: [UserService, UserAuthGuard],
+  providers: [UserService, UserAuthGuard, EmailAuthService],
   exports: [UserService],
 })
 export class UserModule {}
