@@ -2,7 +2,11 @@ import { ApiProperty } from '@nestjs/swagger';
 import { AdminInquiryItemDto } from './admin-inquiry-item.dto';
 
 export class AdminInquiryListDto {
-  @ApiProperty({ description: '문의 목록', type: AdminInquiryItemDto, isArray: true })
+  @ApiProperty({
+    description: '문의 목록',
+    type: AdminInquiryItemDto,
+    isArray: true,
+  })
   items: AdminInquiryItemDto[];
 
   @ApiProperty({ description: '필터 조건에 해당하는 전체 개수', example: 42 })

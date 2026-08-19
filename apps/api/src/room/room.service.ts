@@ -1120,7 +1120,10 @@ export class RoomService extends EventEmitter {
     );
   }
 
-  private passwordAttemptKey(roomId: string, clientIp: string | undefined): string {
+  private passwordAttemptKey(
+    roomId: string,
+    clientIp: string | undefined,
+  ): string {
     return `${PASSWORD_ATTEMPT_CACHE_KEY_PREFIX}${roomId}:${clientIp ?? 'unknown'}`;
   }
 

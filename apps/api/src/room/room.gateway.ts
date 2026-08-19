@@ -222,10 +222,7 @@ export class RoomGateway implements OnGatewayDisconnect {
     if (!membership) return;
 
     try {
-      await this.roomService.restartGame(
-        membership.roomId,
-        membership.userId,
-      );
+      await this.roomService.restartGame(membership.roomId, membership.userId);
     } catch (err) {
       client.emit('room:error', { message: (err as Error).message });
     }

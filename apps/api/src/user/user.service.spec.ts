@@ -221,9 +221,7 @@ describe('UserService', () => {
     it('계정을 찾을 수 없으면 NotFoundException을 던진다', async () => {
       userRepositoryMock.findOne.mockResolvedValue(null);
 
-      await expect(service.getMe('unknown')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(service.getMe('unknown')).rejects.toThrow(NotFoundException);
     });
 
     it('status가 ACTIVE가 아니면 UnauthorizedException을 던진다', async () => {
