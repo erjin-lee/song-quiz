@@ -126,6 +126,24 @@ export class UserService {
     }
   }
 
+  /** 이메일 인증코드 발송 시 요청 계정을 함께 기록해두기 위한 조회. 없으면 null. */
+  async findUserKeyByUserId(userId: string): Promise<string | null> {
+    const user = await this.userRepository.findOne({
+      where: { userId, role: USER_ROLE, status: 'ACTIVE' },
+    });
+    return user?.userKey ?? null;
+  }
+
+  async markEmailVerified(userId: string, email: string): Promise<void> {
+    const user = await this.findUserByUserIdOrThrow(userId);
+    await this.userRepository.update(user.userKey, {
+      email,
+      emailAuthYn: 'Y',
+      emailAuthDt: new Date(),
+      updDt: new Date(),
+    });
+  }
+
   private issueToken(user: User): LoginResponseDto {
     const payload: UserJwtPayload = {
       sub: user.userId,
