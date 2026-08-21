@@ -10,6 +10,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -357,7 +358,7 @@ export class RoomService extends EventEmitter {
       }
 
       if (room.gameStatus === 'LOADING') {
-        this.recomputeReadyStatus(room);
+        await this.recomputeReadyStatus(room);
       } else if (room.gameStatus === 'PLAYING' && room.currentRound) {
         const allAnswered = room.participants.every((participant) =>
           room.currentRound!.correctUserIds.includes(participant.userId),
@@ -590,7 +591,7 @@ export class RoomService extends EventEmitter {
       if (!round.readyUserIds.includes(userId)) {
         round.readyUserIds.push(userId);
       }
-      this.recomputeReadyStatus(room);
+      await this.recomputeReadyStatus(room);
 
       await this.saveRoom(room);
       this.emit('room-updated', this.toPublicRoom(room));
@@ -685,7 +686,7 @@ export class RoomService extends EventEmitter {
         round.autoRevealAt = new Date(
           Date.now() + SPEED_MODE_REVEAL_DELAY_SECONDS * 1000,
         ).toISOString();
-        this.scheduleSpeedModeTimer(
+        await this.scheduleSpeedModeTimer(
           roomId,
           'speed-reveal',
           SPEED_MODE_REVEAL_DELAY_SECONDS,
@@ -751,7 +752,7 @@ export class RoomService extends EventEmitter {
       round.forceSkipAt = new Date(
         Date.now() + FORCE_SKIP_DELAY_SECONDS * 1000,
       ).toISOString();
-      this.scheduleRoundTimer(roomId, FORCE_SKIP_DELAY_SECONDS);
+      await this.scheduleRoundTimer(roomId, FORCE_SKIP_DELAY_SECONDS);
 
       await this.saveRoom(room);
       this.emit('room-updated', this.toPublicRoom(room));
@@ -824,7 +825,7 @@ export class RoomService extends EventEmitter {
     }
   }
 
-  private recomputeReadyStatus(room: RoomItemDto): void {
+  private async recomputeReadyStatus(room: RoomItemDto): Promise<void> {
     const round = room.currentRound;
     if (!round || room.gameStatus !== 'LOADING') {
       return;
@@ -833,7 +834,7 @@ export class RoomService extends EventEmitter {
       round.readyUserIds.includes(participant.userId),
     );
     if (allReady) {
-      this.beginRound(room);
+      await this.beginRound(room);
     }
   }
 
@@ -842,8 +843,11 @@ export class RoomService extends EventEmitter {
    * 실제 재생은 즉시가 아니라 PLAY_SCHEDULE_DELAY_SECONDS 뒤로 예약해, 모든
    * 클라이언트가 이벤트 수신 시각과 무관하게 같은 시각에 재생을 시작하도록 한다.
    * 라운드 제한시간도 이 예약 시각 기준으로 흐르도록 그만큼 늦춰서 건다.
+   * 타이머 예약이 실패하면(scheduleRoundTimer가 던짐) gameStatus를 PLAYING으로
+   * 바꾼 것까지 포함해 이 호출 전체가 실패해야 한다 — 그래야 뒤이은 saveRoom이
+   * 건너뛰어져 "타임아웃 없이 PLAYING으로 저장된" 상태가 생기지 않는다.
    */
-  private beginRound(room: RoomItemDto): void {
+  private async beginRound(room: RoomItemDto): Promise<void> {
     if (!room.currentRound) {
       return;
     }
@@ -851,7 +855,7 @@ export class RoomService extends EventEmitter {
     room.currentRound.playScheduledAt = new Date(
       Date.now() + PLAY_SCHEDULE_DELAY_SECONDS * 1000,
     ).toISOString();
-    this.scheduleRoundTimer(
+    await this.scheduleRoundTimer(
       room.roomId,
       ROUND_TIME_LIMIT_SECONDS + PLAY_SCHEDULE_DELAY_SECONDS,
     );
@@ -889,7 +893,7 @@ export class RoomService extends EventEmitter {
       room.currentRound.autoNextRoundAt = new Date(
         Date.now() + SPEED_MODE_NEXT_ROUND_DELAY_SECONDS * 1000,
       ).toISOString();
-      this.scheduleSpeedModeTimer(
+      await this.scheduleSpeedModeTimer(
         room.roomId,
         'speed-next',
         SPEED_MODE_NEXT_ROUND_DELAY_SECONDS,
@@ -902,14 +906,22 @@ export class RoomService extends EventEmitter {
    * 서로 다른 예약(member)이라 자동으로 대체되지 않으므로, 기존에 한 슬롯만 쓰던
    * "두 단계가 동시에 존재하지 않는다"는 불변식을 유지하려면 스케줄 전에 반드시
    * 두 kind를 모두 취소해야 한다.
+   * 예약(ZADD) 자체가 실패하면 호출자에게 그대로 던진다 — 상태 저장만 성공하고
+   * 타이머는 유실되는 상황을 막기 위함이다(RoomTimerService.schedule 참고).
    */
-  private scheduleSpeedModeTimer(
+  private async scheduleSpeedModeTimer(
     roomId: string,
     kind: 'speed-reveal' | 'speed-next',
     delaySeconds: number,
-  ): void {
+  ): Promise<void> {
     this.clearSpeedModeTimer(roomId);
-    this.roomTimerService.schedule(kind, roomId, delaySeconds);
+    try {
+      await this.roomTimerService.schedule(kind, roomId, delaySeconds);
+    } catch {
+      throw new ServiceUnavailableException(
+        '타이머 예약에 실패했습니다. 잠시 후 다시 시도해주세요.',
+      );
+    }
   }
 
   private clearSpeedModeTimer(roomId: string): void {
@@ -925,38 +937,52 @@ export class RoomService extends EventEmitter {
     });
   }
 
-  /** 스피드 모드: 첫 정답자가 나온 뒤 예약된 시간이 지나면 아직 전원이 못 맞췄어도 정답을 공개한다. */
+  /**
+   * 스피드 모드: 첫 정답자가 나온 뒤 예약된 시간이 지나면 아직 전원이 못 맞췄어도 정답을 공개한다.
+   * 실패를 여기서 삼키지 않고 다시 던진다 — 이 메서드는 RoomTimerService가 등록한
+   * 타이머 핸들러라, 삼키면 실패한 처리도 성공한 것으로 보고 예약을 지워버려(CAS
+   * 삭제가 handler resolve만 보고 판단) 재시도 기회 자체가 사라진다.
+   */
   private async handleSpeedModeReveal(roomId: string): Promise<void> {
-    await this.withRoomLock(roomId, async () => {
-      const room = await this.getRoomRecord(roomId);
-      if (!room || room.gameStatus !== 'PLAYING') {
-        return;
-      }
-      await this.finalizeRoundEnd(room);
-      await this.saveRoom(room);
-      this.emit('room-updated', this.toPublicRoom(room));
-    }).catch((err) => {
+    try {
+      await this.withRoomLock(roomId, async () => {
+        const room = await this.getRoomRecord(roomId);
+        if (!room || room.gameStatus !== 'PLAYING') {
+          return;
+        }
+        await this.finalizeRoundEnd(room);
+        await this.saveRoom(room);
+        this.emit('room-updated', this.toPublicRoom(room));
+      });
+    } catch (err) {
       this.logger.error(
-        `스피드 모드 정답 자동 공개 처리 실패(roomId: ${roomId}): ${(err as Error).message}`,
+        `스피드 모드 정답 자동 공개 처리 실패(roomId: ${roomId}), 재시도되도록 예약을 유지합니다: ${(err as Error).message}`,
       );
-    });
+      throw err;
+    }
   }
 
-  /** 스피드 모드: 정답 공개 후 예약된 시간이 지나면 방장 조작 없이 자동으로 다음 라운드로 넘어간다. */
+  /**
+   * 스피드 모드: 정답 공개 후 예약된 시간이 지나면 방장 조작 없이 자동으로 다음 라운드로 넘어간다.
+   * handleSpeedModeReveal과 동일한 이유로 실패를 삼키지 않고 다시 던진다.
+   */
   private async handleAutoNextRound(roomId: string): Promise<void> {
-    await this.withRoomLock(roomId, async () => {
-      const room = await this.getRoomRecord(roomId);
-      if (!room || room.gameStatus !== 'ROUND_ENDED') {
-        return;
-      }
-      await this.advanceToNextRound(room);
-      await this.saveRoom(room);
-      this.emit('room-updated', this.toPublicRoom(room));
-    }).catch((err) => {
+    try {
+      await this.withRoomLock(roomId, async () => {
+        const room = await this.getRoomRecord(roomId);
+        if (!room || room.gameStatus !== 'ROUND_ENDED') {
+          return;
+        }
+        await this.advanceToNextRound(room);
+        await this.saveRoom(room);
+        this.emit('room-updated', this.toPublicRoom(room));
+      });
+    } catch (err) {
       this.logger.error(
-        `스피드 모드 자동 다음 라운드 처리 실패(roomId: ${roomId}): ${(err as Error).message}`,
+        `스피드 모드 자동 다음 라운드 처리 실패(roomId: ${roomId}), 재시도되도록 예약을 유지합니다: ${(err as Error).message}`,
       );
-    });
+      throw err;
+    }
   }
 
   /** 다음 라운드를 준비하거나(있으면) 게임을 종료한다(없으면). room 객체를 직접 변경한다. */
@@ -988,9 +1014,24 @@ export class RoomService extends EventEmitter {
    * 라운드 제한시간 타이머를 예약한다. RoomTimerService.schedule은 같은 kind+roomId면
    * score(발화 시각)만 덮어써 재예약이 곧 취소+재설정 효과를 내므로 별도로 먼저
    * 취소할 필요가 없다.
+   * 예약(ZADD) 자체가 실패하면 호출자에게 그대로 던진다 — 상태 저장만 성공하고
+   * 타이머는 유실되는 상황을 막기 위함이다(RoomTimerService.schedule 참고).
    */
-  private scheduleRoundTimer(roomId: string, delaySeconds: number): void {
-    this.roomTimerService.schedule('round-timeout', roomId, delaySeconds);
+  private async scheduleRoundTimer(
+    roomId: string,
+    delaySeconds: number,
+  ): Promise<void> {
+    try {
+      await this.roomTimerService.schedule(
+        'round-timeout',
+        roomId,
+        delaySeconds,
+      );
+    } catch {
+      throw new ServiceUnavailableException(
+        '타이머 예약에 실패했습니다. 잠시 후 다시 시도해주세요.',
+      );
+    }
   }
 
   private clearRoundTimer(roomId: string): void {

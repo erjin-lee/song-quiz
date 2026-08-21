@@ -1,4 +1,4 @@
-import { Logger } from '@nestjs/common';
+import { Logger, NotFoundException } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -435,28 +435,38 @@ export class RoomGateway implements OnGatewayDisconnect {
    * 참가자를 실제로 방에서 제거하고 퇴장 사실을 알린다. 재접속 유예 만료 처리는
    * disconnect가 발생한 인스턴스가 아닌 다른 인스턴스에서 실행될 수 있으므로,
    * 로컬 소켓 멤버십에 남아있는 닉네임 대신 방 상태에서 최신 닉네임을 다시 조회한다.
+   * 이 메서드는 disconnect-grace 타이머 핸들러로도 쓰이므로(RoomTimerService), 락
+   * 획득 실패 등 재시도 가능한 오류를 여기서 삼키면 실패한 처리도 성공한 것으로
+   * 간주돼 예약이 지워지고, 참가자가 방에 영구적으로 남게 된다. "이미 방을 나간
+   * 유저"(leaveRoom이 NotFoundException을 던지는 경우)만 정상적인 상황으로 보고
+   * 무시하며, 그 외 오류는 그대로 다시 던져 타이머가 재시도하게 한다.
    */
   private async removeParticipant(
     roomId: string,
     userId: string,
   ): Promise<void> {
+    const room = await this.roomService.getRoom(roomId);
+    const nickname =
+      room?.participants.find((p) => p.userId === userId)?.nickname ??
+      '알 수 없음';
+
     try {
-      const room = await this.roomService.getRoom(roomId);
-      const nickname =
-        room?.participants.find((p) => p.userId === userId)?.nickname ??
-        '알 수 없음';
       await this.roomService.leaveRoom(roomId, userId);
-      await this.broadcastSystemMessage(
-        roomId,
-        undefined,
-        `${nickname}님이 퇴장했습니다.`,
-      );
     } catch (err) {
-      // REST로 이미 퇴장 처리된 경우 등은 정상적인 상황이므로 조용히 무시한다.
-      this.logger.debug(
-        `소켓 퇴장 처리 스킵(이미 방을 나간 유저일 수 있음): ${(err as Error).message}`,
-      );
+      if (err instanceof NotFoundException) {
+        this.logger.debug(
+          `소켓 퇴장 처리 스킵(이미 방을 나간 유저일 수 있음): ${(err as Error).message}`,
+        );
+        return;
+      }
+      throw err;
     }
+
+    await this.broadcastSystemMessage(
+      roomId,
+      undefined,
+      `${nickname}님이 퇴장했습니다.`,
+    );
   }
 
   /**

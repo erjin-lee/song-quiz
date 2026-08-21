@@ -94,9 +94,19 @@ export class RoomTimerService implements OnModuleDestroy {
     this.handlers.set(kind, handler);
   }
 
-  schedule(kind: RoomTimerKind, key: string, delaySeconds: number): void {
+  /**
+   * Redis 모드에서는 ZADD가 끝날 때까지 기다린다. 실패를 여기서 삼키면 호출자(주로
+   * RoomService)가 이미 상태를 PLAYING 등으로 저장한 뒤인데 정작 타임아웃 예약은
+   * 유실되어 방이 그 상태에 무기한 멈출 수 있으므로, 실패는 반드시 호출자에게
+   * 그대로 던져 상태 저장 자체를 취소할 수 있게 한다.
+   */
+  async schedule(
+    kind: RoomTimerKind,
+    key: string,
+    delaySeconds: number,
+  ): Promise<void> {
     if (this.redisConfigured) {
-      this.scheduleRedis(kind, key, delaySeconds);
+      await this.scheduleRedis(kind, key, delaySeconds);
     } else {
       this.scheduleLocal(kind, key, delaySeconds);
     }
@@ -114,23 +124,26 @@ export class RoomTimerService implements OnModuleDestroy {
     return `${kind}|${key}`;
   }
 
-  private scheduleRedis(
+  private async scheduleRedis(
     kind: RoomTimerKind,
     key: string,
     delaySeconds: number,
-  ): void {
+  ): Promise<void> {
     const redis = this.cacheService.getRedisClient();
     if (!redis) {
       return;
     }
     const member = this.member(kind, key);
     const fireAt = Date.now() + delaySeconds * 1000;
-    // 같은 member면 ZADD가 score만 덮어써 재예약이 곧 취소+재설정 효과를 낸다.
-    redis.zadd(TIMERS_KEY, fireAt, member).catch((err) => {
+    try {
+      // 같은 member면 ZADD가 score만 덮어써 재예약이 곧 취소+재설정 효과를 낸다.
+      await redis.zadd(TIMERS_KEY, fireAt, member);
+    } catch (err) {
       this.logger.error(
         `타이머 예약 실패(${member}): ${(err as Error).message}`,
       );
-    });
+      throw err;
+    }
   }
 
   private async cancelRedis(
