@@ -10,6 +10,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -27,6 +28,8 @@ import { RoomJoinResultDto } from './dto/room-join-result.dto';
 import { RoundPublicStateDto } from './dto/round-public-state.dto';
 import { UpdateRoomRequestDto } from './dto/update-room-request.dto';
 import { normalizeAnswer, pointsForRank } from './game-scoring.util';
+import { RoomLockService } from './room-lock.service';
+import { RoomTimerService } from './room-timer.service';
 
 const BCRYPT_SALT_ROUNDS = 10;
 /**
@@ -37,8 +40,14 @@ const PASSWORD_ATTEMPT_LIMIT = 5;
 const PASSWORD_ATTEMPT_WINDOW_SECONDS = 60;
 
 const ROOM_INDEX_CACHE_KEY = 'room:index';
+/** room:index read-modify-write를 인스턴스 간에 직렬화하기 위한 락 키. */
+const ROOM_INDEX_LOCK_KEY = 'room-index';
 const ROOM_CACHE_KEY_PREFIX = 'room:';
 const PASSWORD_ATTEMPT_CACHE_KEY_PREFIX = 'room:pwd-attempts:';
+const SONG_ORDER_CACHE_KEY_PREFIX = 'room:song-order:';
+const CURRENT_ANSWERS_CACHE_KEY_PREFIX = 'room:answers:';
+const CURRENT_REVEAL_CACHE_KEY_PREFIX = 'room:reveal:';
+const CHAT_HISTORY_CACHE_KEY_PREFIX = 'room:chat:';
 /** 방은 활동(생성/입장/퇴장/게임 진행)이 있을 때마다 TTL이 갱신되는 슬라이딩 방식이다. */
 const ROOM_TTL_SECONDS = 6 * 60 * 60;
 /** 한 라운드의 제한 시간. 이 시간이 지나면 전원이 못 맞춰도 라운드가 강제 종료된다. */
@@ -70,6 +79,14 @@ const SPEED_MODE_NEXT_ROUND_DELAY_SECONDS = Number(
 
 export interface ChatSubmissionResult {
   action: 'broadcast' | 'blocked' | 'correct';
+  /**
+   * action이 'broadcast'일 때, 이 처리 시점에 공유 room 상태에서 조회한 발신자의
+   * 최신 닉네임. 닉네임 변경이 다른 인스턴스에서 처리됐다면(RoomService의
+   * nickname-changed는 프로세스 로컬 이벤트라 소켓이 붙은 인스턴스까지 전파되지
+   * 않을 수 있다) 소켓 게이트웨이가 들고 있는 로컬 캐시가 오래됐을 수 있으므로,
+   * 항상 이 값을 우선 사용해야 한다.
+   */
+  nickname?: string;
   correctInfo?: {
     userId: string;
     nickname: string;
@@ -117,32 +134,16 @@ export class RoomService extends EventEmitter {
   private readonly logger = new Logger(RoomService.name);
 
   /**
-   * roomId별 작업을 직렬화하는 간단한 in-memory 락.
-   * 프로세스 내 동시 요청(같은 방에 대한 동시 입장/퇴장/정답 제출)으로 인한 경쟁 상태를 막아준다.
-   * 다중 인스턴스로 수평 확장하는 경우에는 이 락과 아래 in-memory 상태들이 인스턴스 간에 공유되지
-   * 않으므로 Redis 기반 분산 락/상태 공유로 교체가 필요하다.
+   * roomId -> 최근 채팅/시스템 메시지 히스토리(재접속 시 복원용, 최대 CHAT_HISTORY_MAX_ENTRIES개).
+   * Redis가 설정돼 있으면 Redis LIST(room:chat:<roomId>)를 우선 사용하고, 이 Map은
+   * append/조회 시점에 Redis 커맨드가 실패할 때만 쓰는 로컬 폴백 저장소로 남겨둔다.
    */
-  private readonly roomLocks = new Map<string, Promise<unknown>>();
-
-  /** roomId -> 이번 게임에서 출제할 quizSongId 순서(랜덤이면 셔플됨). 스포일러라 클라이언트에 노출하지 않는다. */
-  private readonly songOrders = new Map<string, string[]>();
-  /** roomId -> 현재 라운드의 허용 정답 목록. 정답 채점에만 쓰고 절대 클라이언트로 보내지 않는다. */
-  private readonly currentAnswers = new Map<string, string[]>();
-  /** roomId -> 현재 라운드 종료 시 공개할 곡 정보. 라운드 종료 전까지는 room 객체에 채우지 않는다. */
-  private readonly currentReveal = new Map<string, RoundRevealInfo>();
-  /** roomId -> 라운드 제한시간 타이머 */
-  private readonly roundTimers = new Map<string, NodeJS.Timeout>();
-  /**
-   * roomId -> 스피드 모드 타이머(정답 자동 공개 또는 공개 후 자동 다음 라운드).
-   * 두 단계가 순차적으로만 일어나 슬롯 하나를 재사용하며, 라운드 제한시간용
-   * `roundTimers`와는 별도로 관리해 서로의 예약을 취소하지 않는다.
-   */
-  private readonly speedModeTimers = new Map<string, NodeJS.Timeout>();
-  /** roomId -> 최근 채팅/시스템 메시지 히스토리(재접속 시 복원용, 최대 CHAT_HISTORY_MAX_ENTRIES개). */
   private readonly chatHistory = new Map<string, ChatHistoryEntry[]>();
 
   constructor(
     private readonly cacheService: CacheService,
+    private readonly roomLockService: RoomLockService,
+    private readonly roomTimerService: RoomTimerService,
     @InjectRepository(Quiz)
     private readonly quizRepository: Repository<Quiz>,
     @InjectRepository(QuizArtist)
@@ -153,6 +154,15 @@ export class RoomService extends EventEmitter {
     private readonly quizAnswerRepository: Repository<QuizAnswer>,
   ) {
     super();
+    this.roomTimerService.registerHandler('round-timeout', (roomId) =>
+      this.handleRoundTimeout(roomId),
+    );
+    this.roomTimerService.registerHandler('speed-reveal', (roomId) =>
+      this.handleSpeedModeReveal(roomId),
+    );
+    this.roomTimerService.registerHandler('speed-next', (roomId) =>
+      this.handleAutoNextRound(roomId),
+    );
   }
 
   async getRooms(): Promise<RoomItemDto[]> {
@@ -347,18 +357,23 @@ export class RoomService extends EventEmitter {
         );
       }
 
+      let roundEnded = false;
       if (room.gameStatus === 'LOADING') {
-        this.recomputeReadyStatus(room);
+        await this.recomputeReadyStatus(room);
       } else if (room.gameStatus === 'PLAYING' && room.currentRound) {
         const allAnswered = room.participants.every((participant) =>
           room.currentRound!.correctUserIds.includes(participant.userId),
         );
         if (allAnswered || this.hasSkipMajority(room)) {
-          this.finalizeRoundEnd(room);
+          await this.finalizeRoundEnd(room);
+          roundEnded = true;
         }
       }
 
       await this.saveRoom(room);
+      if (roundEnded) {
+        this.cleanupStaleRoundTimers(room);
+      }
       this.emit('room-updated', this.toPublicRoom(room));
 
       return { roomDeleted: false, room: this.toPublicRoom(room) };
@@ -558,7 +573,7 @@ export class RoomService extends EventEmitter {
 
     await this.quizRepository.increment({ quizId: room.quizId }, 'playCnt', 1);
 
-    this.songOrders.set(roomId, songOrder);
+    await this.setSongOrder(roomId, songOrder);
     room.gameStatus = 'LOADING';
     room.currentRound = await this.prepareRoundData(
       roomId,
@@ -581,7 +596,7 @@ export class RoomService extends EventEmitter {
       if (!round.readyUserIds.includes(userId)) {
         round.readyUserIds.push(userId);
       }
-      this.recomputeReadyStatus(room);
+      await this.recomputeReadyStatus(room);
 
       await this.saveRoom(room);
       this.emit('room-updated', this.toPublicRoom(room));
@@ -625,16 +640,19 @@ export class RoomService extends EventEmitter {
     return this.withRoomLock(roomId, async () => {
       const room = await this.getRoomOrThrow(roomId);
       const round = room.currentRound;
+      const nickname = room.participants.find(
+        (p) => p.userId === userId,
+      )?.nickname;
 
       if (!round || round.revealed) {
-        return { action: 'broadcast' };
+        return { action: 'broadcast', nickname };
       }
 
-      const answers = (this.currentAnswers.get(roomId) ?? []).filter(
+      const answers = (await this.getCurrentAnswers(roomId)).filter(
         (answer) => normalizeAnswer(answer).length > 0,
       );
       if (answers.length === 0) {
-        return { action: 'broadcast' };
+        return { action: 'broadcast', nickname };
       }
 
       const normalizedMessage = normalizeAnswer(rawMessage);
@@ -648,7 +666,7 @@ export class RoomService extends EventEmitter {
         );
 
       if (!containsAnswer) {
-        return { action: 'broadcast' };
+        return { action: 'broadcast', nickname };
       }
 
       const alreadyCorrect = round.correctUserIds.includes(userId);
@@ -667,20 +685,25 @@ export class RoomService extends EventEmitter {
       const allAnswered = room.participants.every((p) =>
         round.correctUserIds.includes(p.userId),
       );
+      let roundEnded = false;
       if (allAnswered) {
-        this.finalizeRoundEnd(room);
+        await this.finalizeRoundEnd(room);
+        roundEnded = true;
       } else if (room.speedModeEnabled && round.correctUserIds.length === 1) {
         round.autoRevealAt = new Date(
           Date.now() + SPEED_MODE_REVEAL_DELAY_SECONDS * 1000,
         ).toISOString();
-        this.scheduleSpeedModeTimer(
+        await this.scheduleSpeedModeTimer(
           roomId,
+          'speed-reveal',
           SPEED_MODE_REVEAL_DELAY_SECONDS,
-          () => this.handleSpeedModeReveal(roomId),
         );
       }
 
       await this.saveRoom(room);
+      if (roundEnded) {
+        this.cleanupStaleRoundTimers(room);
+      }
       this.emit('room-updated', this.toPublicRoom(room));
 
       return {
@@ -709,11 +732,15 @@ export class RoomService extends EventEmitter {
         round.skipUserIds.push(userId);
       }
 
-      if (this.hasSkipMajority(room)) {
-        this.finalizeRoundEnd(room);
+      const roundEnded = this.hasSkipMajority(room);
+      if (roundEnded) {
+        await this.finalizeRoundEnd(room);
       }
 
       await this.saveRoom(room);
+      if (roundEnded) {
+        this.cleanupStaleRoundTimers(room);
+      }
       this.emit('room-updated', this.toPublicRoom(room));
       return room;
     });
@@ -739,7 +766,7 @@ export class RoomService extends EventEmitter {
       round.forceSkipAt = new Date(
         Date.now() + FORCE_SKIP_DELAY_SECONDS * 1000,
       ).toISOString();
-      this.scheduleRoundTimer(roomId, FORCE_SKIP_DELAY_SECONDS);
+      await this.scheduleRoundTimer(roomId, FORCE_SKIP_DELAY_SECONDS);
 
       await this.saveRoom(room);
       this.emit('room-updated', this.toPublicRoom(room));
@@ -747,8 +774,37 @@ export class RoomService extends EventEmitter {
     });
   }
 
-  /** 채팅/시스템 메시지를 히스토리에 기록한다(재접속 시 복원용). 방 상태와 무관해 락을 타지 않는다. */
-  appendChatHistory(roomId: string, entry: ChatHistoryEntry): void {
+  /**
+   * 채팅/시스템 메시지를 히스토리에 기록한다(재접속 시 복원용). 방 상태와 무관해 락을 타지 않는다.
+   * 이 오퍼레이션은 스케줄/취소처럼 짝을 이루지 않는 단발성 append이므로, 매 호출 시점의
+   * Redis 연결 상태(isRedisReady)로 그때그때 폴백해도 안전하다(RoomLockService/RoomTimerService의
+   * "모드 고정" 원칙과 달리 append/조회가 서로 다른 백엔드를 타도 최악의 경우 최근 몇 건의
+   * 순서만 어긋날 뿐 게임 상태 정합성에는 영향이 없다).
+   * RPUSH+LTRIM+EXPIRE를 MULTI/EXEC로 묶어 여러 인스턴스에서 동시에 append해도 Redis의
+   * 단일 스레드 실행 모델상 원자적으로 처리된다.
+   */
+  async appendChatHistory(
+    roomId: string,
+    entry: ChatHistoryEntry,
+  ): Promise<void> {
+    const redis = this.cacheService.getRedisClient();
+    if (redis && this.cacheService.isRedisReady()) {
+      try {
+        const key = this.chatHistoryKey(roomId);
+        await redis
+          .multi()
+          .rpush(key, JSON.stringify(entry))
+          .ltrim(key, -CHAT_HISTORY_MAX_ENTRIES, -1)
+          .expire(key, ROOM_TTL_SECONDS)
+          .exec();
+        return;
+      } catch (err) {
+        this.logger.warn(
+          `채팅 히스토리 Redis 기록 실패(${roomId}), 로컬 메모리로 폴백합니다: ${(err as Error).message}`,
+        );
+      }
+    }
+
     const history = this.chatHistory.get(roomId) ?? [];
     history.push(entry);
     if (history.length > CHAT_HISTORY_MAX_ENTRIES) {
@@ -758,8 +814,23 @@ export class RoomService extends EventEmitter {
   }
 
   /** roomId의 채팅 히스토리를 조회한다(재접속 시 복원용). */
-  getChatHistory(roomId: string): ChatHistoryEntry[] {
+  async getChatHistory(roomId: string): Promise<ChatHistoryEntry[]> {
+    const redis = this.cacheService.getRedisClient();
+    if (redis && this.cacheService.isRedisReady()) {
+      try {
+        const raw = await redis.lrange(this.chatHistoryKey(roomId), 0, -1);
+        return raw.map((entry) => JSON.parse(entry) as ChatHistoryEntry);
+      } catch (err) {
+        this.logger.warn(
+          `채팅 히스토리 Redis 조회 실패(${roomId}), 로컬 메모리로 폴백합니다: ${(err as Error).message}`,
+        );
+      }
+    }
     return this.chatHistory.get(roomId) ?? [];
+  }
+
+  private chatHistoryKey(roomId: string): string {
+    return `${CHAT_HISTORY_CACHE_KEY_PREFIX}${roomId}`;
   }
 
   private assertHost(room: RoomItemDto, requesterUserId: string): void {
@@ -768,7 +839,7 @@ export class RoomService extends EventEmitter {
     }
   }
 
-  private recomputeReadyStatus(room: RoomItemDto): void {
+  private async recomputeReadyStatus(room: RoomItemDto): Promise<void> {
     const round = room.currentRound;
     if (!round || room.gameStatus !== 'LOADING') {
       return;
@@ -777,7 +848,7 @@ export class RoomService extends EventEmitter {
       round.readyUserIds.includes(participant.userId),
     );
     if (allReady) {
-      this.beginRound(room);
+      await this.beginRound(room);
     }
   }
 
@@ -786,8 +857,11 @@ export class RoomService extends EventEmitter {
    * 실제 재생은 즉시가 아니라 PLAY_SCHEDULE_DELAY_SECONDS 뒤로 예약해, 모든
    * 클라이언트가 이벤트 수신 시각과 무관하게 같은 시각에 재생을 시작하도록 한다.
    * 라운드 제한시간도 이 예약 시각 기준으로 흐르도록 그만큼 늦춰서 건다.
+   * 타이머 예약이 실패하면(scheduleRoundTimer가 던짐) gameStatus를 PLAYING으로
+   * 바꾼 것까지 포함해 이 호출 전체가 실패해야 한다 — 그래야 뒤이은 saveRoom이
+   * 건너뛰어져 "타임아웃 없이 PLAYING으로 저장된" 상태가 생기지 않는다.
    */
-  private beginRound(room: RoomItemDto): void {
+  private async beginRound(room: RoomItemDto): Promise<void> {
     if (!room.currentRound) {
       return;
     }
@@ -795,7 +869,7 @@ export class RoomService extends EventEmitter {
     room.currentRound.playScheduledAt = new Date(
       Date.now() + PLAY_SCHEDULE_DELAY_SECONDS * 1000,
     ).toISOString();
-    this.scheduleRoundTimer(
+    await this.scheduleRoundTimer(
       room.roomId,
       ROUND_TIME_LIMIT_SECONDS + PLAY_SCHEDULE_DELAY_SECONDS,
     );
@@ -812,16 +886,24 @@ export class RoomService extends EventEmitter {
   }
 
   /**
-   * 라운드를 종료(정답 공개)한다. 타임아웃/강제스킵/스킵과반/전원정답 등 어떤 경로로
-   * 호출되든 이 함수 하나로 모이므로, 스피드 모드의 "공개 후 자동 다음 라운드" 예약도
-   * 여기서 일괄 처리한다.
+   * 라운드를 종료(정답 공개) 상태로 만들고(room을 직접 변경), 스피드 모드면
+   * "공개 후 자동 다음 라운드" 예약(speed-next)까지 만든다. 타임아웃/강제스킵/
+   * 스킵과반/전원정답 등 어떤 경로로 호출되든 이 함수 하나로 모인다.
+   *
+   * round-timeout·speed-reveal 취소는 여기서 하지 않는다 — 호출자가 이 함수 뒤에
+   * saveRoom까지 성공한 걸 확인한 다음 cleanupStaleRoundTimers를 불러야 한다. 이
+   * 함수는 round-timeout/speed-reveal 핸들러 자신이 호출하는 경로도 있는데, saveRoom
+   * 확인 전에 먼저 취소해버리면 saveRoom이 실패했을 때(Redis 단절 등) 그 핸들러
+   * 자신의 claim과 새로 만든 speed-next까지 모두 사라져 방이 영구히 멈출 수 있다.
+   * saveRoom이 실패하면 이 함수가 만든 speed-next와 기존 round-timeout/speed-reveal이
+   * 모두 살아있는 채로 남고, 그중 먼저 발화하는 것이 이 함수를 처음부터 다시
+   * 시도한다 — 이미 반영된 상태라면 각 핸들러의 gameStatus 가드가 no-op 처리한다.
    */
-  private finalizeRoundEnd(room: RoomItemDto): void {
-    this.clearRoundTimer(room.roomId);
+  private async finalizeRoundEnd(room: RoomItemDto): Promise<void> {
     if (!room.currentRound) {
       return;
     }
-    const reveal = this.currentReveal.get(room.roomId);
+    const reveal = await this.getCurrentReveal(room.roomId);
     room.currentRound.revealed = true;
     room.currentRound.songNm = reveal?.songNm ?? null;
     room.currentRound.atstNm = reveal?.atstNm ?? null;
@@ -830,83 +912,133 @@ export class RoomService extends EventEmitter {
     room.gameStatus = 'ROUND_ENDED';
 
     if (room.speedModeEnabled) {
-      const roomId = room.roomId;
       room.currentRound.autoNextRoundAt = new Date(
         Date.now() + SPEED_MODE_NEXT_ROUND_DELAY_SECONDS * 1000,
       ).toISOString();
-      this.scheduleSpeedModeTimer(
-        roomId,
+      await this.scheduleSpeedModeTimer(
+        room.roomId,
+        'speed-next',
         SPEED_MODE_NEXT_ROUND_DELAY_SECONDS,
-        () => this.handleAutoNextRound(roomId),
       );
     }
   }
 
-  private scheduleSpeedModeTimer(
+  /**
+   * finalizeRoundEnd로 라운드를 끝내고 그 room 상태 저장(saveRoom)까지 성공한
+   * 직후에만 호출한다. round-timeout과(스피드 모드면) speed-reveal은 이제 쓸모없는
+   * 안전 타이머이므로 정리하지만, 어디까지나 best-effort 정리라 실패해도 예외를
+   * 던지지 않는다 — 핵심 상태는 이미 저장됐으니, 정리에 실패해도 스테일 타이머가
+   * 한 번 더 헛돌고 각자의 gameStatus 가드로 no-op 처리될 뿐이다.
+   */
+  private cleanupStaleRoundTimers(room: RoomItemDto): void {
+    this.clearRoundTimer(room.roomId);
+    if (room.speedModeEnabled) {
+      this.roomTimerService.cancel('speed-reveal', room.roomId).catch((err) => {
+        this.logger.warn(
+          `스피드모드 타이머 취소 실패(speed-reveal, ${room.roomId}): ${(err as Error).message}`,
+        );
+      });
+    }
+  }
+
+  /**
+   * 스피드 모드 타이머를 예약한다. 예약(ZADD) 자체가 실패하면 호출자에게 그대로
+   * 던진다 — 상태 저장만 성공하고 타이머는 유실되는 상황을 막기 위함이다
+   * (RoomTimerService.schedule 참고). 'speed-reveal'과 'speed-next'가 같은 roomId에
+   * 동시에 남아있을 위험은 예약 시점에 다른 kind를 미리 지우는 대신, 각 핸들러의
+   * gameStatus 가드(PLAYING/ROUND_ENDED가 아니면 no-op)와 CAS 기반 자기 정리로
+   * 감당한다 — finalizeRoundEnd 문서 참고.
+   */
+  private async scheduleSpeedModeTimer(
     roomId: string,
+    kind: 'speed-reveal' | 'speed-next',
     delaySeconds: number,
-    onFire: () => void,
-  ): void {
-    this.clearSpeedModeTimer(roomId);
-    const timer = setTimeout(onFire, delaySeconds * 1000);
-    timer.unref();
-    this.speedModeTimers.set(roomId, timer);
+  ): Promise<void> {
+    try {
+      await this.roomTimerService.schedule(kind, roomId, delaySeconds);
+    } catch {
+      throw new ServiceUnavailableException(
+        '타이머 예약에 실패했습니다. 잠시 후 다시 시도해주세요.',
+      );
+    }
   }
 
   private clearSpeedModeTimer(roomId: string): void {
-    const timer = this.speedModeTimers.get(roomId);
-    if (timer) {
-      clearTimeout(timer);
-      this.speedModeTimers.delete(roomId);
+    this.roomTimerService.cancel('speed-reveal', roomId).catch((err) => {
+      this.logger.warn(
+        `스피드모드 타이머 취소 실패(speed-reveal, ${roomId}): ${(err as Error).message}`,
+      );
+    });
+    this.roomTimerService.cancel('speed-next', roomId).catch((err) => {
+      this.logger.warn(
+        `스피드모드 타이머 취소 실패(speed-next, ${roomId}): ${(err as Error).message}`,
+      );
+    });
+  }
+
+  /**
+   * 스피드 모드: 첫 정답자가 나온 뒤 예약된 시간이 지나면 아직 전원이 못 맞췄어도 정답을 공개한다.
+   * 실패를 여기서 삼키지 않고 다시 던진다 — 이 메서드는 RoomTimerService가 등록한
+   * 타이머 핸들러라, 삼키면 실패한 처리도 성공한 것으로 보고 예약을 지워버려(CAS
+   * 삭제가 handler resolve만 보고 판단) 재시도 기회 자체가 사라진다.
+   */
+  private async handleSpeedModeReveal(roomId: string): Promise<void> {
+    try {
+      await this.withRoomLock(roomId, async () => {
+        const room = await this.getRoomRecord(roomId);
+        if (!room || room.gameStatus !== 'PLAYING') {
+          return;
+        }
+        await this.finalizeRoundEnd(room);
+        await this.saveRoom(room);
+        this.cleanupStaleRoundTimers(room);
+        this.emit('room-updated', this.toPublicRoom(room));
+      });
+    } catch (err) {
+      this.logger.error(
+        `스피드 모드 정답 자동 공개 처리 실패(roomId: ${roomId}), 재시도되도록 예약을 유지합니다: ${(err as Error).message}`,
+      );
+      throw err;
     }
   }
 
-  /** 스피드 모드: 첫 정답자가 나온 뒤 예약된 시간이 지나면 아직 전원이 못 맞췄어도 정답을 공개한다. */
-  private async handleSpeedModeReveal(roomId: string): Promise<void> {
-    await this.withRoomLock(roomId, async () => {
-      const room = await this.getRoomRecord(roomId);
-      if (!room || room.gameStatus !== 'PLAYING') {
-        return;
-      }
-      this.finalizeRoundEnd(room);
-      await this.saveRoom(room);
-      this.emit('room-updated', this.toPublicRoom(room));
-    }).catch((err) => {
-      this.logger.error(
-        `스피드 모드 정답 자동 공개 처리 실패(roomId: ${roomId}): ${(err as Error).message}`,
-      );
-    });
-  }
-
-  /** 스피드 모드: 정답 공개 후 예약된 시간이 지나면 방장 조작 없이 자동으로 다음 라운드로 넘어간다. */
+  /**
+   * 스피드 모드: 정답 공개 후 예약된 시간이 지나면 방장 조작 없이 자동으로 다음 라운드로 넘어간다.
+   * handleSpeedModeReveal과 동일한 이유로 실패를 삼키지 않고 다시 던진다.
+   */
   private async handleAutoNextRound(roomId: string): Promise<void> {
-    await this.withRoomLock(roomId, async () => {
-      const room = await this.getRoomRecord(roomId);
-      if (!room || room.gameStatus !== 'ROUND_ENDED') {
-        return;
-      }
-      await this.advanceToNextRound(room);
-      await this.saveRoom(room);
-      this.emit('room-updated', this.toPublicRoom(room));
-    }).catch((err) => {
+    try {
+      await this.withRoomLock(roomId, async () => {
+        const room = await this.getRoomRecord(roomId);
+        if (!room || room.gameStatus !== 'ROUND_ENDED') {
+          return;
+        }
+        await this.advanceToNextRound(room);
+        await this.saveRoom(room);
+        this.emit('room-updated', this.toPublicRoom(room));
+      });
+    } catch (err) {
       this.logger.error(
-        `스피드 모드 자동 다음 라운드 처리 실패(roomId: ${roomId}): ${(err as Error).message}`,
+        `스피드 모드 자동 다음 라운드 처리 실패(roomId: ${roomId}), 재시도되도록 예약을 유지합니다: ${(err as Error).message}`,
       );
-    });
+      throw err;
+    }
   }
 
   /** 다음 라운드를 준비하거나(있으면) 게임을 종료한다(없으면). room 객체를 직접 변경한다. */
   private async advanceToNextRound(room: RoomItemDto): Promise<void> {
     const roomId = room.roomId;
-    const songOrder = this.songOrders.get(roomId) ?? [];
+    const songOrder = await this.getSongOrder(roomId);
     const nextIndex = (room.currentRound?.roundIndex ?? -1) + 1;
 
     if (nextIndex >= songOrder.length) {
       room.gameStatus = 'FINISHED';
       room.currentRound = null;
-      this.songOrders.delete(roomId);
-      this.currentAnswers.delete(roomId);
-      this.currentReveal.delete(roomId);
+      await Promise.all([
+        this.deleteSongOrder(roomId),
+        this.deleteCurrentAnswers(roomId),
+        this.deleteCurrentReveal(roomId),
+      ]);
     } else {
       room.gameStatus = 'LOADING';
       room.currentRound = await this.prepareRoundData(
@@ -918,25 +1050,36 @@ export class RoomService extends EventEmitter {
     }
   }
 
-  private scheduleRoundTimer(roomId: string, delaySeconds: number): void {
-    this.clearRoundTimer(roomId);
-    const timer = setTimeout(() => {
-      this.handleRoundTimeout(roomId).catch((err) => {
-        this.logger.error(
-          `라운드 타임아웃 처리 실패(roomId: ${roomId}): ${(err as Error).message}`,
-        );
-      });
-    }, delaySeconds * 1000);
-    timer.unref();
-    this.roundTimers.set(roomId, timer);
+  /**
+   * 라운드 제한시간 타이머를 예약한다. RoomTimerService.schedule은 같은 kind+roomId면
+   * score(발화 시각)만 덮어써 재예약이 곧 취소+재설정 효과를 내므로 별도로 먼저
+   * 취소할 필요가 없다.
+   * 예약(ZADD) 자체가 실패하면 호출자에게 그대로 던진다 — 상태 저장만 성공하고
+   * 타이머는 유실되는 상황을 막기 위함이다(RoomTimerService.schedule 참고).
+   */
+  private async scheduleRoundTimer(
+    roomId: string,
+    delaySeconds: number,
+  ): Promise<void> {
+    try {
+      await this.roomTimerService.schedule(
+        'round-timeout',
+        roomId,
+        delaySeconds,
+      );
+    } catch {
+      throw new ServiceUnavailableException(
+        '타이머 예약에 실패했습니다. 잠시 후 다시 시도해주세요.',
+      );
+    }
   }
 
   private clearRoundTimer(roomId: string): void {
-    const timer = this.roundTimers.get(roomId);
-    if (timer) {
-      clearTimeout(timer);
-      this.roundTimers.delete(roomId);
-    }
+    this.roomTimerService.cancel('round-timeout', roomId).catch((err) => {
+      this.logger.warn(
+        `라운드 타이머 취소 실패(${roomId}): ${(err as Error).message}`,
+      );
+    });
   }
 
   private async handleRoundTimeout(roomId: string): Promise<void> {
@@ -945,8 +1088,9 @@ export class RoomService extends EventEmitter {
       if (!room || room.gameStatus !== 'PLAYING') {
         return;
       }
-      this.finalizeRoundEnd(room);
+      await this.finalizeRoundEnd(room);
       await this.saveRoom(room);
+      this.cleanupStaleRoundTimers(room);
       this.emit('room-updated', this.toPublicRoom(room));
     });
   }
@@ -994,11 +1138,11 @@ export class RoomService extends EventEmitter {
       where: { quizSongId },
     });
 
-    this.currentAnswers.set(
+    await this.setCurrentAnswers(
       roomId,
       quizAnswers.map((answer) => answer.answerTxt),
     );
-    this.currentReveal.set(roomId, {
+    await this.setCurrentReveal(roomId, {
       quizSongId: quizSong.quizSongId,
       songNm: quizSong.song.songNm,
       atstNm: quizSong.song.artist.atstNm,
@@ -1062,8 +1206,16 @@ export class RoomService extends EventEmitter {
     return publicRoom;
   }
 
+  /**
+   * room 상태는 여러 인스턴스가 공유하는 핵심 데이터라 cacheService.set()의 "Redis
+   * 실패 시 로컬로 조용히 폴백" 동작을 쓰면 안 된다 — 폴백하면 이 인스턴스에서는
+   * 성공한 것처럼 보이지만 실제 공유 Redis에는 반영되지 않아, 이미 Redis에 반영된
+   * 타이머 예약(RoomTimerService) 등과 어긋나는 조용한 정합성 문제로 이어진다.
+   * setStrict는 실패를 그대로 던지므로 호출자(withRoomLock 내부)가 상태 저장
+   * 실패를 알아채고 이후 정리(cleanupStaleRoundTimers 등)를 건너뛸 수 있다.
+   */
   private async saveRoom(room: RoomItemDto): Promise<void> {
-    await this.cacheService.set(
+    await this.cacheService.setStrict(
       this.roomKey(room.roomId),
       room,
       ROOM_TTL_SECONDS,
@@ -1075,14 +1227,106 @@ export class RoomService extends EventEmitter {
     await this.removeFromIndex(roomId);
     this.clearRoundTimer(roomId);
     this.clearSpeedModeTimer(roomId);
-    this.songOrders.delete(roomId);
-    this.currentAnswers.delete(roomId);
-    this.currentReveal.delete(roomId);
+    await Promise.all([
+      this.deleteSongOrder(roomId),
+      this.deleteCurrentAnswers(roomId),
+      this.deleteCurrentReveal(roomId),
+      this.cacheService.del(this.chatHistoryKey(roomId)),
+    ]);
     this.chatHistory.delete(roomId);
   }
 
   private roomKey(roomId: string): string {
     return `${ROOM_CACHE_KEY_PREFIX}${roomId}`;
+  }
+
+  /**
+   * songOrder/currentAnswers/currentReveal는 room 상태와 마찬가지로 여러 인스턴스가
+   * 공유해야 하는 라운드 진행 데이터라 get/set이 아니라 getStrict/setStrict를 쓴다.
+   * 일반 get/set의 로컬 폴백을 허용하면, room 상태(setStrict로 이미 보호됨)는
+   * Redis에 반영됐는데 이 데이터만 이 인스턴스의 로컬 캐시에만 남는 상황이 생길 수
+   * 있다 — 다른 인스턴스가 곡 순서를 빈 배열로 읽어 게임을 조기 종료하거나, 정답을
+   * 인식하지 못하는 등 감지하기 어려운 정합성 문제로 이어진다.
+   */
+  private async getSongOrder(roomId: string): Promise<string[]> {
+    return (
+      (await this.cacheService.getStrict<string[]>(
+        this.songOrderKey(roomId),
+      )) ?? []
+    );
+  }
+
+  private async setSongOrder(
+    roomId: string,
+    songOrder: string[],
+  ): Promise<void> {
+    await this.cacheService.setStrict(
+      this.songOrderKey(roomId),
+      songOrder,
+      ROOM_TTL_SECONDS,
+    );
+  }
+
+  private async deleteSongOrder(roomId: string): Promise<void> {
+    await this.cacheService.del(this.songOrderKey(roomId));
+  }
+
+  private songOrderKey(roomId: string): string {
+    return `${SONG_ORDER_CACHE_KEY_PREFIX}${roomId}`;
+  }
+
+  private async getCurrentAnswers(roomId: string): Promise<string[]> {
+    return (
+      (await this.cacheService.getStrict<string[]>(
+        this.currentAnswersKey(roomId),
+      )) ?? []
+    );
+  }
+
+  private async setCurrentAnswers(
+    roomId: string,
+    answers: string[],
+  ): Promise<void> {
+    await this.cacheService.setStrict(
+      this.currentAnswersKey(roomId),
+      answers,
+      ROOM_TTL_SECONDS,
+    );
+  }
+
+  private async deleteCurrentAnswers(roomId: string): Promise<void> {
+    await this.cacheService.del(this.currentAnswersKey(roomId));
+  }
+
+  private currentAnswersKey(roomId: string): string {
+    return `${CURRENT_ANSWERS_CACHE_KEY_PREFIX}${roomId}`;
+  }
+
+  private async getCurrentReveal(
+    roomId: string,
+  ): Promise<RoundRevealInfo | undefined> {
+    return this.cacheService.getStrict<RoundRevealInfo>(
+      this.currentRevealKey(roomId),
+    );
+  }
+
+  private async setCurrentReveal(
+    roomId: string,
+    reveal: RoundRevealInfo,
+  ): Promise<void> {
+    await this.cacheService.setStrict(
+      this.currentRevealKey(roomId),
+      reveal,
+      ROOM_TTL_SECONDS,
+    );
+  }
+
+  private async deleteCurrentReveal(roomId: string): Promise<void> {
+    await this.cacheService.del(this.currentRevealKey(roomId));
+  }
+
+  private currentRevealKey(roomId: string): string {
+    return `${CURRENT_REVEAL_CACHE_KEY_PREFIX}${roomId}`;
   }
 
   /**
@@ -1163,32 +1407,43 @@ export class RoomService extends EventEmitter {
     return (await this.cacheService.get<string[]>(ROOM_INDEX_CACHE_KEY)) ?? [];
   }
 
+  /**
+   * room:index는 여러 인스턴스가 동시에 건드릴 수 있는 read-modify-write라, roomId별
+   * 락(withRoomLock)과 별개로 인덱스 전용 락으로 직렬화해야 두 인스턴스가 동시에
+   * 방을 만들거나 지워도 마지막 쓰기가 상대방의 변경을 덮어쓰지 않는다.
+   */
   private async addToIndex(roomId: string): Promise<void> {
-    const index = await this.getRoomIndex();
-    index.push(roomId);
-    await this.cacheService.set(ROOM_INDEX_CACHE_KEY, index, ROOM_TTL_SECONDS);
+    await this.roomLockService.withLock(ROOM_INDEX_LOCK_KEY, async () => {
+      const index = await this.getRoomIndex();
+      index.push(roomId);
+      await this.cacheService.set(
+        ROOM_INDEX_CACHE_KEY,
+        index,
+        ROOM_TTL_SECONDS,
+      );
+    });
   }
 
   private async removeFromIndex(roomId: string): Promise<void> {
-    const index = await this.getRoomIndex();
-    await this.cacheService.set(
-      ROOM_INDEX_CACHE_KEY,
-      index.filter((id) => id !== roomId),
-      ROOM_TTL_SECONDS,
-    );
+    await this.roomLockService.withLock(ROOM_INDEX_LOCK_KEY, async () => {
+      const index = await this.getRoomIndex();
+      await this.cacheService.set(
+        ROOM_INDEX_CACHE_KEY,
+        index.filter((id) => id !== roomId),
+        ROOM_TTL_SECONDS,
+      );
+    });
   }
 
-  /** 같은 roomId에 대한 작업을 도착한 순서대로 하나씩 실행되도록 직렬화한다. */
+  /**
+   * 같은 roomId에 대한 작업을 도착한 순서대로 하나씩 실행되도록 직렬화한다.
+   * REDIS_HOST가 설정돼 있으면 인스턴스 간에도 직렬화되는 분산 락(RoomLockService)을,
+   * 아니면 프로세스 내 Promise 체이닝을 쓴다.
+   */
   private async withRoomLock<T>(
     roomId: string,
     task: () => Promise<T>,
   ): Promise<T> {
-    const previous = this.roomLocks.get(roomId) ?? Promise.resolve();
-    const run = previous.catch(() => undefined).then(() => task());
-    this.roomLocks.set(
-      roomId,
-      run.catch(() => undefined),
-    );
-    return run;
+    return this.roomLockService.withLock(`room:${roomId}`, task);
   }
 }

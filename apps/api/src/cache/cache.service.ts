@@ -34,6 +34,21 @@ export class CacheService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * 락/ZSET/LIST 등 get·set·del로 표현할 수 없는 원시 Redis 커맨드가 필요한
+   * 서비스(RoomLockService, RoomTimerService 등)를 위해 raw 클라이언트를 노출한다.
+   * REDIS_HOST 미설정이면 null이며, 이 값은 프로세스 생애주기 동안 바뀌지 않으므로
+   * 호출자는 부팅 시 1회 모드를 결정하는 용도로 써야 한다(연결 성공 여부는 isRedisReady 참고).
+   */
+  getRedisClient(): Redis | null {
+    return this.redis;
+  }
+
+  /** 지금 이 순간 Redis에 커맨드를 보낼 수 있는지. 단발성 오퍼레이션의 매 호출 폴백 판단용. */
+  isRedisReady(): boolean {
+    return this.redis !== null && this.redisReady;
+  }
+
   async get<T>(key: string): Promise<T | undefined> {
     if (this.redis && this.redisReady) {
       try {
@@ -46,6 +61,23 @@ export class CacheService implements OnModuleDestroy {
       }
     }
     return this.getLocal<T>(key);
+  }
+
+  /**
+   * get()과 달리 Redis 오류를 로컬 캐시로 조용히 폴백하지 않고 그대로 던진다.
+   * songOrder/currentAnswers/currentReveal처럼 room 상태와 함께 여러 인스턴스가
+   * 공유해야 하는 데이터에 쓴다. 폴백을 허용하면 "이 인스턴스에는 값이 없어서
+   * 못 찾음"과 "Redis 자체가 잠깐 응답하지 않아서 못 찾음"을 구분할 수 없어,
+   * 타이머 핸들러가 후자를 정상적인 no-op으로 오인해 아직 필요한 타이머 예약을
+   * 지워버릴 수 있다. REDIS_HOST가 아예 설정되지 않은 단일 인스턴스 환경에서는
+   * 로컬 캐시가 유일한 저장소이므로 그대로 로컬에서 읽는다.
+   */
+  async getStrict<T>(key: string): Promise<T | undefined> {
+    if (!this.redis) {
+      return this.getLocal<T>(key);
+    }
+    const raw = await this.redis.get(key);
+    return raw === null ? undefined : (JSON.parse(raw) as T);
   }
 
   async set<T>(
@@ -66,6 +98,29 @@ export class CacheService implements OnModuleDestroy {
       }
     }
     this.setLocal(key, serialized, ttlSeconds);
+  }
+
+  /**
+   * set()과 달리 Redis 오류를 로컬 캐시로 조용히 폴백하지 않고 그대로 던진다.
+   * roomId별 room 상태처럼 여러 인스턴스가 공유해야만 하는 데이터에 쓴다 — set()의
+   * 폴백은 "이 인스턴스에서는 성공한 것처럼 보이지만 실제로는 다른 인스턴스와
+   * 공유되지 않는 상태"를 만들어, 같은 room에 대해 이미 Redis에 반영된 다른 변경
+   * (예: RoomTimerService의 타이머 ZSET)과 어긋나는 조용한 정합성 문제로 이어질 수
+   * 있다. REDIS_HOST가 아예 설정되지 않은 단일 인스턴스 환경에서는 로컬 캐시가
+   * 유일한 저장소이므로 그대로 로컬에 쓴다.
+   */
+  async setStrict<T>(
+    key: string,
+    value: T,
+    ttlSeconds: number = this.defaultTtlSeconds,
+  ): Promise<void> {
+    const serialized = JSON.stringify(value);
+
+    if (!this.redis) {
+      this.setLocal(key, serialized, ttlSeconds);
+      return;
+    }
+    await this.redis.set(key, serialized, 'EX', ttlSeconds);
   }
 
   async del(key: string): Promise<void> {

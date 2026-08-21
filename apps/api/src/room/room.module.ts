@@ -7,6 +7,8 @@ import { Quiz } from '../quiz/entities/quiz.entity';
 import { UserModule } from '../user/user.module';
 import { RoomController } from './room.controller';
 import { RoomGateway } from './room.gateway';
+import { RoomLockService } from './room-lock.service';
+import { RoomTimerService } from './room-timer.service';
 import { RoomService } from './room.service';
 
 @Module({
@@ -15,7 +17,7 @@ import { RoomService } from './room.service';
     UserModule,
   ],
   controllers: [RoomController],
-  providers: [RoomService, RoomGateway],
+  providers: [RoomService, RoomGateway, RoomLockService, RoomTimerService],
   exports: [RoomGateway],
 })
 export class RoomModule {}
