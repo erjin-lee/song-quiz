@@ -30,9 +30,22 @@
 
 # Commands
 
-- Web 빌드: `yarn web:build` (루트에서 turbo 필터 실행)
-- Web 개발 서버: `yarn web`
-- 워크스페이스 내부에서 직접 실행: `yarn workspace web dev`, `yarn workspace web build`, `yarn workspace web lint`
+- Web 빌드(루트에서 turbo 필터 실행)
+```bash
+yarn web:build
+```
+
+- Web 개발 서버
+```bash
+yarn web
+```
+
+- 워크스페이스 내부에서 직접 실행
+```bash
+yarn workspace web dev
+yarn workspace web build
+yarn workspace web lint
+```
 
 # Verification
 

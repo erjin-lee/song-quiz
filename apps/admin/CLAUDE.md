@@ -25,9 +25,22 @@
 
 # Commands
 
-- Admin 빌드: `yarn admin:build` (루트에서 turbo 필터 실행)
-- Admin 개발 서버: `yarn admin`
-- 워크스페이스 내부에서 직접 실행: `yarn workspace admin dev`, `yarn workspace admin build`, `yarn workspace admin lint`
+- Admin 빌드(루트에서 turbo 필터 실행)
+```bash
+yarn admin:build
+```
+
+- Admin 개발 서버
+```bash
+yarn admin
+```
+
+- 워크스페이스 내부에서 직접 실행
+```bash
+yarn workspace admin dev
+yarn workspace admin build
+yarn workspace admin lint
+```
 
 # Verification
 
