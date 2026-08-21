@@ -69,5 +69,11 @@ export function createRoomSocket(): RoomSocket {
   return io(`${API_BASE_URL}/rooms`, {
     transports: ['websocket'],
     autoConnect: false,
+    // 기본값(1000ms, ±50% 지터)이면 서버 재배포처럼 순간적으로 끊겼다가 금방
+    // 살아나는 경우에도 첫 재연결 시도가 RoomGamePage의 DISCONNECT_NOTICE_DELAY_MS
+    // (800ms)보다 늦게 시작돼 끊김 안내가 뜨고 만다. 재연결 시도 자체를 앞당겨
+    // 그 안에 재연결이 끝날 여지를 준다. 장시간 장애 시의 백오프 상한
+    // (reconnectionDelayMax, 기본 5000ms)은 그대로 둔다.
+    reconnectionDelay: 300,
   });
 }
