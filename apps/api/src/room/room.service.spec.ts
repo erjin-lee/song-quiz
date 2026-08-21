@@ -15,6 +15,8 @@ import { QuizAnswer } from '../quiz/entities/quiz-answer.entity';
 import { QuizArtist } from '../quiz/entities/quiz-artist.entity';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
 import { Quiz } from '../quiz/entities/quiz.entity';
+import { RoomLockService } from './room-lock.service';
+import { RoomTimerService } from './room-timer.service';
 import { RoomService } from './room.service';
 
 const QUIZ_SONGS = [
@@ -54,6 +56,8 @@ const QUIZ_ANSWERS: Record<string, string[]> = {
 describe('RoomService', () => {
   let roomService: RoomService;
   let cacheService: CacheService;
+  let roomLockService: RoomLockService;
+  let roomTimerService: RoomTimerService;
 
   const quizRepositoryMock = {
     findOne: jest.fn(),
@@ -104,6 +108,8 @@ describe('RoomService', () => {
       providers: [
         RoomService,
         CacheService,
+        RoomLockService,
+        RoomTimerService,
         { provide: getRepositoryToken(Quiz), useValue: quizRepositoryMock },
         {
           provide: getRepositoryToken(QuizArtist),
@@ -122,10 +128,13 @@ describe('RoomService', () => {
 
     roomService = app.get<RoomService>(RoomService);
     cacheService = app.get<CacheService>(CacheService);
+    roomLockService = app.get<RoomLockService>(RoomLockService);
+    roomTimerService = app.get<RoomTimerService>(RoomTimerService);
   });
 
   afterEach(async () => {
     await cacheService.onModuleDestroy();
+    roomTimerService.onModuleDestroy();
   });
 
   async function createTestRoom(
@@ -653,6 +662,8 @@ describe('RoomService', () => {
       // RoomService 인스턴스에서 계산해도 동일해야 한다.
       const anotherInstance = new RoomService(
         cacheService,
+        roomLockService,
+        roomTimerService,
         quizRepositoryMock as unknown as Repository<Quiz>,
         quizArtistRepositoryMock as unknown as Repository<QuizArtist>,
         quizSongRepositoryMock as unknown as Repository<QuizSong>,

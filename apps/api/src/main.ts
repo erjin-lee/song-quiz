@@ -1,11 +1,12 @@
 import { setDefaultResultOrder } from 'node:dns';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { IoAdapter } from '@nestjs/platform-socket.io';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as basicAuth from 'express-basic-auth';
 import { AppModule } from './app/app.module';
+import { CacheService } from './cache/cache.service';
+import { RedisIoAdapter } from './common/redis-io.adapter';
 
 setDefaultResultOrder('ipv4first');
 
@@ -25,7 +26,10 @@ async function bootstrap() {
       ];
   app.enableCors({ origin: corsOrigins });
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
-  app.useWebSocketAdapter(new IoAdapter(app));
+
+  const redisIoAdapter = new RedisIoAdapter(app, app.get(CacheService));
+  await redisIoAdapter.connectToRedis();
+  app.useWebSocketAdapter(redisIoAdapter);
 
   const API_DOCS_PATH = 'api-docs';
   const apiDocsUser = process.env.API_DOCS_USER;

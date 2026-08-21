@@ -34,6 +34,21 @@ export class CacheService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * 락/ZSET/LIST 등 get·set·del로 표현할 수 없는 원시 Redis 커맨드가 필요한
+   * 서비스(RoomLockService, RoomTimerService 등)를 위해 raw 클라이언트를 노출한다.
+   * REDIS_HOST 미설정이면 null이며, 이 값은 프로세스 생애주기 동안 바뀌지 않으므로
+   * 호출자는 부팅 시 1회 모드를 결정하는 용도로 써야 한다(연결 성공 여부는 isRedisReady 참고).
+   */
+  getRedisClient(): Redis | null {
+    return this.redis;
+  }
+
+  /** 지금 이 순간 Redis에 커맨드를 보낼 수 있는지. 단발성 오퍼레이션의 매 호출 폴백 판단용. */
+  isRedisReady(): boolean {
+    return this.redis !== null && this.redisReady;
+  }
+
   async get<T>(key: string): Promise<T | undefined> {
     if (this.redis && this.redisReady) {
       try {
