@@ -18,6 +18,7 @@ Yarn 4(Berry) + Turborepo 기반 TypeScript 모노레포다.
 - 공통 개발 원칙: [`docs/engineering-principles.md`](docs/engineering-principles.md)
 - Git 및 검증 규칙: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - 코드만 봐서는 알 수 없는 설계 결정의 배경: [`docs/adr/`](docs/adr/README.md)
+- AI 에이전트 성능 벤치마크: [`evals/README.md`](evals/README.md) — Claude Code agent session 결과를 `evals/results/agent-results.json`에 기록해 pass rate를 추적한다.
 
 앱을 수정할 때는 해당 앱의 규칙도 따른다.
 

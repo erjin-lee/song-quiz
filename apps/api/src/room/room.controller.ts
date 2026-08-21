@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -21,6 +22,7 @@ import {
 import { Request } from 'express';
 import { UserService } from '../user/user.service';
 import { CreateRoomRequestDto } from './dto/create-room-request.dto';
+import { GetRoomsQueryDto } from './dto/get-rooms-query.dto';
 import { JoinRoomRequestDto } from './dto/join-room-request.dto';
 import { LeaveRoomRequestDto } from './dto/leave-room-request.dto';
 import { LeaveRoomResultDto } from './dto/leave-room-result.dto';
@@ -53,10 +55,13 @@ export class RoomController {
   }
 
   @Get()
-  @ApiOperation({ summary: '퀴즈 방 목록 조회' })
+  @ApiOperation({
+    summary:
+      '퀴즈 방 목록 조회. page/pageSize를 생략하면 전체 목록을 반환한다.',
+  })
   @ApiOkResponse({ description: '방 목록', type: RoomItemDto, isArray: true })
-  getRooms(): Promise<RoomItemDto[]> {
-    return this.roomService.getRooms();
+  getRooms(@Query() query: GetRoomsQueryDto): Promise<RoomItemDto[]> {
+    return this.roomService.getRooms(query.page, query.pageSize);
   }
 
   @Get(':roomId')
