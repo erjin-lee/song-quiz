@@ -11,7 +11,6 @@ import * as bcrypt from 'bcrypt';
 import { In, Repository } from 'typeorm';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
 import { User } from '../user/entities/user.entity';
-import { AdminInquiryItemDto } from './dto/admin-inquiry-item.dto';
 import { AdminInquiryListDto } from './dto/admin-inquiry-list.dto';
 import { AdminItemDto } from './dto/admin-item.dto';
 import { AdminLoginRequestDto } from './dto/admin-login-request.dto';
