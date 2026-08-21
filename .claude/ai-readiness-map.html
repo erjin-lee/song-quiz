@@ -1,0 +1,1362 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>song-quiz · AI-Readiness Map</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #fafafa;
+        --surface: #ffffff;
+        --border: #e5e7eb;
+        --border-strong: #d1d5db;
+        --text: #0f172a;
+        --text-2: #475569;
+        --text-3: #94a3b8;
+        --accent: #2563eb;
+        --accent-soft: #eff6ff;
+        --green: #16a34a;
+        --green-soft: #dcfce7;
+        --amber: #d97706;
+        --amber-soft: #fef3c7;
+        --red: #dc2626;
+        --red-soft: #fee2e2;
+        --grid: #f1f5f9;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          "Inter",
+          -apple-system,
+          system-ui,
+          "Segoe UI",
+          sans-serif;
+        font-feature-settings: "cv11", "ss01";
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .page {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 48px 40px 64px;
+      }
+
+      /* ============ HEADER ============ */
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        padding-bottom: 24px;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 32px;
+      }
+
+      .header .eyebrow {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--text-3);
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+
+      .header h1 {
+        font-size: 30px;
+        font-weight: 700;
+        margin: 0;
+        letter-spacing: -0.02em;
+      }
+
+      .header .sub {
+        font-size: 14px;
+        color: var(--text-2);
+        margin-top: 4px;
+      }
+
+      .header-meta {
+        text-align: right;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--text-3);
+        line-height: 1.7;
+      }
+
+      .header-meta strong {
+        color: var(--text);
+        font-weight: 500;
+      }
+
+      /* ============ SCORE STRIP ============ */
+      .score-strip {
+        display: grid;
+        grid-template-columns: 320px 1fr;
+        gap: 24px;
+        margin-bottom: 32px;
+      }
+
+      .score-hero {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 28px 28px 24px;
+      }
+
+      .score-hero .label {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-3);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .score-hero .value {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        margin-top: 8px;
+      }
+
+      .score-hero .num {
+        font-size: 64px;
+        font-weight: 700;
+        letter-spacing: -0.04em;
+        line-height: 1;
+        color: var(--text);
+      }
+
+      .score-hero .denom {
+        font-size: 20px;
+        color: var(--text-3);
+        font-weight: 500;
+      }
+
+      .score-hero .grade-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .grade-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: var(--green-soft);
+        color: var(--green);
+        font-size: 12px;
+        font-weight: 600;
+        font-family: "JetBrains Mono", monospace;
+      }
+
+      .grade-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: var(--green);
+      }
+
+      .score-hero .desc {
+        font-size: 13px;
+        color: var(--text-2);
+        line-height: 1.5;
+        margin-top: 10px;
+      }
+
+      .score-hero hr {
+        border: 0;
+        border-top: 1px solid var(--border);
+        margin: 18px 0 14px;
+      }
+
+      .mini-stats {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+      }
+
+      .mini-stat .k {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--text-3);
+        margin-bottom: 2px;
+      }
+
+      .mini-stat .v {
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--text);
+      }
+
+      /* ============ 10 RULES BAR CHART ============ */
+      .rules {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 20px 24px 24px;
+      }
+
+      .rules .rules-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 16px;
+      }
+
+      .rules h2 {
+        font-size: 14px;
+        font-weight: 600;
+        margin: 0;
+      }
+
+      .legend-inline {
+        display: flex;
+        gap: 14px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--text-2);
+      }
+
+      .legend-inline span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      .legend-inline i {
+        width: 8px;
+        height: 8px;
+        border-radius: 2px;
+      }
+
+      .rule-row {
+        display: grid;
+        grid-template-columns: 28px 1fr 220px 56px;
+        gap: 12px;
+        align-items: center;
+        padding: 7px 0;
+        font-size: 13px;
+      }
+
+      .rule-row + .rule-row {
+        border-top: 1px dashed var(--border);
+      }
+
+      .rule-row .idx {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--text-3);
+        font-weight: 500;
+      }
+
+      .rule-row .title {
+        color: var(--text);
+        font-weight: 500;
+      }
+
+      .rule-row .sub {
+        font-size: 11.5px;
+        color: var(--text-3);
+        margin-top: 1px;
+      }
+
+      .rule-row .bar {
+        height: 8px;
+        border-radius: 3px;
+        background: var(--grid);
+        overflow: hidden;
+      }
+
+      .rule-row .bar > span {
+        display: block;
+        height: 100%;
+        border-radius: 3px;
+      }
+
+      .bar-good > span {
+        background: var(--green);
+      }
+      .bar-warn > span {
+        background: var(--amber);
+      }
+      .bar-bad > span {
+        background: var(--red);
+      }
+
+      .rule-row .num {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 13px;
+        font-weight: 600;
+        text-align: right;
+        color: var(--text);
+      }
+
+      /* ============ MAP ============ */
+      .map-section {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        margin-bottom: 32px;
+        overflow: hidden;
+      }
+
+      .map-head {
+        padding: 18px 24px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .map-head h2 {
+        font-size: 14px;
+        font-weight: 600;
+        margin: 0;
+      }
+
+      .map-head .sub {
+        font-size: 12px;
+        color: var(--text-2);
+        margin-top: 2px;
+      }
+
+      .map-legend {
+        display: flex;
+        gap: 18px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--text-2);
+        align-items: center;
+      }
+
+      .map-legend > span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .legend-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+      }
+
+      .legend-square {
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+      }
+
+      .legend-line {
+        width: 24px;
+        height: 0;
+        border-top: 1.5px solid;
+      }
+
+      .map-body {
+        padding: 28px 24px 32px;
+      }
+
+      .map-body svg {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      /* ============ FINDINGS ============ */
+      .findings {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+      }
+
+      .panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .panel-head {
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .panel-head h3 {
+        font-size: 13px;
+        font-weight: 600;
+        margin: 0;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .panel-head .count {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--text-3);
+        margin-left: auto;
+      }
+
+      .panel-strength .panel-head {
+        background: var(--green-soft);
+      }
+      .panel-strength .panel-head h3 {
+        color: var(--green);
+      }
+
+      .panel-risk .panel-head {
+        background: var(--red-soft);
+      }
+      .panel-risk .panel-head h3 {
+        color: var(--red);
+      }
+
+      .panel-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+
+      .panel-list li {
+        padding: 14px 20px;
+        border-top: 1px solid var(--border);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .panel-list li:first-child {
+        border-top: 0;
+      }
+
+      .panel-list .head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 500;
+        color: var(--text);
+      }
+
+      .panel-list .tag {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10.5px;
+        padding: 2px 7px;
+        border-radius: 3px;
+        font-weight: 500;
+        letter-spacing: 0.02em;
+      }
+
+      .tag-rule {
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+
+      .panel-list .note {
+        margin-top: 4px;
+        color: var(--text-2);
+        font-size: 12.5px;
+      }
+
+      .panel-list code {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11.5px;
+        background: var(--grid);
+        padding: 1px 5px;
+        border-radius: 3px;
+        color: var(--text);
+      }
+
+      footer {
+        margin-top: 48px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--text-3);
+        text-align: center;
+      }
+
+      /* ============ SVG ============ */
+      .grid-bg {
+        stroke: var(--grid);
+        stroke-width: 1;
+      }
+
+      .node-card {
+        fill: var(--surface);
+        stroke: var(--border-strong);
+        stroke-width: 1.2;
+      }
+
+      .node-card.accent {
+        stroke: var(--accent);
+      }
+
+      .node-title {
+        font-family: "Inter", sans-serif;
+        font-size: 12px;
+        font-weight: 600;
+        fill: var(--text);
+      }
+
+      .node-meta {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        fill: var(--text-3);
+      }
+
+      .node-kpi {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      .edge {
+        fill: none;
+        stroke: var(--border-strong);
+        stroke-width: 1.3;
+      }
+
+      .edge-dash {
+        stroke-dasharray: 4 3;
+      }
+
+      .edge-warn {
+        stroke: var(--amber);
+      }
+
+      .edge-type {
+        stroke: var(--accent);
+        stroke-width: 1.5;
+      }
+
+      .claude-dot {
+        fill: var(--accent);
+      }
+      .claude-ring {
+        fill: var(--accent-soft);
+      }
+
+      .test-dot {
+        fill: var(--green);
+      }
+
+      .hot {
+        fill: var(--red-soft);
+        stroke: var(--red);
+        stroke-width: 1;
+      }
+
+      .warm {
+        fill: var(--amber-soft);
+        stroke: var(--amber);
+        stroke-width: 1;
+      }
+
+      @media (max-width: 960px) {
+        .score-strip,
+        .findings {
+          grid-template-columns: 1fr;
+        }
+        .rule-row {
+          grid-template-columns: 24px 1fr 140px 40px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <!-- =========== HEADER =========== -->
+      <header class="header">
+        <div>
+          <div class="eyebrow">레포지토리 감사 · AI 준비도 · v2 루브릭</div>
+          <h1>song-quiz — AI 준비도 지도</h1>
+          <div class="sub">
+            7개 카테고리 채점 · 구조 지도 · ROI 우선순위 액션
+          </div>
+        </div>
+        <div class="header-meta">
+          <div>점수 측정 <strong>2026-08-21</strong></div>
+          <div>브랜치 <strong>main</strong></div>
+          <div>모듈 <strong>4</strong> · 컨텍스트 파일 <strong>8</strong></div>
+        </div>
+      </header>
+
+      <!-- =========== SCORE STRIP =========== -->
+      <section class="score-strip">
+        <div class="score-hero">
+          <div class="label">AI 준비도 지수</div>
+          <div class="value">
+            <span class="num">88</span><span class="denom">/ 100</span>
+          </div>
+          <div class="grade-row">
+            <span class="grade-badge" style="background: var(--green-soft); color: var(--green)">
+              <span class="grade-dot" style="background: var(--green)"></span> AI-Ready · 에이전트 친화
+            </span>
+          </div>
+          <div class="desc">
+            7개 카테고리 · 가중치 차등 (A 15 · B 20 · C 20 · D 15 · E 15
+            · F 10 · G 5). 가장 약한 영역은 <strong>B 컨텍스트 문서 품질
+            (14/20, Why:/Note:/Gotcha 마커가 evals/ 1곳에만 있음)</strong>
+            와 <strong>F 신선도 (8/10, pre-push hook 경로 검증 부재)</strong>.
+            자동 스캐너가 보고한 hallucinated path와 mermaid 부재는
+            <strong>전수 수동 검증 결과 오탐으로 확인</strong>돼 반영·보정함.
+            이번 세션에서 <strong>CODEOWNERS/PR template</strong>(E 8→12)과
+            <strong>evals/ 도입</strong>(G 0→5, task 5개 + 자동검증 +
+            결과 로그)을 완료해 76 → 88점으로 상승.
+          </div>
+          <hr />
+          <div class="mini-stats">
+            <div class="mini-stat">
+              <div class="k">컨텍스트 보유 모듈</div>
+              <div class="v">4 / 4</div>
+            </div>
+            <div class="mini-stat">
+              <div class="k">잘못된 경로 (수동검증)</div>
+              <div class="v" style="color: var(--green)">0</div>
+            </div>
+            <div class="mini-stat">
+              <div class="k">300줄 초과 파일</div>
+              <div class="v">15</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Categories bar chart -->
+        <div class="rules">
+          <div class="rules-head">
+            <div>
+              <h2>7개 카테고리 — 카테고리별 점수</h2>
+            </div>
+            <div class="legend-inline">
+              <span><i style="background: var(--green)"></i> 75% 이상</span>
+              <span><i style="background: var(--amber)"></i> 50–74%</span>
+              <span><i style="background: var(--red)"></i> 50% 미만</span>
+            </div>
+          </div>
+
+          <div class="rule-row">
+            <div class="idx">A</div>
+            <div>
+              <div class="title">AI 탐색 & 커버리지</div>
+              <div class="sub">
+                핵심 모듈 4/4 (100%) 에 CLAUDE.md 보유 (evals/ 포함) · root CLAUDE.md 완비
+              </div>
+            </div>
+            <div class="bar bar-good">
+              <span style="width: 100%"></span>
+            </div>
+            <div class="num">15/15</div>
+          </div>
+
+          <div class="rule-row">
+            <div class="idx">B</div>
+            <div>
+              <div class="title">컨텍스트 문서 품질</div>
+              <div class="sub">
+                27-96줄 · Why:/Note:/Gotcha 마커가 evals/CLAUDE.md 1곳에만 있음(B4 0/4, 4개 module 중 1개만 통과 → 반올림 0)
+              </div>
+              <div class="sub" style="font-family: 'JetBrains Mono', monospace; margin-top: 4px;">
+                B1 4/4 · B2 3/4 · B3 3/4 · <span style="color: var(--red)">B4 0/4</span> · B5 4/4
+              </div>
+            </div>
+            <div class="bar bar-warn">
+              <span style="width: 70%"></span>
+            </div>
+            <div class="num">14/20</div>
+          </div>
+
+          <div class="rule-row">
+            <div class="idx">C</div>
+            <div>
+              <div class="title">암묵지 외부화</div>
+              <div class="sub">
+                docs/adr/ ADR 3건 · evals/CLAUDE.md 추가로 Q1/Q2/Q4 4/4 만점 · Q3(non-obvious) 1/4만 통과
+              </div>
+            </div>
+            <div class="bar bar-good">
+              <span style="width: 85%"></span>
+            </div>
+            <div class="num">17/20</div>
+          </div>
+
+          <div class="rule-row">
+            <div class="idx">D</div>
+            <div>
+              <div class="title">모듈 간 의존성 매핑</div>
+              <div class="sub">
+                ARCHITECTURE.md + mermaid 2건(시스템/모듈 의존성) · turbo.json workspace
+              </div>
+            </div>
+            <div class="bar bar-good">
+              <span style="width: 100%"></span>
+            </div>
+            <div class="num">15/15</div>
+          </div>
+
+          <div class="rule-row">
+            <div class="idx">E</div>
+            <div>
+              <div class="title">검증 & 품질 게이트</div>
+              <div class="sub">
+                <strong style="color: var(--green)">✓ hallucinated path 0건(수동검증)</strong> · CODEOWNERS/PR template · evals/ 모두 추가 완료
+              </div>
+              <div class="sub" style="font-family: 'JetBrains Mono', monospace; margin-top: 4px;">
+                E1 5/5 · E2 4/4 · E3 3/4 · E4 2/2
+              </div>
+            </div>
+            <div class="bar bar-good">
+              <span style="width: 93%"></span>
+            </div>
+            <div class="num">14/15</div>
+          </div>
+
+          <div class="rule-row">
+            <div class="idx">F</div>
+            <div>
+              <div class="title">신선도 & 자가 유지보수</div>
+              <div class="sub">
+                context drift 0% · CI에 validate-context.yml 존재 · pre-push hook 검증 부재
+              </div>
+            </div>
+            <div class="bar bar-good">
+              <span style="width: 80%"></span>
+            </div>
+            <div class="num">8/10</div>
+          </div>
+
+          <div class="rule-row">
+            <div class="idx">G</div>
+            <div>
+              <div class="title">에이전트 성과 측정</div>
+              <div class="sub">
+                <strong style="color: var(--green)">✓ evals/ 도입 완료</strong> — task 5개 + agent-results.json + telemetry 힌트
+              </div>
+            </div>
+            <div class="bar bar-good">
+              <span style="width: 100%"></span>
+            </div>
+            <div class="num">5/5</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =========== MAP =========== -->
+      <section class="map-section">
+        <div class="map-head">
+          <div>
+            <h2>구조 지도</h2>
+            <div class="sub">
+              노드 = 디렉터리 · 엣지 = 의존성 · 카드 내부 수치는 파일
+              라인 수(god file 강조)
+            </div>
+          </div>
+          <div class="map-legend">
+            <span
+              ><span
+                class="legend-dot"
+                style="background: var(--accent)"
+              ></span>
+              CLAUDE.md 보유</span
+            >
+            <span
+              ><span
+                class="legend-dot"
+                style="background: var(--green)"
+              ></span>
+              테스트</span
+            >
+            <span
+              ><span
+                class="legend-square"
+                style="background: var(--red-soft); border: 1px solid var(--red)"
+              ></span>
+              500줄 초과
+            </span>
+            <span>
+              <span
+                class="legend-line"
+                style="border-color: var(--accent)"
+              ></span>
+              REST/Socket.IO 연결
+            </span>
+            <span>
+              <span
+                class="legend-line"
+                style="border-color: var(--border-strong); border-style: dashed"
+              ></span>
+              의존성
+            </span>
+          </div>
+        </div>
+
+        <div class="map-body">
+          <svg viewBox="0 0 1180 640" xmlns="http://www.w3.org/2000/svg">
+            <!-- subtle grid -->
+            <g class="grid-bg">
+              <path d="M0,80 H1180" />
+              <path d="M0,160 H1180" />
+              <path d="M0,240 H1180" />
+              <path d="M0,320 H1180" />
+              <path d="M0,400 H1180" />
+              <path d="M0,480 H1180" />
+              <path d="M0,560 H1180" />
+              <path d="M100,0 V640" />
+              <path d="M300,0 V640" />
+              <path d="M500,0 V640" />
+              <path d="M700,0 V640" />
+              <path d="M900,0 V640" />
+              <path d="M1100,0 V640" />
+            </g>
+
+            <!-- Column headers -->
+            <text
+              x="200"
+              y="32"
+              text-anchor="middle"
+              class="node-meta"
+              style="font-size: 11px; fill: var(--text-2); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;"
+            >
+              프런트엔드(유저) · apps/web
+            </text>
+            <text
+              x="590"
+              y="32"
+              text-anchor="middle"
+              class="node-meta"
+              style="font-size: 11px; fill: var(--text-2); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;"
+            >
+              백엔드 · apps/api (허브)
+            </text>
+            <text
+              x="980"
+              y="32"
+              text-anchor="middle"
+              class="node-meta"
+              style="font-size: 11px; fill: var(--text-2); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;"
+            >
+              프런트엔드(관리자) · apps/admin
+            </text>
+
+            <!-- ============ ROOT CLAUDE.md + AGENTS.md (top center) ============ -->
+            <g transform="translate(440,60)">
+              <rect
+                class="node-card accent"
+                width="300"
+                height="70"
+                rx="8"
+              />
+              <circle cx="22" cy="22" r="14" class="claude-ring" />
+              <circle cx="22" cy="22" r="6" class="claude-dot" />
+              <text x="44" y="26" class="node-title">
+                CLAUDE.md + AGENTS.md (root)
+              </text>
+              <text x="44" y="42" class="node-meta">
+                모노레포 개요 · 워크스페이스 규칙 · 앱별 CLAUDE.md 링크
+              </text>
+              <text x="44" y="58" class="node-meta" style="fill: var(--text-2)">
+                57 + 60 lines · ARCHITECTURE.md 참조
+              </text>
+              <text
+                x="284"
+                y="26"
+                text-anchor="end"
+                class="node-kpi"
+                style="fill: var(--accent)"
+              >
+                루트
+              </text>
+            </g>
+
+            <!-- ============ apps/web column ============ -->
+            <!-- web CLAUDE.md -->
+            <g transform="translate(60,180)">
+              <rect class="node-card accent" width="280" height="64" rx="8" />
+              <circle cx="22" cy="22" r="12" class="claude-ring" />
+              <circle cx="22" cy="22" r="5" class="claude-dot" />
+              <text x="42" y="26" class="node-title">apps/web/CLAUDE.md</text>
+              <text x="42" y="42" class="node-meta">
+                Vite+React SPA · 게스트/로그인 게임 플레이어
+              </text>
+              <text x="264" y="26" text-anchor="end" class="node-kpi">
+                63 ln
+              </text>
+            </g>
+
+            <!-- src/pages -->
+            <g transform="translate(60,268)">
+              <rect class="node-card" width="280" height="130" rx="8" />
+              <text x="16" y="24" class="node-title">apps/web/src/pages</text>
+              <text x="16" y="40" class="node-meta">
+                RoomGamePage · RoomListPage · CreateRoomPage
+              </text>
+
+              <g transform="translate(16,52)">
+                <rect class="hot" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--red); font-weight:600">
+                  RoomGamePage.tsx
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--red); font-weight:600">
+                  696
+                </text>
+              </g>
+
+              <g transform="translate(16,74)">
+                <rect class="warm" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  RoomListPage.tsx
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  444
+                </text>
+              </g>
+
+              <g transform="translate(16,96)">
+                <rect class="warm" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  CreateRoomPage.tsx
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  379
+                </text>
+              </g>
+            </g>
+
+            <!-- src/components -->
+            <g transform="translate(60,414)">
+              <rect class="node-card" width="280" height="88" rx="8" />
+              <text x="16" y="24" class="node-title">apps/web/src/components</text>
+              <text x="16" y="40" class="node-meta">
+                GamePlayer · EditRoomModal
+              </text>
+
+              <g transform="translate(16,52)">
+                <rect class="hot" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--red); font-weight:600">
+                  GamePlayer.tsx
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--red); font-weight:600">
+                  627
+                </text>
+              </g>
+            </g>
+
+            <!-- context / session (no test runner) -->
+            <g transform="translate(60,518)">
+              <rect class="node-card" width="280" height="64" rx="8" stroke-dasharray="4 3" />
+              <circle cx="22" cy="22" r="10" fill="var(--amber-soft)" />
+              <circle cx="22" cy="22" r="5" fill="var(--amber)" />
+              <text x="42" y="26" class="node-title">
+                src/context/SessionContext.tsx
+              </text>
+              <text x="42" y="42" class="node-meta" style="fill: var(--amber); font-weight: 500">
+                테스트 러너 미설정 (E3 gap)
+              </text>
+            </g>
+
+            <!-- ============ apps/api column (hub) ============ -->
+            <!-- api CLAUDE.md -->
+            <g transform="translate(450,180)">
+              <rect class="node-card accent" width="280" height="64" rx="8" />
+              <circle cx="22" cy="22" r="12" class="claude-ring" />
+              <circle cx="22" cy="22" r="5" class="claude-dot" />
+              <text x="42" y="26" class="node-title">apps/api/CLAUDE.md</text>
+              <text x="42" y="42" class="node-meta">
+                NestJS · web/admin이 공유하는 유일한 백엔드
+              </text>
+              <text x="264" y="26" text-anchor="end" class="node-kpi">
+                71 ln
+              </text>
+            </g>
+
+            <!-- src/room -->
+            <g transform="translate(450,268)">
+              <rect class="node-card" width="280" height="130" rx="8" />
+              <text x="16" y="24" class="node-title">apps/api/src/room</text>
+              <text x="16" y="40" class="node-meta">
+                room.service · room.gateway (Socket.IO)
+              </text>
+
+              <g transform="translate(16,52)">
+                <rect class="hot" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--red); font-weight:600">
+                  room.service.ts
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--red); font-weight:600">
+                  1449
+                </text>
+              </g>
+              <g transform="translate(16,74)">
+                <rect class="hot" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--red); font-weight:600">
+                  room.service.spec.ts
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--red); font-weight:600">
+                  1474
+                </text>
+              </g>
+              <g transform="translate(16,96)">
+                <rect class="hot" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--red); font-weight:600">
+                  room.gateway.ts
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--red); font-weight:600">
+                  566
+                </text>
+              </g>
+            </g>
+
+            <!-- src/admin, inquiry, scraper -->
+            <g transform="translate(450,414)">
+              <rect class="node-card" width="280" height="110" rx="8" />
+              <text x="16" y="24" class="node-title">src/admin · inquiry · scraper</text>
+              <text x="16" y="40" class="node-meta">
+                admin이 inquiry/quiz/user 3개 도메인에 직접 결합
+              </text>
+
+              <g transform="translate(16,52)">
+                <rect class="hot" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--red); font-weight:600">
+                  admin.service.spec.ts
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--red); font-weight:600">
+                  509
+                </text>
+              </g>
+              <g transform="translate(16,74)">
+                <rect class="warm" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  inquiry.service.spec.ts
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  393
+                </text>
+              </g>
+            </g>
+
+            <!-- api/test (colocated specs + e2e) -->
+            <g transform="translate(450,542)">
+              <rect class="node-card" width="280" height="64" rx="8" />
+              <circle cx="22" cy="22" r="10" fill="var(--green-soft)" />
+              <circle cx="22" cy="22" r="5" class="test-dot" />
+              <text x="42" y="26" class="node-title">
+                *.spec.ts (코로케이션) + test/ e2e
+              </text>
+              <text x="42" y="42" class="node-meta">
+                Jest + supertest · yarn workspace api test/test:e2e
+              </text>
+            </g>
+
+            <!-- ============ apps/admin column ============ -->
+            <!-- admin CLAUDE.md -->
+            <g transform="translate(840,180)">
+              <rect class="node-card accent" width="280" height="64" rx="8" />
+              <circle cx="22" cy="22" r="12" class="claude-ring" />
+              <circle cx="22" cy="22" r="5" class="claude-dot" />
+              <text x="42" y="26" class="node-title">apps/admin/CLAUDE.md</text>
+              <text x="42" y="42" class="node-meta">
+                Next.js 14 App Router · 운영자 전용 화면
+              </text>
+              <text x="264" y="26" text-anchor="end" class="node-kpi">
+                57 ln
+              </text>
+            </g>
+
+            <!-- inquiries page -->
+            <g transform="translate(840,268)">
+              <rect class="node-card" width="280" height="88" rx="8" />
+              <text x="16" y="24" class="node-title">src/app/(protected)/inquiries</text>
+              <text x="16" y="40" class="node-meta">
+                문의 관리 화면
+              </text>
+              <g transform="translate(16,52)">
+                <rect class="warm" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  page.tsx
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  427
+                </text>
+              </g>
+            </g>
+
+            <!-- admin no test runner -->
+            <g transform="translate(840,380)">
+              <rect class="node-card" width="280" height="64" rx="8" stroke-dasharray="4 3" />
+              <circle cx="22" cy="22" r="10" fill="var(--amber-soft)" />
+              <circle cx="22" cy="22" r="5" fill="var(--amber)" />
+              <text x="42" y="26" class="node-title">
+                require-auth.tsx · auth-provider.tsx
+              </text>
+              <text x="42" y="42" class="node-meta" style="fill: var(--amber); font-weight: 500">
+                테스트 러너 미설정 (E3 gap)
+              </text>
+            </g>
+
+            <!-- ARCHITECTURE.md + docs/adr -->
+            <g transform="translate(840,478)">
+              <rect class="node-card" width="280" height="128" rx="8" />
+              <text x="16" y="24" class="node-title">ARCHITECTURE.md · docs/adr/</text>
+              <text x="16" y="40" class="node-meta">
+                mermaid 2건 · ADR 3건 · 외부 연동 표
+              </text>
+              <g transform="translate(16,52)">
+                <rect fill="var(--accent-soft)" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--accent); font-weight:600">
+                  ADR-0001 room 재접속
+                </text>
+              </g>
+              <g transform="translate(16,74)">
+                <rect fill="var(--accent-soft)" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--accent); font-weight:600">
+                  ADR-0002 게스트/JWT · ADR-0003 DTO 미러링
+                </text>
+              </g>
+              <g transform="translate(16,96)">
+                <rect fill="var(--grid)" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--text-2)">
+                  OpenAI · YouTube · Melon 외부 연동
+                </text>
+              </g>
+            </g>
+
+            <!-- =================== EDGES =================== -->
+            <!-- Root CLAUDE.md → each sub CLAUDE.md -->
+            <path
+              class="edge edge-dash"
+              d="M500,130 C 500,160 200,160 200,180"
+            />
+            <path
+              class="edge edge-dash"
+              d="M590,130 C 590,160 590,160 590,180"
+            />
+            <path
+              class="edge edge-dash"
+              d="M680,130 C 680,160 980,160 980,180"
+            />
+
+            <!-- apps/web → apps/api : REST + Socket.IO -->
+            <path
+              class="edge edge-type"
+              d="M340,212 C 400,212 400,212 450,212"
+            />
+            <text
+              x="395"
+              y="205"
+              text-anchor="middle"
+              class="node-meta"
+              style="fill: var(--accent); font-weight: 600"
+            >
+              REST(JWT) + Socket.IO /rooms
+            </text>
+
+            <!-- apps/admin → apps/api : REST Admin JWT -->
+            <path
+              class="edge edge-type"
+              d="M840,212 C 780,212 780,212 730,212"
+            />
+            <text
+              x="785"
+              y="205"
+              text-anchor="middle"
+              class="node-meta"
+              style="fill: var(--accent); font-weight: 600"
+            >
+              REST(Admin JWT)
+            </text>
+
+            <!-- DTO manual mirroring warning: web/admin types ↔ api DTO -->
+            <path
+              class="edge edge-warn edge-dash"
+              d="M200,244 C 200,244 300,300 340,300"
+            />
+            <text
+              x="255"
+              y="270"
+              text-anchor="middle"
+              class="node-meta"
+              style="fill: var(--amber); font-weight: 600"
+            >
+              DTO 수동 미러링
+            </text>
+
+            <!-- api → ARCHITECTURE/docs -->
+            <path
+              class="edge edge-dash"
+              d="M730,300 C 800,300 900,400 900,478"
+            />
+          </svg>
+        </div>
+      </section>
+
+      <!-- =========== FINDINGS =========== -->
+      <div class="findings">
+        <section class="panel panel-strength">
+          <div class="panel-head">
+            <h3>강점</h3>
+            <span class="count">유지할 것들</span>
+          </div>
+          <ul class="panel-list">
+            <li>
+              <div class="head">
+                <span class="tag tag-rule">Cat A</span>
+                root + 4 module CLAUDE.md 완전 커버리지 (4/4)
+              </div>
+              <div class="note">
+                root(CLAUDE.md+AGENTS.md) → web/api/admin/evals 각 모듈.
+                에이전트가 상위에서 하위로 드릴다운하며 필요한 만큼만
+                context 로드 가능.
+              </div>
+            </li>
+            <li>
+              <div class="head">
+                <span class="tag tag-rule">Cat D</span>
+                ARCHITECTURE.md에 mermaid 다이어그램 2건
+              </div>
+              <div class="note">
+                시스템 개요(web/admin/api/외부연동)와 <code>apps/api</code>
+                내부 모듈 의존성 그래프를 실제 import 기준으로 유지. 숨은
+                결합(<code>inquiry → room</code>)까지 텍스트로 명시.
+              </div>
+            </li>
+            <li>
+              <div class="head">
+                <span class="tag tag-rule">Cat C</span>
+                docs/adr/ ADR 3건으로 설계 배경 외부화
+              </div>
+              <div class="note">
+                room 재접속(0001) · 게스트모드/JWT 저장(0002) · DTO 수동
+                미러링(0003) 배경이 각 모듈 CLAUDE.md에서 상호 링크됨.
+              </div>
+            </li>
+            <li>
+              <div class="head">
+                <span class="tag tag-rule">Cat F</span>
+                Context drift 0% · CI에 validate-context.yml
+              </div>
+              <div class="note">
+                <code>.github/workflows/validate-context.yml</code>이 이미
+                가동 중. CLAUDE.md가 최근 코드 변경보다 항상 신선함.
+              </div>
+            </li>
+            <li>
+              <div class="head">
+                <span class="tag tag-rule">Cat E3</span>
+                Build/test infra 완비
+              </div>
+              <div class="note">
+                <code>turbo.json</code> + 3개 앱 <code>package.json</code> +
+                CI workflow 3개(build/deploy). agent가 변경 후 검증 가능한
+                명령을 CLAUDE.md의 Commands/Verification 섹션에서 바로 확인.
+              </div>
+            </li>
+            <li>
+              <div class="head">
+                <span class="tag tag-rule">Cat E2</span>
+                CODEOWNERS + PR template 신설
+                <span style="margin-left: auto; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--green)">✓ 2026-08-21</span>
+              </div>
+              <div class="note">
+                <code>.github/CODEOWNERS</code>(@erjin-lee 전체 소유) ·
+                <code>.github/pull_request_template.md</code>(브랜치/커밋
+                규칙 + 셀프리뷰 체크리스트 + DTO·ADR 갱신 체크) 추가. E2
+                0/4 → 4/4, E 8/15 → 12/15.
+              </div>
+            </li>
+            <li>
+              <div class="head">
+                <span class="tag tag-rule">Cat G</span>
+                <code>evals/</code> 도입
+                <span style="margin-left: auto; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--green)">✓ 2026-08-21</span>
+              </div>
+              <div class="note">
+                room 페이지네이션·DTO 미러링·재접속 회귀 테스트·god file
+                분리 등 이 저장소의 실제 코드에 기반한 task 5개 + 자동
+                검증 스크립트(<code>evals/checks/*.sh</code>) + 결과 로그
+                (<code>evals/results/agent-results.json</code>) 추가.
+                G 0/5 → 5/5, E4 0/2 → 2/2.
+              </div>
+            </li>
+            <li>
+              <div class="head">
+                <span class="tag tag-rule">Cat G</span>
+                evals 첫 실행·기록
+                <span style="margin-left: auto; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--green)">✓ 2026-08-21</span>
+              </div>
+              <div class="note">
+                <code>001-rooms-pagination</code> task를 실제로 구현
+                (admin의 <code>GetAdminInquiriesQueryDto</code> 패턴을
+                재사용한 <code>GetRoomsQueryDto</code> 신설, 하위 호환
+                기본값 유지)하고 자동 검증 4/4 통과. 결과를
+                <code>evals/results/agent-results.json</code>에 첫 기록으로
+                적재 — 인프라뿐 아니라 실측 데이터가 쌓이기 시작함.
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <section class="panel panel-risk">
+          <div class="panel-head">
+            <h3>최우선 ROI 액션</h3>
+            <span class="count">우선순위 정렬</span>
+          </div>
+          <ul class="panel-list">
+            <li>
+              <div class="head">
+                <span class="tag tag-rule">Cat B/C · S</span>
+                나머지 3개 CLAUDE.md에 Why:/Note:/Gotcha 마커 확산
+              </div>
+              <div class="note">
+                <strong>Effort 1.0 hr · Priority 6.0.</strong>
+                <code>evals/CLAUDE.md</code>에만 마커가 있어 4개 module 중
+                1개만 통과(B4 0/4, C_Q3 1/4). 이미 서술돼 있는 hidden
+                rule(예: <code>admin</code>이 3개 도메인에 직접 결합, DTO
+                3곳 수동 동기화)에 <code>Why:</code>/<code>Gotcha:</code>
+                마커만 붙이면 됨 — 내용은 이미 존재.
+              </div>
+            </li>
+            <li>
+              <div class="head">
+                <span class="tag tag-rule">Cat B · L</span>
+                god file 6개(&gt;500줄) 분할
+              </div>
+              <div class="note">
+                <strong>Effort 15.0 hr (2.5h × 6) · Priority 0.4.</strong>
+                <code>room.service.spec.ts</code>(1474) ·
+                <code>room.service.ts</code>(1449) ·
+                <code>RoomGamePage.tsx</code>(696) ·
+                <code>GamePlayer.tsx</code>(627) ·
+                <code>room.gateway.ts</code>(566) ·
+                <code>admin.service.spec.ts</code>(509). 파일당 ~5K-10K
+                token 절감 + 편집 정확도 ↑. <code>evals/tasks/005</code>가
+                <code>room.service.spec.ts</code> 분리부터 안전하게
+                시작하는 절차를 이미 정의해뒀다.
+              </div>
+            </li>
+          </ul>
+        </section>
+      </div>
+
+      <footer>
+        song-quiz · AI-Readiness v2 · scored 2026-08-21
+      </footer>
+    </div>
+  </body>
+</html>
