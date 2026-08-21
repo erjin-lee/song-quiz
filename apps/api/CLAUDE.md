@@ -22,6 +22,12 @@
 - `test/`: e2e 테스트(Jest + supertest).
 - 신규 도메인은 `src/<domain>/` 하위에 module/controller/service/dto 구조로 추가한다 (`src/app/` 참고).
 
+# Dependencies
+
+- 소비자: `apps/web`(REST + Socket.IO), `apps/admin`(REST, Admin JWT). DTO를 변경하면 두 프런트엔드의 `src/types/`를 함께 확인한다.
+- 외부 연동: OpenAI API(GPT 채점), YouTube(영상 스크래핑), Melon 차트(곡 정보). 전체 그래프는 [`ARCHITECTURE.md`](../../ARCHITECTURE.md) 참고.
+- 설계 배경: room 실시간 상태([`ADR-0001`](../../docs/adr/0001-room-realtime-state-and-reconnect.md)), 게스트 모드/JWT 저장([`ADR-0002`](../../docs/adr/0002-guest-mode-and-jwt-storage.md)), DTO 미러링([`ADR-0003`](../../docs/adr/0003-manual-dto-type-mirroring.md)).
+
 # Commands
 
 - API 빌드: `yarn api:build` (루트에서 turbo 필터 실행)
