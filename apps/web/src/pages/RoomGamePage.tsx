@@ -274,6 +274,9 @@ export function RoomGamePage() {
     const socket = createRoomSocket();
     setSocket(socket);
 
+    let hasDisconnectedOnce = false;
+    let pendingReconnectNotice = false;
+
     socket.on('chat:message', (payload) => {
       setChatEntries((prev) => [
         ...prev,
@@ -296,8 +299,23 @@ export function RoomGamePage() {
     // room:enter 성공 시 서버가 보관 중인 최근 채팅 히스토리를 내려준다. 새로고침으로
     // chatEntries가 초기화돼도 이걸로 복원된다(전체를 교체 — 최초 입장 시에도 다른
     // 유저들이 미리 나눈 채팅이 있으면 함께 보인다).
+    // 재연결 직후에는 room:enter 응답으로 이 이벤트가 곧바로 뒤따라오므로, connect
+    // 핸들러에서 append한 "복구되었습니다" 메시지가 여기서 덮어써진다. 그래서 복구
+    // 안내는 여기서 pendingReconnectNotice 플래그를 확인해 교체 결과에 함께 붙인다.
     socket.on('chat:history', (entries) => {
-      setChatEntries(entries.map((entry) => ({ id: nextEntryId(), ...entry })));
+      const mapped: ChatEntry[] = entries.map((entry) => ({
+        id: nextEntryId(),
+        ...entry,
+      }));
+      if (pendingReconnectNotice) {
+        pendingReconnectNotice = false;
+        mapped.push({
+          id: nextEntryId(),
+          type: 'system',
+          message: '서버와의 연결이 복구되었습니다.',
+        });
+      }
+      setChatEntries(mapped);
     });
 
     socket.on('room:state', (updatedRoom) => {
@@ -305,6 +323,10 @@ export function RoomGamePage() {
     });
 
     socket.on('room:error', (payload) => {
+      // room:enter가 실패하면 chat:history가 오지 않아 pendingReconnectNotice가
+      // 계속 true로 남을 수 있다. 이후 무관한 chat:history에 복구 메시지가 잘못
+      // 붙는 걸 막기 위해 여기서 정리한다.
+      pendingReconnectNotice = false;
       setChatEntries((prev) => [
         ...prev,
         { id: nextEntryId(), type: 'system', message: payload.message },
@@ -344,8 +366,30 @@ export function RoomGamePage() {
       });
     }
 
+    // 서버 재시작 등으로 소켓이 끊겼다가 자동 재연결되면 'connect'가 다시 발화된다.
+    // 이때 room:enter를 재emit하지 않으면 서버의 disconnect-grace 타이머가 만료되어
+    // 방에서 제거되고, room 멤버십도 복구되지 않는다. 복구 안내 메시지 자체는
+    // chat:history 핸들러에서 pendingReconnectNotice로 붙인다.
+    socket.on('connect', () => {
+      if (hasDisconnectedOnce) {
+        pendingReconnectNotice = true;
+      }
+      socket.emit('room:enter', { roomId, userId, accessToken });
+    });
+
+    socket.on('disconnect', () => {
+      hasDisconnectedOnce = true;
+      setChatEntries((prev) => [
+        ...prev,
+        {
+          id: nextEntryId(),
+          type: 'system',
+          message: '서버와의 연결이 끊어졌습니다. 재연결을 시도합니다...',
+        },
+      ]);
+    });
+
     socket.connect();
-    socket.emit('room:enter', { roomId, userId, accessToken });
 
     return () => {
       socket.disconnect();
