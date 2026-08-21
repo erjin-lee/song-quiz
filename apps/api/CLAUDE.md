@@ -30,19 +30,22 @@
 
 # Commands
 
-- API 빌드(루트에서 turbo 필터 실행):
+- API 빌드(루트에서 turbo 필터 실행)
 ```bash
 yarn api:build
 ```
-- API 실행(watch):
+
+- API 실행(watch)
 ```bash
 yarn api
-```  
-- API 실행(watch, `.env.local` 로드):
+```
+
+- API 실행(watch, `.env.local` 로드)
 ```bash
 yarn api:local
 ```
-- 워크스페이스 내부에서 직접 실행:
+
+- 워크스페이스 내부에서 직접 실행
 ```bash
 yarn workspace api start:dev
 yarn workspace api start:dev:local
@@ -50,6 +53,7 @@ yarn workspace api build
 yarn workspace api test
 yarn workspace api lint
 ```
+
 # Verification
 
 1. 변경된 파일의 타입 오류를 확인한다.
