@@ -83,6 +83,29 @@ export class CacheService implements OnModuleDestroy {
     this.setLocal(key, serialized, ttlSeconds);
   }
 
+  /**
+   * set()과 달리 Redis 오류를 로컬 캐시로 조용히 폴백하지 않고 그대로 던진다.
+   * roomId별 room 상태처럼 여러 인스턴스가 공유해야만 하는 데이터에 쓴다 — set()의
+   * 폴백은 "이 인스턴스에서는 성공한 것처럼 보이지만 실제로는 다른 인스턴스와
+   * 공유되지 않는 상태"를 만들어, 같은 room에 대해 이미 Redis에 반영된 다른 변경
+   * (예: RoomTimerService의 타이머 ZSET)과 어긋나는 조용한 정합성 문제로 이어질 수
+   * 있다. REDIS_HOST가 아예 설정되지 않은 단일 인스턴스 환경에서는 로컬 캐시가
+   * 유일한 저장소이므로 그대로 로컬에 쓴다.
+   */
+  async setStrict<T>(
+    key: string,
+    value: T,
+    ttlSeconds: number = this.defaultTtlSeconds,
+  ): Promise<void> {
+    const serialized = JSON.stringify(value);
+
+    if (!this.redis) {
+      this.setLocal(key, serialized, ttlSeconds);
+      return;
+    }
+    await this.redis.set(key, serialized, 'EX', ttlSeconds);
+  }
+
   async del(key: string): Promise<void> {
     if (this.redis && this.redisReady) {
       try {

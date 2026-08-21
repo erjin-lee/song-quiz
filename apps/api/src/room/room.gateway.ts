@@ -8,6 +8,7 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { delay } from '../common/delay';
 import { RoomItemDto } from './dto/room-item.dto';
 import { RoomTimerService } from './room-timer.service';
 import { NicknameChangedEvent, RoomService } from './room.service';
@@ -46,6 +47,14 @@ interface SocketMembership {
  * 제거를 취소해 참가자 레코드(점수 포함)를 그대로 보존한다.
  */
 const DISCONNECT_GRACE_SECONDS = 10;
+/**
+ * disconnect-grace 예약(ZADD) 실패 시 즉시 퇴장 처리로 폴백하는데, 그 원인이 Redis
+ * 단절이라면 즉시 퇴장(withRoomLock의 분산 락 획득 포함)도 같은 이유로 실패할 수
+ * 있다. 순간적인 블립이라면 ioredis 자체 재연결(수백ms 내)로 곧 회복되므로, 짧은
+ * 간격으로 몇 차례 더 시도해본다.
+ */
+const REMOVE_FALLBACK_ATTEMPTS = 3;
+const REMOVE_FALLBACK_RETRY_DELAY_MS = 500;
 
 /**
  * 방 채팅 + 게임 진행 전용 소켓 게이트웨이.
@@ -357,7 +366,39 @@ export class RoomGateway implements OnGatewayDisconnect {
       this.logger.error(
         `재접속 유예 타이머 예약 실패(${membership.roomId}, ${membership.userId}), 유예 없이 즉시 퇴장 처리합니다: ${(err as Error).message}`,
       );
-      await this.removeParticipant(membership.roomId, membership.userId);
+      await this.removeParticipantWithRetry(
+        membership.roomId,
+        membership.userId,
+      );
+    }
+  }
+
+  /**
+   * disconnect-grace 예약 실패의 fallback으로 쓰는 즉시 퇴장. 예약이 실패한 원인이
+   * Redis 단절이라면 removeParticipant가 의존하는 분산 락·room 상태 저장도 같은
+   * 이유로 실패할 수 있으므로, 짧은 간격으로 몇 차례 재시도해 순간적인 장애는
+   * 넘긴다. 그래도 전부 실패하면 참가자가 방에 남을 수 있음을 크게 로그로 남긴다
+   * (완전히 복구 불가능한 상태는 아니다 — 재접속하면 room:enter 경로로 정상
+   * 참가자로 복귀한다).
+   */
+  private async removeParticipantWithRetry(
+    roomId: string,
+    userId: string,
+  ): Promise<void> {
+    for (let attempt = 1; attempt <= REMOVE_FALLBACK_ATTEMPTS; attempt++) {
+      try {
+        await this.removeParticipant(roomId, userId);
+        return;
+      } catch (err) {
+        if (attempt === REMOVE_FALLBACK_ATTEMPTS) {
+          this.logger.error(
+            `즉시 퇴장 처리도 ${REMOVE_FALLBACK_ATTEMPTS}회 모두 실패(${roomId}, ${userId}): ${(err as Error).message}. ` +
+              '참가자가 방에 남아있을 수 있습니다(재접속하면 정상 복귀됩니다) — Redis 상태를 확인하세요.',
+          );
+          return;
+        }
+        await delay(REMOVE_FALLBACK_RETRY_DELAY_MS);
+      }
     }
   }
 

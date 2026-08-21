@@ -357,6 +357,7 @@ export class RoomService extends EventEmitter {
         );
       }
 
+      let roundEnded = false;
       if (room.gameStatus === 'LOADING') {
         await this.recomputeReadyStatus(room);
       } else if (room.gameStatus === 'PLAYING' && room.currentRound) {
@@ -365,10 +366,14 @@ export class RoomService extends EventEmitter {
         );
         if (allAnswered || this.hasSkipMajority(room)) {
           await this.finalizeRoundEnd(room);
+          roundEnded = true;
         }
       }
 
       await this.saveRoom(room);
+      if (roundEnded) {
+        this.cleanupStaleRoundTimers(room);
+      }
       this.emit('room-updated', this.toPublicRoom(room));
 
       return { roomDeleted: false, room: this.toPublicRoom(room) };
@@ -680,8 +685,10 @@ export class RoomService extends EventEmitter {
       const allAnswered = room.participants.every((p) =>
         round.correctUserIds.includes(p.userId),
       );
+      let roundEnded = false;
       if (allAnswered) {
         await this.finalizeRoundEnd(room);
+        roundEnded = true;
       } else if (room.speedModeEnabled && round.correctUserIds.length === 1) {
         round.autoRevealAt = new Date(
           Date.now() + SPEED_MODE_REVEAL_DELAY_SECONDS * 1000,
@@ -694,6 +701,9 @@ export class RoomService extends EventEmitter {
       }
 
       await this.saveRoom(room);
+      if (roundEnded) {
+        this.cleanupStaleRoundTimers(room);
+      }
       this.emit('room-updated', this.toPublicRoom(room));
 
       return {
@@ -722,11 +732,15 @@ export class RoomService extends EventEmitter {
         round.skipUserIds.push(userId);
       }
 
-      if (this.hasSkipMajority(room)) {
+      const roundEnded = this.hasSkipMajority(room);
+      if (roundEnded) {
         await this.finalizeRoundEnd(room);
       }
 
       await this.saveRoom(room);
+      if (roundEnded) {
+        this.cleanupStaleRoundTimers(room);
+      }
       this.emit('room-updated', this.toPublicRoom(room));
       return room;
     });
@@ -872,19 +886,21 @@ export class RoomService extends EventEmitter {
   }
 
   /**
-   * 라운드를 종료(정답 공개)한다. 타임아웃/강제스킵/스킵과반/전원정답 등 어떤 경로로
-   * 호출되든 이 함수 하나로 모이므로, 스피드 모드의 "공개 후 자동 다음 라운드" 예약도
-   * 여기서 일괄 처리한다.
-   * round-timeout 취소는 맨 마지막에 한다. 이 함수는 round-timeout 핸들러
-   * (handleRoundTimeout) 자신이 호출하는 경로도 있는데, 맨 앞에서 먼저 취소해버리면
-   * 그 뒤(예: speed-next 예약)에서 실패했을 때 자기 자신의 claim만 지운 채 아무
-   * 타이머도 남지 않는다. 발화 중인 타이머 자신의 claim은 이 명시적 취소가 없어도
-   * 핸들러가 정상 종료되면 RoomTimerService(fireClaimed)의 CAS 삭제가 정리하므로,
-   * 나머지 처리가 전부 성공한 뒤에만 정리해도 안전하다.
+   * 라운드를 종료(정답 공개) 상태로 만들고(room을 직접 변경), 스피드 모드면
+   * "공개 후 자동 다음 라운드" 예약(speed-next)까지 만든다. 타임아웃/강제스킵/
+   * 스킵과반/전원정답 등 어떤 경로로 호출되든 이 함수 하나로 모인다.
+   *
+   * round-timeout·speed-reveal 취소는 여기서 하지 않는다 — 호출자가 이 함수 뒤에
+   * saveRoom까지 성공한 걸 확인한 다음 cleanupStaleRoundTimers를 불러야 한다. 이
+   * 함수는 round-timeout/speed-reveal 핸들러 자신이 호출하는 경로도 있는데, saveRoom
+   * 확인 전에 먼저 취소해버리면 saveRoom이 실패했을 때(Redis 단절 등) 그 핸들러
+   * 자신의 claim과 새로 만든 speed-next까지 모두 사라져 방이 영구히 멈출 수 있다.
+   * saveRoom이 실패하면 이 함수가 만든 speed-next와 기존 round-timeout/speed-reveal이
+   * 모두 살아있는 채로 남고, 그중 먼저 발화하는 것이 이 함수를 처음부터 다시
+   * 시도한다 — 이미 반영된 상태라면 각 핸들러의 gameStatus 가드가 no-op 처리한다.
    */
   private async finalizeRoundEnd(room: RoomItemDto): Promise<void> {
     if (!room.currentRound) {
-      this.clearRoundTimer(room.roomId);
       return;
     }
     const reveal = await this.getCurrentReveal(room.roomId);
@@ -905,19 +921,33 @@ export class RoomService extends EventEmitter {
         SPEED_MODE_NEXT_ROUND_DELAY_SECONDS,
       );
     }
-
-    this.clearRoundTimer(room.roomId);
   }
 
   /**
-   * 스피드 모드 타이머를 예약한다. 'speed-reveal'/'speed-next'는 RoomTimerService에서
-   * 서로 다른 예약(member)이라 자동으로 대체되지 않으므로, 기존에 한 슬롯만 쓰던
-   * "두 단계가 동시에 존재하지 않는다"는 불변식을 유지하려면 다른 kind를 취소해야
-   * 한다 — 단, 반드시 새 예약이 성공한 "뒤"에 취소한다. 순서를 반대로 하면(정리
-   * 먼저) 이 함수가 자기 자신을 부른 타이머 핸들러의 현재 claim을 새 예약보다
-   * 먼저 지우게 되고, 그 상태에서 새 예약이 실패하면 아무 타이머도 남지 않는다.
-   * 예약(ZADD) 자체가 실패하면 호출자에게 그대로 던진다 — 상태 저장만 성공하고
-   * 타이머는 유실되는 상황을 막기 위함이다(RoomTimerService.schedule 참고).
+   * finalizeRoundEnd로 라운드를 끝내고 그 room 상태 저장(saveRoom)까지 성공한
+   * 직후에만 호출한다. round-timeout과(스피드 모드면) speed-reveal은 이제 쓸모없는
+   * 안전 타이머이므로 정리하지만, 어디까지나 best-effort 정리라 실패해도 예외를
+   * 던지지 않는다 — 핵심 상태는 이미 저장됐으니, 정리에 실패해도 스테일 타이머가
+   * 한 번 더 헛돌고 각자의 gameStatus 가드로 no-op 처리될 뿐이다.
+   */
+  private cleanupStaleRoundTimers(room: RoomItemDto): void {
+    this.clearRoundTimer(room.roomId);
+    if (room.speedModeEnabled) {
+      this.roomTimerService.cancel('speed-reveal', room.roomId).catch((err) => {
+        this.logger.warn(
+          `스피드모드 타이머 취소 실패(speed-reveal, ${room.roomId}): ${(err as Error).message}`,
+        );
+      });
+    }
+  }
+
+  /**
+   * 스피드 모드 타이머를 예약한다. 예약(ZADD) 자체가 실패하면 호출자에게 그대로
+   * 던진다 — 상태 저장만 성공하고 타이머는 유실되는 상황을 막기 위함이다
+   * (RoomTimerService.schedule 참고). 'speed-reveal'과 'speed-next'가 같은 roomId에
+   * 동시에 남아있을 위험은 예약 시점에 다른 kind를 미리 지우는 대신, 각 핸들러의
+   * gameStatus 가드(PLAYING/ROUND_ENDED가 아니면 no-op)와 CAS 기반 자기 정리로
+   * 감당한다 — finalizeRoundEnd 문서 참고.
    */
   private async scheduleSpeedModeTimer(
     roomId: string,
@@ -931,12 +961,6 @@ export class RoomService extends EventEmitter {
         '타이머 예약에 실패했습니다. 잠시 후 다시 시도해주세요.',
       );
     }
-    const otherKind = kind === 'speed-reveal' ? 'speed-next' : 'speed-reveal';
-    this.roomTimerService.cancel(otherKind, roomId).catch((err) => {
-      this.logger.warn(
-        `스피드모드 타이머 취소 실패(${otherKind}, ${roomId}): ${(err as Error).message}`,
-      );
-    });
   }
 
   private clearSpeedModeTimer(roomId: string): void {
@@ -967,6 +991,7 @@ export class RoomService extends EventEmitter {
         }
         await this.finalizeRoundEnd(room);
         await this.saveRoom(room);
+        this.cleanupStaleRoundTimers(room);
         this.emit('room-updated', this.toPublicRoom(room));
       });
     } catch (err) {
@@ -1065,6 +1090,7 @@ export class RoomService extends EventEmitter {
       }
       await this.finalizeRoundEnd(room);
       await this.saveRoom(room);
+      this.cleanupStaleRoundTimers(room);
       this.emit('room-updated', this.toPublicRoom(room));
     });
   }
@@ -1180,8 +1206,16 @@ export class RoomService extends EventEmitter {
     return publicRoom;
   }
 
+  /**
+   * room 상태는 여러 인스턴스가 공유하는 핵심 데이터라 cacheService.set()의 "Redis
+   * 실패 시 로컬로 조용히 폴백" 동작을 쓰면 안 된다 — 폴백하면 이 인스턴스에서는
+   * 성공한 것처럼 보이지만 실제 공유 Redis에는 반영되지 않아, 이미 Redis에 반영된
+   * 타이머 예약(RoomTimerService) 등과 어긋나는 조용한 정합성 문제로 이어진다.
+   * setStrict는 실패를 그대로 던지므로 호출자(withRoomLock 내부)가 상태 저장
+   * 실패를 알아채고 이후 정리(cleanupStaleRoundTimers 등)를 건너뛸 수 있다.
+   */
   private async saveRoom(room: RoomItemDto): Promise<void> {
-    await this.cacheService.set(
+    await this.cacheService.setStrict(
       this.roomKey(room.roomId),
       room,
       ROOM_TTL_SECONDS,
