@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationShutdown } from '@nestjs/common';
 import { Redis } from 'ioredis';
 
 interface LocalCacheEntry {
@@ -7,7 +7,7 @@ interface LocalCacheEntry {
 }
 
 @Injectable()
-export class CacheService implements OnModuleDestroy {
+export class CacheService implements OnApplicationShutdown {
   private readonly logger = new Logger(CacheService.name);
   private readonly defaultTtlSeconds = Number(
     process.env.CACHE_DEFAULT_TTL_SECONDS ?? 300,
@@ -27,7 +27,15 @@ export class CacheService implements OnModuleDestroy {
     this.localCacheSweepTimer.unref();
   }
 
-  async onModuleDestroy(): Promise<void> {
+  /**
+   * OnModuleDestroy가 아니라 OnApplicationShutdown을 쓴다 — Nest의 종료 순서상
+   * OnModuleDestroy는 HTTP/소켓 서버가 요청을 다 처리하고 닫히기(dispose) *전에*
+   * 실행돼, 이 시점에 redis.quit()하면 그레이스풀 셧다운 중 아직 처리 중이던
+   * 요청이 Redis에 접근하다 끊긴 연결 때문에 실패할 수 있다. OnApplicationShutdown은
+   * dispose() 이후에 실행되므로 HTTP 서버가 이미 요청을 다 흘려보낸 뒤에 Redis를
+   * 끊는다.
+   */
+  async onApplicationShutdown(): Promise<void> {
     clearInterval(this.localCacheSweepTimer);
     if (this.redis) {
       await this.redis.quit().catch(() => this.redis?.disconnect());

@@ -19,7 +19,7 @@ describe('RoomTimerService', () => {
 
   afterEach(async () => {
     roomTimerService.onModuleDestroy();
-    await cacheService.onModuleDestroy();
+    await cacheService.onApplicationShutdown();
     jest.useRealTimers();
   });
 
