@@ -18,11 +18,29 @@
 - `src/types/`: `apps/api`의 DTO를 미러링한 타입.
 - 아직 테스트 러너는 설정되어 있지 않다.
 
+# Dependencies
+
+- `apps/api`에 REST(Admin JWT)로 의존한다. 전체 그래프는 [`ARCHITECTURE.md`](../../ARCHITECTURE.md) 참고.
+- 설계 배경: DTO 미러링([`ADR-0003`](../../docs/adr/0003-manual-dto-type-mirroring.md)).
+
 # Commands
 
-- Admin 빌드: `yarn admin:build` (루트에서 turbo 필터 실행)
-- Admin 개발 서버: `yarn admin`
-- 워크스페이스 내부에서 직접 실행: `yarn workspace admin dev`, `yarn workspace admin build`, `yarn workspace admin lint`
+- Admin 빌드(루트에서 turbo 필터 실행)
+```bash
+yarn admin:build
+```
+
+- Admin 개발 서버
+```bash
+yarn admin
+```
+
+- 워크스페이스 내부에서 직접 실행
+```bash
+yarn workspace admin dev
+yarn workspace admin build
+yarn workspace admin lint
+```
 
 # Verification
 

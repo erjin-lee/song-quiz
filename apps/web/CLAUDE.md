@@ -23,11 +23,29 @@
 - `/rooms/new` 라우트는 `/rooms/:roomId`보다 먼저 선언해야 한다.
 - 아직 테스트 러너는 설정되어 있지 않다. 도입 시 이 문서에 명시한다.
 
+# Dependencies
+
+- `apps/api`에 REST(`Authorization: Bearer`)와 Socket.IO(`/rooms`)로 의존한다. 전체 그래프는 [`ARCHITECTURE.md`](../../ARCHITECTURE.md) 참고.
+- 설계 배경: room 재접속([`ADR-0001`](../../docs/adr/0001-room-realtime-state-and-reconnect.md)), 게스트 모드/JWT 저장([`ADR-0002`](../../docs/adr/0002-guest-mode-and-jwt-storage.md)), DTO 미러링([`ADR-0003`](../../docs/adr/0003-manual-dto-type-mirroring.md)).
+
 # Commands
 
-- Web 빌드: `yarn web:build` (루트에서 turbo 필터 실행)
-- Web 개발 서버: `yarn web`
-- 워크스페이스 내부에서 직접 실행: `yarn workspace web dev`, `yarn workspace web build`, `yarn workspace web lint`
+- Web 빌드(루트에서 turbo 필터 실행)
+```bash
+yarn web:build
+```
+
+- Web 개발 서버
+```bash
+yarn web
+```
+
+- 워크스페이스 내부에서 직접 실행
+```bash
+yarn workspace web dev
+yarn workspace web build
+yarn workspace web lint
+```
 
 # Verification
 

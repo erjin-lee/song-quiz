@@ -33,9 +33,20 @@ Yarn 4(Berry) + Turborepo 기반 TypeScript 모노레포다.
 
 # Commands
 
-- 의존성 설치: `yarn install`
-- 전체 테스트: `yarn test`
-- 변경 확인: `git diff --stat && git diff`
+- 의존성 설치
+```bash
+yarn install
+```
+
+- 전체 테스트
+```bash
+yarn test
+```
+
+- 변경 확인
+```bash
+git diff --stat && git diff
+```
 - 앱별 명령은 해당 앱의 `CLAUDE.md`를 따른다.
 
 # Prohibited actions
