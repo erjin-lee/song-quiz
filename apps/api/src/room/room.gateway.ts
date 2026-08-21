@@ -209,16 +209,23 @@ export class RoomGateway implements OnGatewayDisconnect {
         return;
       }
 
+      // 닉네임 변경이 다른 인스턴스에서 처리됐다면 이 인스턴스의 socketMemberships는
+      // 갱신되지 않았을 수 있으므로, submitChatMessage가 공유 room 상태에서 조회해
+      // 돌려준 닉네임을 우선 사용한다(동시에 로컬 캐시도 최신화해 다음 메시지부터는
+      // 별도 조회 없이도 맞게 유지되도록 한다).
+      const nickname = result.nickname ?? membership.nickname;
+      membership.nickname = nickname;
+
       const sentAt = new Date().toISOString();
       await this.roomService.appendChatHistory(membership.roomId, {
         type: 'message',
-        nickname: membership.nickname,
+        nickname,
         message: payload.message,
         sentAt,
       });
       this.server.to(membership.roomId).emit('chat:message', {
         userId: membership.userId,
-        nickname: membership.nickname,
+        nickname,
         message: payload.message,
         sentAt,
       });

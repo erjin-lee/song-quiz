@@ -31,6 +31,21 @@ end
 `;
 
 /**
+ * score가 claim 당시 설정한 예약 시각 그대로일 때만 지운다. 핸들러 실행 중 같은
+ * kind+key가 재예약(ZADD)되면 score가 바뀌므로, 그 경우엔 지우지 않고 새 예약을
+ * 보존한다.
+ */
+const DELETE_IF_RESERVED_SCRIPT = `
+local current = redis.call('ZSCORE', KEYS[1], ARGV[1])
+if current == ARGV[2] then
+  redis.call('ZREM', KEYS[1], ARGV[1])
+  return 1
+else
+  return 0
+end
+`;
+
+/**
  * 라운드 타임아웃/스피드모드/재접속 유예 등 "지연 실행"을 인스턴스 간에 공유한다.
  * REDIS_HOST가 설정돼 있으면 Redis ZSET 기반 폴링/claim으로, 아니면 기존
  * RoomService/RoomGateway의 setTimeout+Map 방식으로 동일하게 동작한다(로컬 개발,
@@ -208,9 +223,10 @@ export class RoomTimerService implements OnModuleDestroy {
       for (let j = 0; j < raw.length; j += 2) {
         const member = raw[j];
         const score = raw[j + 1];
-        const claimed = await this.tryClaim(redis, member, score, now);
+        const reservedAt = now + RESERVATION_MS;
+        const claimed = await this.tryClaim(redis, member, score, reservedAt);
         if (claimed) {
-          this.fireClaimed(redis, member);
+          this.fireClaimed(redis, member, reservedAt);
         }
       }
 
@@ -224,7 +240,7 @@ export class RoomTimerService implements OnModuleDestroy {
     redis: Redis,
     member: string,
     score: string,
-    now: number,
+    reservedAt: number,
   ): Promise<boolean> {
     try {
       const result = await redis.eval(
@@ -233,7 +249,7 @@ export class RoomTimerService implements OnModuleDestroy {
         TIMERS_KEY,
         member,
         score,
-        now + RESERVATION_MS,
+        reservedAt,
       );
       return result === 1;
     } catch (err) {
@@ -244,8 +260,14 @@ export class RoomTimerService implements OnModuleDestroy {
     }
   }
 
-  /** claim에 성공한 항목의 핸들러를 실행한다. 다른 항목의 claim을 막지 않도록 await하지 않는다. */
-  private fireClaimed(redis: Redis, member: string): void {
+  /**
+   * claim에 성공한 항목의 핸들러를 실행한다. 다른 항목의 claim을 막지 않도록 await하지 않는다.
+   * 핸들러가 성공했을 때만, 그리고 그 사이 재예약되지 않았을 때만(score가 claim 당시
+   * 예약 시각 그대로일 때만) 지운다. 핸들러가 실패하면 지우지 않고 그대로 둔다 —
+   * score는 이미 미래(reservedAt)로 미뤄져 있으므로, 그 시각이 지나면 poll이 다시
+   * 집어 들어 자동으로 재시도된다(크래시 복구와 동일한 경로).
+   */
+  private fireClaimed(redis: Redis, member: string, reservedAt: number): void {
     const separatorIndex = member.indexOf('|');
     const kind = member.slice(0, separatorIndex) as RoomTimerKind;
     const key = member.slice(separatorIndex + 1);
@@ -253,23 +275,33 @@ export class RoomTimerService implements OnModuleDestroy {
 
     if (!handler) {
       this.logger.warn(`등록되지 않은 타이머 kind: ${kind}`);
-      redis.zrem(TIMERS_KEY, member).catch(() => undefined);
+      this.deleteIfReserved(redis, member, reservedAt);
       return;
     }
 
     Promise.resolve()
       .then(() => handler(key))
+      .then(() => {
+        this.deleteIfReserved(redis, member, reservedAt);
+      })
       .catch((err) => {
         this.logger.error(
-          `타이머 핸들러 실행 실패(${kind}:${key}): ${(err as Error).message}`,
+          `타이머 핸들러 실행 실패(${kind}:${key}), 예약을 유지해 재시도합니다: ${(err as Error).message}`,
         );
-      })
-      .finally(() => {
-        redis.zrem(TIMERS_KEY, member).catch((err) => {
-          this.logger.warn(
-            `타이머 정리(zrem) 실패(${member}): ${(err as Error).message}`,
-          );
-        });
+      });
+  }
+
+  private deleteIfReserved(
+    redis: Redis,
+    member: string,
+    reservedAt: number,
+  ): void {
+    redis
+      .eval(DELETE_IF_RESERVED_SCRIPT, 1, TIMERS_KEY, member, reservedAt)
+      .catch((err) => {
+        this.logger.warn(
+          `타이머 정리(zrem) 실패(${member}): ${(err as Error).message}`,
+        );
       });
   }
 }

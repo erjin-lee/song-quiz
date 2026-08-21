@@ -39,6 +39,8 @@ const PASSWORD_ATTEMPT_LIMIT = 5;
 const PASSWORD_ATTEMPT_WINDOW_SECONDS = 60;
 
 const ROOM_INDEX_CACHE_KEY = 'room:index';
+/** room:index read-modify-write를 인스턴스 간에 직렬화하기 위한 락 키. */
+const ROOM_INDEX_LOCK_KEY = 'room-index';
 const ROOM_CACHE_KEY_PREFIX = 'room:';
 const PASSWORD_ATTEMPT_CACHE_KEY_PREFIX = 'room:pwd-attempts:';
 const SONG_ORDER_CACHE_KEY_PREFIX = 'room:song-order:';
@@ -76,6 +78,14 @@ const SPEED_MODE_NEXT_ROUND_DELAY_SECONDS = Number(
 
 export interface ChatSubmissionResult {
   action: 'broadcast' | 'blocked' | 'correct';
+  /**
+   * action이 'broadcast'일 때, 이 처리 시점에 공유 room 상태에서 조회한 발신자의
+   * 최신 닉네임. 닉네임 변경이 다른 인스턴스에서 처리됐다면(RoomService의
+   * nickname-changed는 프로세스 로컬 이벤트라 소켓이 붙은 인스턴스까지 전파되지
+   * 않을 수 있다) 소켓 게이트웨이가 들고 있는 로컬 캐시가 오래됐을 수 있으므로,
+   * 항상 이 값을 우선 사용해야 한다.
+   */
+  nickname?: string;
   correctInfo?: {
     userId: string;
     nickname: string;
@@ -624,16 +634,19 @@ export class RoomService extends EventEmitter {
     return this.withRoomLock(roomId, async () => {
       const room = await this.getRoomOrThrow(roomId);
       const round = room.currentRound;
+      const nickname = room.participants.find(
+        (p) => p.userId === userId,
+      )?.nickname;
 
       if (!round || round.revealed) {
-        return { action: 'broadcast' };
+        return { action: 'broadcast', nickname };
       }
 
       const answers = (await this.getCurrentAnswers(roomId)).filter(
         (answer) => normalizeAnswer(answer).length > 0,
       );
       if (answers.length === 0) {
-        return { action: 'broadcast' };
+        return { action: 'broadcast', nickname };
       }
 
       const normalizedMessage = normalizeAnswer(rawMessage);
@@ -647,7 +660,7 @@ export class RoomService extends EventEmitter {
         );
 
       if (!containsAnswer) {
-        return { action: 'broadcast' };
+        return { action: 'broadcast', nickname };
       }
 
       const alreadyCorrect = round.correctUserIds.includes(userId);
@@ -1293,19 +1306,32 @@ export class RoomService extends EventEmitter {
     return (await this.cacheService.get<string[]>(ROOM_INDEX_CACHE_KEY)) ?? [];
   }
 
+  /**
+   * room:index는 여러 인스턴스가 동시에 건드릴 수 있는 read-modify-write라, roomId별
+   * 락(withRoomLock)과 별개로 인덱스 전용 락으로 직렬화해야 두 인스턴스가 동시에
+   * 방을 만들거나 지워도 마지막 쓰기가 상대방의 변경을 덮어쓰지 않는다.
+   */
   private async addToIndex(roomId: string): Promise<void> {
-    const index = await this.getRoomIndex();
-    index.push(roomId);
-    await this.cacheService.set(ROOM_INDEX_CACHE_KEY, index, ROOM_TTL_SECONDS);
+    await this.roomLockService.withLock(ROOM_INDEX_LOCK_KEY, async () => {
+      const index = await this.getRoomIndex();
+      index.push(roomId);
+      await this.cacheService.set(
+        ROOM_INDEX_CACHE_KEY,
+        index,
+        ROOM_TTL_SECONDS,
+      );
+    });
   }
 
   private async removeFromIndex(roomId: string): Promise<void> {
-    const index = await this.getRoomIndex();
-    await this.cacheService.set(
-      ROOM_INDEX_CACHE_KEY,
-      index.filter((id) => id !== roomId),
-      ROOM_TTL_SECONDS,
-    );
+    await this.roomLockService.withLock(ROOM_INDEX_LOCK_KEY, async () => {
+      const index = await this.getRoomIndex();
+      await this.cacheService.set(
+        ROOM_INDEX_CACHE_KEY,
+        index.filter((id) => id !== roomId),
+        ROOM_TTL_SECONDS,
+      );
+    });
   }
 
   /**
