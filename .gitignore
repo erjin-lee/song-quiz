@@ -23,5 +23,5 @@ yarn-error.log*
 DB_INFO.txt
 README_BK.md
 PORTFOLIO_BK.md
-scripts/
+scripts/sh/
 apps/api/logs/

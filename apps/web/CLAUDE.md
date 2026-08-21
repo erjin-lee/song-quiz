@@ -15,15 +15,12 @@
 
 # Project layout
 
-- `index.html`, `src/main.tsx`: 진입점 (`BrowserRouter` + `SessionProvider`로 감싼다).
-- `src/App.tsx`: 라우트 정의(`/`, `/signup`, `/rooms`, `/rooms/new`, `/rooms/:roomId`). `/rooms/new`는 `/rooms/:roomId`보다 먼저 선언해야 한다.
-- `src/pages/`: 화면 단위 컴포넌트(`LoginPage` - 로그인/회원가입 진입/게스트 모드, `SignupPage`, `RoomListPage`, `CreateRoomPage` - 방 만들기 전용 페이지, `RoomGamePage`).
-- `src/components/`: 재사용 UI 컴포넌트(`Logo`, `RoomCard`, `ParticipantList`, `ChatPanel`, `PlayerCard`).
-- `src/context/`: 전역 상태(`SessionContext` - 게스트 닉네임 + 계정 인증 상태).
-- `src/api/`: 백엔드 연동(`client.ts` fetch 래퍼 및 토큰 저장, `auth.ts`, `quiz.ts`, `room.ts`, `socket.ts`).
+- `src/pages/`: 화면 단위 컴포넌트.
+- `src/components/`: 재사용 UI 컴포넌트.
+- `src/context/`: 전역 상태.
+- `src/api/`: REST 및 Socket.IO 백엔드 연동.
 - `src/types/`: `apps/api`의 DTO를 미러링한 타입.
-- `vite.config.ts`: dev 서버/빌드 설정, Tailwind Vite 플러그인 등록.
-- `tsconfig.json`은 `tsconfig.app.json`(src)과 `tsconfig.node.json`(vite.config.ts)으로 project reference 분리되어 있다.
+- `/rooms/new` 라우트는 `/rooms/:roomId`보다 먼저 선언해야 한다.
 - 아직 테스트 러너는 설정되어 있지 않다. 도입 시 이 문서에 명시한다.
 
 # Commands

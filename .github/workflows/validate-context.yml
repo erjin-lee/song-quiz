@@ -1,0 +1,27 @@
+name: Validate Context Paths
+
+on:
+  pull_request:
+    paths:
+      - 'CLAUDE.md'
+      - 'apps/**/CLAUDE.md'
+      - '.claude/**'
+      - 'scripts/validate-context-paths.mjs'
+  push:
+    branches: [main]
+    paths:
+      - 'CLAUDE.md'
+      - 'apps/**/CLAUDE.md'
+      - '.claude/**'
+      - 'scripts/validate-context-paths.mjs'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Claude context paths
+        run: node scripts/validate-context-paths.mjs
