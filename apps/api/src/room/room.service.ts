@@ -110,6 +110,18 @@ export interface NicknameChangedEvent {
   newNickname: string;
 }
 
+/**
+ * REST로 새 참가자가 실제로 처음 입장했을 때만 발생하는 이벤트. RoomGateway가 구독해
+ * "입장했습니다" 시스템 메시지를 보낸다. 소켓 room:enter(재연결 포함)가 아니라 REST
+ * joinRoom 시점에만 발생시켜, 서버 재시작 등으로 소켓이 재연결될 때마다 입장 메시지가
+ * 중복 기록되는 것을 막는다.
+ */
+export interface ParticipantJoinedEvent {
+  roomId: string;
+  userId: string;
+  nickname: string;
+}
+
 interface RoundRevealInfo {
   quizSongId: string;
   songNm: string;
@@ -329,6 +341,11 @@ export class RoomService extends EventEmitter {
 
       await this.saveRoom(room);
       this.emit('room-updated', this.toPublicRoom(room));
+      this.emit('participant-joined', {
+        roomId,
+        userId,
+        nickname: dto.nickname,
+      });
 
       const accessToken = this.computeMembershipToken(roomId, userId);
       return { room: this.toPublicRoom(room), userId, accessToken };
