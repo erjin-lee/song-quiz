@@ -5,6 +5,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Inquiry } from '../inquiry/entities/inquiry.entity';
 import { InquiryModule } from '../inquiry/inquiry.module';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
+import { RedisThrottlerStorageService } from '../throttler/redis-throttler-storage.service';
+import { ThrottlerStorageModule } from '../throttler/throttler-storage.module';
 import { User } from '../user/entities/user.entity';
 import { AdminAuthController } from './admin-auth.controller';
 import { AdminSeedService } from './admin-seed.service';
@@ -17,7 +19,14 @@ import { AdminAuthGuard } from './guards/admin-auth.guard';
     TypeOrmModule.forFeature([Inquiry, QuizSong, User]),
     InquiryModule,
     JwtModule.register({}),
-    ThrottlerModule.forRoot([{ name: 'login', ttl: 60_000, limit: 5 }]),
+    ThrottlerModule.forRootAsync({
+      imports: [ThrottlerStorageModule],
+      inject: [RedisThrottlerStorageService],
+      useFactory: (storage: RedisThrottlerStorageService) => ({
+        throttlers: [{ name: 'login', ttl: 60_000, limit: 5 }],
+        storage,
+      }),
+    }),
   ],
   controllers: [AdminController, AdminAuthController],
   providers: [AdminService, AdminAuthGuard, AdminSeedService],
