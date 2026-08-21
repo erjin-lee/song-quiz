@@ -33,6 +33,7 @@ export class InquiryActionService {
   ): Promise<void> {
     const quizSong = await this.findQuizSongOrThrow(quizSongId);
     quizSong.startSec = args.startSec;
+    quizSong.endSec = args.startSec + 30;
     quizSong.youtubeUrl = withStartSecParam(quizSong.youtubeUrl, args.startSec);
     await this.quizSongRepository.save(quizSong);
   }
