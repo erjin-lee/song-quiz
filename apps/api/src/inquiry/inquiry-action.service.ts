@@ -13,7 +13,7 @@ import {
 import { parseYoutubeUrl, withStartSecParam } from './youtube-url.util';
 
 const MAX_ANSWER_TYPE_LENGTH = 12;
-/** 링크 교체 시 t 파라미터가 없어 재생시간을 스크래핑으로 추정할 때 쓰는 클립 길이(초). quiz-generator.service.ts의 QUIZ_SONG_CLIP_SEC과 동일하게 맞춘다. */
+/** 시작 시간 변경/링크 교체 시 종료 시간을 맞추는 클립 길이(초). quiz-generator.service.ts의 QUIZ_SONG_CLIP_SEC과 동일하게 맞춘다. */
 const QUIZ_SONG_CLIP_SEC = 30;
 
 @Injectable()
@@ -33,6 +33,7 @@ export class InquiryActionService {
   ): Promise<void> {
     const quizSong = await this.findQuizSongOrThrow(quizSongId);
     quizSong.startSec = args.startSec;
+    quizSong.endSec = args.startSec + QUIZ_SONG_CLIP_SEC;
     quizSong.youtubeUrl = withStartSecParam(quizSong.youtubeUrl, args.startSec);
     await this.quizSongRepository.save(quizSong);
   }
