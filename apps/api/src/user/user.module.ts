@@ -3,6 +3,8 @@ import { JwtModule } from '@nestjs/jwt';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MailModule } from '../mail/mail.module';
+import { RedisThrottlerStorageService } from '../throttler/redis-throttler-storage.service';
+import { ThrottlerStorageModule } from '../throttler/throttler-storage.module';
 import { EmailAuth } from './entities/email-auth.entity';
 import { User } from './entities/user.entity';
 import { EmailAuthService } from './email-auth.service';
@@ -15,12 +17,19 @@ import { UserService } from './user.service';
     TypeOrmModule.forFeature([User, EmailAuth]),
     JwtModule.register({}),
     MailModule,
-    ThrottlerModule.forRoot([
-      { name: 'user-login', ttl: 60_000, limit: 5 },
-      { name: 'user-signup', ttl: 60_000, limit: 5 },
-      { name: 'email-send-code', ttl: 60_000, limit: 5 },
-      { name: 'email-verify-code', ttl: 60_000, limit: 10 },
-    ]),
+    ThrottlerModule.forRootAsync({
+      imports: [ThrottlerStorageModule],
+      inject: [RedisThrottlerStorageService],
+      useFactory: (storage: RedisThrottlerStorageService) => ({
+        throttlers: [
+          { name: 'user-login', ttl: 60_000, limit: 5 },
+          { name: 'user-signup', ttl: 60_000, limit: 5 },
+          { name: 'email-send-code', ttl: 60_000, limit: 5 },
+          { name: 'email-verify-code', ttl: 60_000, limit: 10 },
+        ],
+        storage,
+      }),
+    }),
   ],
   controllers: [UserAuthController],
   providers: [UserService, UserAuthGuard, EmailAuthService],
