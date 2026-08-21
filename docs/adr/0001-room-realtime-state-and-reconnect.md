@@ -49,6 +49,26 @@
 - `fetchSockets()`는 응답이 느린 인스턴스의 소켓을 조용히 누락할 수 있다 — disconnect 시점과 유예 만료 직전 두 번 확인해 완화하지만 완전히 제거되지는 않는 잔여 리스크다.
 - REDIS_HOST가 설정되지 않은 환경(로컬 개발, 단위 테스트)은 기존과 100% 동일하게 단일 인스턴스로 동작한다 — 이 마이그레이션은 로컬 개발 경험을 바꾸지 않는다.
 
+## 재접속 후속 수정 (2026-08-21)
+
+멀티 인스턴스 마이그레이션 이후에도 남아있던 재접속 관련 결함 두 건을 수정했다.
+
+### 문제
+
+1. **소켓 재연결 시 room:enter 미재전송**: `apps/web`의 `createRoomSocket()`은 `socket.io-client` 기본 재연결 옵션(무제한 재시도)을 그대로 쓰지만, `RoomGamePage`가 `room:enter`를 마운트 시 한 번만 emit했다. 서버 재시작 등으로 소켓이 끊겼다가 transport 레벨로만 재연결되면 애플리케이션 레벨 재입장이 되지 않아, `disconnect-grace`(10초) 만료로 참가자가 방에서 제거되고 room 멤버십(Socket.IO room, `socketMemberships`)도 복구되지 않았다.
+2. **입장 메시지 판별을 disconnect-grace 타이머 취소 성공 여부로 결정**: `room:enter`는 `cancelPendingLeave()`(disconnect-grace 타이머 취소)가 성공했는지로 "재접속 vs 신규 입장"을 판별해 `"입장했습니다"` 메시지를 기록했다. 그런데 서버 프로세스가 disconnect 유예 타이머를 예약하기 전에 죽으면(비정상 종료) 애초에 취소할 타이머가 없어 이 판별이 항상 "신규 입장"으로 오판된다. 배포/장애로 다수 클라이언트가 동시에 재연결하면 입장 메시지가 채팅 히스토리에 중복 기록됐다.
+
+### 결정
+
+1. `RoomGamePage`가 `socket.on('connect', ...)` 안에서 `room:enter`를 재emit하도록 변경했다(최초 접속·재연결 공통 경로). 연결 끊김/복구 시 채팅창에 시스템 메시지도 안내한다.
+2. `room:enter`(`RoomGateway.handleEnter`)는 서버가 이미 조회해둔 최신 `RoomItemDto`를 `room:state`로 해당 소켓에 직접 보낸다 — 재연결한 클라이언트가 끊긴 동안 놓친 `room:state` 브로드캐스트를 기다리지 않고 최신 화면을 받게 하기 위함이다.
+3. `"입장했습니다"` 메시지는 `room:enter`가 아니라 `RoomService.joinRoom`이 실제로 새 참가자를 만들 때만 발생시키는 `participant-joined` 이벤트로 옮겼다(`nickname-changed`와 동일한 패턴으로 `RoomGateway`가 구독). `room:enter`는 이제 `cancelPendingLeave()`를 여전히 호출해 예약된 퇴장만 취소할 뿐, 그 결과로 메시지 여부를 판단하지 않는다.
+
+### 근거
+
+- 소켓 재연결과 REST 입장은 서로 다른 신호다. "이 유저가 실제로 새로 들어왔는가"는 REST `joinRoom`이 참가자 레코드를 새로 만들었는가로 결정하는 것이 가장 정확하고, 소켓 disconnect/reconnect 타이밍(타이머 예약 성공 여부 포함)에 영향받지 않는다.
+- REST 입장 시점에는 아직 새 참가자의 소켓이 연결되지 않았으므로, 기존처럼 "본인 제외 브로드캐스트"(`excludeClient`)를 할 수 없다 — 새 참가자는 곧이어 `room:enter`가 내려주는 `chat:history`로 자신의 입장 메시지를 뒤늦게 확인한다. 실시간 노출 타이밍이 수백 ms 늦어질 뿐 기존 UX와 체감 차이는 없다.
+
 ## 고려했지만 선택하지 않은 대안
 
 - 방/라운드 상태를 전부 Redis에 두는 방법(최초 검토 시점): 매 상태 변경마다 직렬화/역직렬화 비용과 네트워크 latency가 붙는다는 우려가 있었으나, 실제 멀티 인스턴스 마이그레이션 시점에 측정해보니 현재 트래픽 규모에서는 무시할 수준이라 채택했다.
