@@ -1,5 +1,9 @@
 # Admin conventions (apps/admin)
 
+# Purpose
+
+운영자가 문의·방 등 서비스 데이터를 관리하는 관리자 전용 화면을 소유한다.
+
 - Next.js 14(App Router) + TypeScript 기반 SPA다. `apps/web`과 별개의 워크스페이스이며, Node/Next 버전을 독립적으로 관리한다.
 - 개발 서버 포트는 Next.js 기본값(`3000`)을 사용한다. `apps/web`(5173), `apps/api`(8001)와 겹치지 않는다.
 - UI는 shadcn/ui 패턴(Tailwind CSS v3 + CVA + Radix UI)을 따른다. 컴포넌트는 `src/components/ui/`에 두고, 필요한 프리미티브가 없으면 기존 컴포넌트와 같은 스타일로 직접 추가한다.
@@ -17,6 +21,11 @@
 - `src/lib/`: API 클라이언트, 인증 유틸.
 - `src/types/`: `apps/api`의 DTO를 미러링한 타입.
 - 아직 테스트 러너는 설정되어 있지 않다.
+
+# Patterns
+
+- 인증이 필요한 화면 추가: `src/app/(protected)/` 아래에 라우트를 만들고 `RequireAuth`로 감싼다.
+- `apps/api` 응답 타입이 바뀌면 `src/types/`를 함께 갱신한다(수동 미러링 배경: [`ADR-0003`](../../docs/adr/0003-manual-dto-type-mirroring.md)).
 
 # Dependencies
 

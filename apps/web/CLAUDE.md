@@ -1,5 +1,9 @@
 # Frontend conventions (apps/web)
 
+# Purpose
+
+게스트/로그인 사용자가 방을 만들고 실시간으로 퀴즈를 플레이하는 화면(SPA)을 소유한다.
+
 - Vite + React + TypeScript 기반 SPA다 (`@vitejs/plugin-react`, react-jsx, ESLint flat config).
 - 개발 서버 포트는 `5173`이다 (`vite.config.ts`의 `server.port`, `strictPort: true`). 백엔드(`apps/api`, 8001)와 겹치지 않는다.
 - 워크스페이스 이름은 `web`이며, 빌드는 `tsc -b && vite build`로 타입 체크와 번들링을 함께 수행한다.
@@ -22,6 +26,11 @@
 - `src/types/`: `apps/api`의 DTO를 미러링한 타입.
 - `/rooms/new` 라우트는 `/rooms/:roomId`보다 먼저 선언해야 한다.
 - 아직 테스트 러너는 설정되어 있지 않다. 도입 시 이 문서에 명시한다.
+
+# Patterns
+
+- 새 화면 추가: `src/pages/`에 페이지 컴포넌트를 만들고, 재사용 UI는 `src/components/`로 분리한다.
+- `apps/api` 응답 타입이 바뀌면 `src/types/`를 함께 갱신한다(수동 미러링 배경: [`ADR-0003`](../../docs/adr/0003-manual-dto-type-mirroring.md)).
 
 # Dependencies
 
