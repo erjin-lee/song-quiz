@@ -75,7 +75,7 @@ describe('QuizService', () => {
   });
 
   afterEach(async () => {
-    await cacheService.onModuleDestroy();
+    await cacheService.onApplicationShutdown();
   });
 
   it('두 번 연속 같은 조건으로 조회하면 DB는 한 번만 조회하고 캐시된 결과를 반환한다', async () => {

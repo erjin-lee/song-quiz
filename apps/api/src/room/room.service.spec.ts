@@ -133,7 +133,7 @@ describe('RoomService', () => {
   });
 
   afterEach(async () => {
-    await cacheService.onModuleDestroy();
+    await cacheService.onApplicationShutdown();
     roomTimerService.onModuleDestroy();
   });
 

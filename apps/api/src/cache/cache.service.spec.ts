@@ -15,7 +15,7 @@ describe('CacheService', () => {
   });
 
   afterEach(async () => {
-    await cacheService.onModuleDestroy();
+    await cacheService.onApplicationShutdown();
   });
 
   it('REDIS_HOST가 없으면 로컬 메모리 캐시로 값을 저장하고 조회한다', async () => {

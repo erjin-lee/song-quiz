@@ -12,6 +12,12 @@ setDefaultResultOrder('ipv4first');
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // PM2 cluster reload/재시작 시 보내는 SIGINT/SIGTERM에 반응해 그레이스풀 셧다운한다.
+  // 이 훅이 없으면 Node 기본 동작대로 신호를 받는 즉시 프로세스가 종료되어(OnModuleDestroy도
+  // 호출되지 않음) 처리 중이던 요청·소켓이 그대로 끊긴다. ecosystem.config.js의
+  // kill_timeout과 짝을 이룬다 — 그 시간 안에 정상 종료(app.close())가 끝나야 하고,
+  // 못 끝내면 PM2가 SIGKILL로 강제 종료한다.
+  app.enableShutdownHooks(['SIGTERM', 'SIGINT']);
   // 리버스 프록시(nginx/ALB) 1단계 뒤에서 서비스되므로, X-Forwarded-For의
   // 마지막 값을 실제 클라이언트 IP로 신뢰한다. 그렇지 않으면 ThrottlerGuard가
   // 프록시 IP 기준으로만 rate limit을 적용해 모든 사용자가 이를 공유하게 된다.
@@ -76,6 +82,13 @@ async function bootstrap() {
   SwaggerModule.setup(API_DOCS_PATH, app, swaggerDocument);
 
   await app.listen(process.env.PORT ?? 8001);
+
+  // ecosystem.config.js의 wait_ready: true는 PM2가 listen 이벤트만으로 준비 완료를
+  // 추정하던 기본 동작을 끄고 이 신호를 명시적으로 기다리게 만든다 — 그래야 cluster
+  // reload 시 다음 워커로 넘어가기 전에 이 프로세스가 Redis 연결 등 부트스트랩을
+  // 실제로 마쳤는지 확인한다. PM2 밖(로컬 개발 등)에는 IPC 채널이 없어
+  // process.send가 없으므로 안전하게 스킵된다.
+  process.send?.('ready');
 }
 // connectToRedis()는 REDIS_HOST가 설정된 환경에서 재시도 후에도 어댑터 연결에
 // 실패하면 예외를 던진다(RedisIoAdapter 참고) — 여기서 명시적으로 process.exit해

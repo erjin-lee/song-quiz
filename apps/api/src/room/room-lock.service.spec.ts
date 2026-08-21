@@ -18,7 +18,7 @@ describe('RoomLockService', () => {
   });
 
   afterEach(async () => {
-    await cacheService.onModuleDestroy();
+    await cacheService.onApplicationShutdown();
   });
 
   it('같은 key에 대한 작업은 도착한 순서대로 직렬 실행된다(로컬 폴백)', async () => {
