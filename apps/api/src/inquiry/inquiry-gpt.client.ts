@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { asRecord, asString, getField } from '../common/unknown-object.util';
-import { OpenAiChatClient } from '../openai/openai-chat.client';
+import {
+  OpenAiChatClient,
+  OpenAiChatMessage,
+} from '../openai/openai-chat.client';
 import {
   buildClassifyUserMessage,
   buildVerifyUserMessage,
@@ -107,13 +110,21 @@ export class InquiryGptClient {
     content: string,
     args: Record<string, unknown>,
   ): Promise<InquiryConfidence> {
-    const raw = await this.openAiChatClient.requestJson([
+    const messages: OpenAiChatMessage[] = [
       { role: 'system', content: VERIFY_SYSTEM_RULES[functionName] },
       {
         role: 'user',
         content: buildVerifyUserMessage(functionName, song, content, args),
       },
-    ]);
+    ];
+    // CHANGE_LINK 검증 규칙은 기존/새 유튜브 링크를 실제로 확인하도록
+    // 요구하므로, 이 경우에만 웹 검색 도구를 켠다.
+    const raw =
+      functionName === 'CHANGE_LINK'
+        ? await this.openAiChatClient.requestJson(messages, {
+            webSearch: true,
+          })
+        : await this.openAiChatClient.requestJson(messages);
     return parseVerifyResult(raw);
   }
 }
