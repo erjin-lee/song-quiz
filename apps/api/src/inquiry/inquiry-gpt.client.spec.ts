@@ -127,6 +127,42 @@ describe('InquiryGptClient', () => {
       ]);
     });
 
+    it('CHANGE_LINK 검증 시에는 웹 검색 도구를 켜서 요청한다', async () => {
+      openAiChatClientMock.requestJson.mockResolvedValue(
+        JSON.stringify({ confidence: 'HIGH' }),
+      );
+
+      await client.verifyConfidence('CHANGE_LINK', song, '링크가 잘못됐어요', {
+        youtubeUrl: 'https://www.youtube.com/watch?v=new',
+      });
+
+      expect(openAiChatClientMock.requestJson).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({ role: 'system' }),
+          expect.objectContaining({ role: 'user' }),
+        ],
+        { webSearch: true },
+      );
+    });
+
+    it('CHANGE_START_TIME/ADD_ANSWER 검증 시에는 웹 검색 도구를 켜지 않는다', async () => {
+      openAiChatClientMock.requestJson.mockResolvedValue(
+        JSON.stringify({ confidence: 'HIGH' }),
+      );
+
+      await client.verifyConfidence(
+        'CHANGE_START_TIME',
+        song,
+        '시작이 너무 늦어요',
+        { startSec: 30 },
+      );
+
+      expect(openAiChatClientMock.requestJson).toHaveBeenCalledWith([
+        expect.objectContaining({ role: 'system' }),
+        expect.objectContaining({ role: 'user' }),
+      ]);
+    });
+
     it('신뢰도 값을 반환한다', async () => {
       openAiChatClientMock.requestJson.mockResolvedValue(
         JSON.stringify({ confidence: 'LOW' }),

@@ -4264,6 +4264,7 @@ __metadata:
     ioredis: "npm:^6.0.0"
     jest: "npm:^29.5.0"
     mysql2: "npm:^3.23.2"
+    openai: "npm:^7.5.0"
     prettier: "npm:^3.0.0"
     reflect-metadata: "npm:^0.2.0"
     rxjs: "npm:^7.8.1"
@@ -9905,6 +9906,30 @@ __metadata:
   dependencies:
     mimic-fn: "npm:^2.1.0"
   checksum: 10c0/ffcef6fbb2692c3c40749f31ea2e22677a876daea92959b8a80b521d95cca7a668c884d8b2045d1d8ee7d56796aa405c405462af112a1477594cc63531baeb8f
+  languageName: node
+  linkType: hard
+
+"openai@npm:^7.5.0":
+  version: 7.5.0
+  resolution: "openai@npm:7.5.0"
+  peerDependencies:
+    "@aws-sdk/credential-provider-node": ">=3.972.0 <4"
+    "@smithy/hash-node": ">=4.3.0 <5"
+    "@smithy/signature-v4": ">=5.4.0 <6"
+    ws: ^8.18.0
+    zod: ^3.25 || ^4.0
+  peerDependenciesMeta:
+    "@aws-sdk/credential-provider-node":
+      optional: true
+    "@smithy/hash-node":
+      optional: true
+    "@smithy/signature-v4":
+      optional: true
+    ws:
+      optional: true
+    zod:
+      optional: true
+  checksum: 10c0/b16541492ea03cdc1646db9ae2aaea44571fb779708704108ca94256efa9a65d9ca4044723d1e4f579653f5a6ad84724d5bc1079b9572512820d1668495dc07c
   languageName: node
   linkType: hard
 
