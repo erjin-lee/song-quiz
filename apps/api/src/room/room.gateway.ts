@@ -11,7 +11,11 @@ import { Server, Socket } from 'socket.io';
 import { delay } from '../common/delay';
 import { RoomItemDto } from './dto/room-item.dto';
 import { RoomTimerService } from './room-timer.service';
-import { NicknameChangedEvent, RoomService } from './room.service';
+import {
+  NicknameChangedEvent,
+  ParticipantJoinedEvent,
+  RoomService,
+} from './room.service';
 
 interface EnterRoomPayload {
   roomId: string;
@@ -93,6 +97,22 @@ export class RoomGateway implements OnGatewayDisconnect {
     this.roomService.on('room-updated', (room: RoomItemDto) => {
       this.server?.to(room.roomId).emit('room:state', room);
     });
+    // REST joinRoom에서 실제로 새 참가자가 생겼을 때만 발생하는 이벤트다. 소켓
+    // room:enter(재연결 포함)에서 판단하지 않는 이유는 room.gateway.ts:158 참고.
+    this.roomService.on(
+      'participant-joined',
+      (event: ParticipantJoinedEvent) => {
+        this.broadcastSystemMessage(
+          event.roomId,
+          undefined,
+          `${event.nickname}님이 입장했습니다.`,
+        ).catch((err) => {
+          this.logger.error(
+            `입장 시스템 메시지 브로드캐스트 실패: ${(err as Error).message}`,
+          );
+        });
+      },
+    );
     this.roomService.on('nickname-changed', (event: NicknameChangedEvent) => {
       // 이미 연결된 소켓들이 이전 닉네임을 들고 있으면 이후 채팅에 옛 닉네임이
       // 찍히므로, 같은 참가자의 소켓 멤버십도 함께 갱신한다.
@@ -153,12 +173,13 @@ export class RoomGateway implements OnGatewayDisconnect {
       return;
     }
 
-    // 유예 시간 안에 재연결한 경우(새로고침 등)는 예약된 퇴장 처리를 취소한다.
-    // 이 경우 참가자 레코드가 그대로 유지되므로 "입장했습니다" 재안내도 생략한다.
-    const isReconnect = await this.cancelPendingLeave(
-      payload.roomId,
-      payload.userId,
-    );
+    // 유예 시간 안에 재연결한 경우(새로고침, 서버 재시작 등) 예약된 퇴장 처리를
+    // 취소한다. "입장했습니다" 메시지는 여기서 판단하지 않고 REST joinRoom 시점의
+    // participant-joined 이벤트로만 보낸다 — 이 취소 결과(cancelPendingLeave)를
+    // 재입장 여부 판별에 쓰면, 서버 프로세스가 disconnect 유예 타이머를 예약하지
+    // 못한 채 죽었을 때(타이머가 아예 없어 취소도 실패) 정상적인 재접속을 신규
+    // 입장으로 오판해 "입장했습니다"가 중복 기록되는 문제가 있었다.
+    await this.cancelPendingLeave(payload.roomId, payload.userId);
 
     // fetchSockets()로 크로스 인스턴스 다중 탭/기기 감지를 하려면 소켓에 userId를
     // 실어둬야 한다(RemoteSocket.data는 어댑터를 통해 다른 인스턴스에도 전달됨).
@@ -180,14 +201,6 @@ export class RoomGateway implements OnGatewayDisconnect {
       'chat:history',
       await this.roomService.getChatHistory(payload.roomId),
     );
-
-    if (!isReconnect) {
-      await this.broadcastSystemMessage(
-        payload.roomId,
-        client,
-        `${participant.nickname}님이 입장했습니다.`,
-      );
-    }
   }
 
   @SubscribeMessage('chat:message')
