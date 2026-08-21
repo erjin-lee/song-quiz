@@ -1,5 +1,9 @@
 # Backend conventions (apps/api)
 
+# Purpose
+
+게임 로직·인증·데이터 접근을 담당하는 NestJS 백엔드 API를 소유한다. `apps/web`과 `apps/admin`이 공유하는 유일한 백엔드다.
+
 - NestJS(Express 플랫폼, `@nestjs/platform-express`) 기반 백엔드 애플리케이션이다.
 - 서버 포트는 `8001`이다 (`src/main.ts`에서 `process.env.PORT ?? 8001`). 배포 환경에서 포트를 바꾸려면 `.env`가 아니라 `PORT` 환경 변수로 주입한다.
 - 개발 중 `.env.local` 값을 프로세스 환경 변수로 주입하려면 `dotenv-cli`를 사용하는 `start:dev:local` 스크립트(`yarn api:local`)를 쓴다. 앱 코드가 자체적으로 `.env` 파일을 읽어 들이지는 않는다.
@@ -21,6 +25,12 @@
 - `src/app/`: 기본 스캐폴드(`app.module.ts`, `app.controller.ts`, `app.service.ts`)이자 도메인 디렉토리 구조의 예시.
 - `test/`: e2e 테스트(Jest + supertest).
 - 신규 도메인은 `src/<domain>/` 하위에 module/controller/service/dto 구조로 추가한다 (`src/app/` 참고).
+
+# Patterns
+
+- 신규 도메인 추가: `src/<domain>/` 아래 module/controller/service/dto 구조로 만든다(`src/app/` 참고).
+- 비즈니스 로직 변경: Controller가 아니라 Service에 작성한다. Controller는 요청 검증과 응답 전달만 담당한다.
+- DB 쿼리 변경: N+1과 인덱스 영향을 확인하고, 필요하면 `apps/api/DB_INFO.txt`로 스키마를 먼저 확인한다.
 
 # Dependencies
 
