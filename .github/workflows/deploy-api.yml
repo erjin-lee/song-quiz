@@ -55,7 +55,7 @@ jobs:
             git checkout main
             git pull --ff-only
             corepack enable
-            yarn install --immutable
+            yarn workspaces focus api --immutable
             yarn api:build
             cd apps/api
             pm2 startOrReload ecosystem.config.js --update-env
