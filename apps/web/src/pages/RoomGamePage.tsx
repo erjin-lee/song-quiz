@@ -51,6 +51,10 @@ interface RoomMembership {
 let entrySeq = 0;
 const nextEntryId = () => `entry-${entrySeq++}`;
 
+/** 짧은 네트워크 hiccup으로 소켓이 잠깐 끊겼다가 곧바로 재연결되는 경우까지
+ * "연결이 끊어졌습니다" 안내를 띄우면 사용자를 불필요하게 불안하게 만든다. */
+const DISCONNECT_NOTICE_DELAY_MS = 800;
+
 export function RoomGamePage() {
   const { roomId } = useParams<{ roomId: string }>();
   const location = useLocation();
@@ -274,7 +278,12 @@ export function RoomGamePage() {
     const socket = createRoomSocket();
     setSocket(socket);
 
-    let hasDisconnectedOnce = false;
+    // 끊김 안내는 즉시 띄우지 않고 DISCONNECT_NOTICE_DELAY_MS만큼 지연시킨다. 그 안에
+    // 재연결되면(짧은 네트워크 hiccup) 안내를 아예 띄우지 않고, 안내가 실제로 뜬
+    // 경우에만(disconnectNoticeShown) 복구 메시지도 함께 띄운다 — 끊긴 적 없다는
+    // 사실을 사용자가 굳이 알 필요는 없다.
+    let disconnectNoticeShown = false;
+    let disconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let pendingReconnectNotice = false;
 
     socket.on('chat:message', (payload) => {
@@ -371,27 +380,38 @@ export function RoomGamePage() {
     // 방에서 제거되고, room 멤버십도 복구되지 않는다. 복구 안내 메시지 자체는
     // chat:history 핸들러에서 pendingReconnectNotice로 붙인다.
     socket.on('connect', () => {
-      if (hasDisconnectedOnce) {
+      if (disconnectTimer) {
+        clearTimeout(disconnectTimer);
+        disconnectTimer = null;
+      }
+      if (disconnectNoticeShown) {
+        disconnectNoticeShown = false;
         pendingReconnectNotice = true;
       }
       socket.emit('room:enter', { roomId, userId, accessToken });
     });
 
     socket.on('disconnect', () => {
-      hasDisconnectedOnce = true;
-      setChatEntries((prev) => [
-        ...prev,
-        {
-          id: nextEntryId(),
-          type: 'system',
-          message: '서버와의 연결이 끊어졌습니다. 재연결을 시도합니다...',
-        },
-      ]);
+      disconnectTimer = setTimeout(() => {
+        disconnectTimer = null;
+        disconnectNoticeShown = true;
+        setChatEntries((prev) => [
+          ...prev,
+          {
+            id: nextEntryId(),
+            type: 'system',
+            message: '서버와의 연결이 끊어졌습니다. 재연결을 시도합니다...',
+          },
+        ]);
+      }, DISCONNECT_NOTICE_DELAY_MS);
     });
 
     socket.connect();
 
     return () => {
+      if (disconnectTimer) {
+        clearTimeout(disconnectTimer);
+      }
       socket.disconnect();
       setSocket(null);
     };
