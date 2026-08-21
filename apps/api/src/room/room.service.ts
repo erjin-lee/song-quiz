@@ -875,10 +875,16 @@ export class RoomService extends EventEmitter {
    * 라운드를 종료(정답 공개)한다. 타임아웃/강제스킵/스킵과반/전원정답 등 어떤 경로로
    * 호출되든 이 함수 하나로 모이므로, 스피드 모드의 "공개 후 자동 다음 라운드" 예약도
    * 여기서 일괄 처리한다.
+   * round-timeout 취소는 맨 마지막에 한다. 이 함수는 round-timeout 핸들러
+   * (handleRoundTimeout) 자신이 호출하는 경로도 있는데, 맨 앞에서 먼저 취소해버리면
+   * 그 뒤(예: speed-next 예약)에서 실패했을 때 자기 자신의 claim만 지운 채 아무
+   * 타이머도 남지 않는다. 발화 중인 타이머 자신의 claim은 이 명시적 취소가 없어도
+   * 핸들러가 정상 종료되면 RoomTimerService(fireClaimed)의 CAS 삭제가 정리하므로,
+   * 나머지 처리가 전부 성공한 뒤에만 정리해도 안전하다.
    */
   private async finalizeRoundEnd(room: RoomItemDto): Promise<void> {
-    this.clearRoundTimer(room.roomId);
     if (!room.currentRound) {
+      this.clearRoundTimer(room.roomId);
       return;
     }
     const reveal = await this.getCurrentReveal(room.roomId);
@@ -899,13 +905,17 @@ export class RoomService extends EventEmitter {
         SPEED_MODE_NEXT_ROUND_DELAY_SECONDS,
       );
     }
+
+    this.clearRoundTimer(room.roomId);
   }
 
   /**
    * 스피드 모드 타이머를 예약한다. 'speed-reveal'/'speed-next'는 RoomTimerService에서
    * 서로 다른 예약(member)이라 자동으로 대체되지 않으므로, 기존에 한 슬롯만 쓰던
-   * "두 단계가 동시에 존재하지 않는다"는 불변식을 유지하려면 스케줄 전에 반드시
-   * 두 kind를 모두 취소해야 한다.
+   * "두 단계가 동시에 존재하지 않는다"는 불변식을 유지하려면 다른 kind를 취소해야
+   * 한다 — 단, 반드시 새 예약이 성공한 "뒤"에 취소한다. 순서를 반대로 하면(정리
+   * 먼저) 이 함수가 자기 자신을 부른 타이머 핸들러의 현재 claim을 새 예약보다
+   * 먼저 지우게 되고, 그 상태에서 새 예약이 실패하면 아무 타이머도 남지 않는다.
    * 예약(ZADD) 자체가 실패하면 호출자에게 그대로 던진다 — 상태 저장만 성공하고
    * 타이머는 유실되는 상황을 막기 위함이다(RoomTimerService.schedule 참고).
    */
@@ -914,7 +924,6 @@ export class RoomService extends EventEmitter {
     kind: 'speed-reveal' | 'speed-next',
     delaySeconds: number,
   ): Promise<void> {
-    this.clearSpeedModeTimer(roomId);
     try {
       await this.roomTimerService.schedule(kind, roomId, delaySeconds);
     } catch {
@@ -922,6 +931,12 @@ export class RoomService extends EventEmitter {
         '타이머 예약에 실패했습니다. 잠시 후 다시 시도해주세요.',
       );
     }
+    const otherKind = kind === 'speed-reveal' ? 'speed-next' : 'speed-reveal';
+    this.roomTimerService.cancel(otherKind, roomId).catch((err) => {
+      this.logger.warn(
+        `스피드모드 타이머 취소 실패(${otherKind}, ${roomId}): ${(err as Error).message}`,
+      );
+    });
   }
 
   private clearSpeedModeTimer(roomId: string): void {

@@ -345,11 +345,20 @@ export class RoomGateway implements OnGatewayDisconnect {
       return;
     }
 
-    this.roomTimerService.schedule(
-      'disconnect-grace',
-      this.membershipKey(membership.roomId, membership.userId),
-      DISCONNECT_GRACE_SECONDS,
-    );
+    try {
+      await this.roomTimerService.schedule(
+        'disconnect-grace',
+        this.membershipKey(membership.roomId, membership.userId),
+        DISCONNECT_GRACE_SECONDS,
+      );
+    } catch (err) {
+      // 예약(ZADD) 자체가 실패하면 나중에 이 유저를 제거할 방법이 전혀 없어
+      // 참가자가 방에 영구적으로 남으므로, 유예 없이 즉시 퇴장 처리한다.
+      this.logger.error(
+        `재접속 유예 타이머 예약 실패(${membership.roomId}, ${membership.userId}), 유예 없이 즉시 퇴장 처리합니다: ${(err as Error).message}`,
+      );
+      await this.removeParticipant(membership.roomId, membership.userId);
+    }
   }
 
   /** 재접속 유예 시간이 지난 뒤 호출된다. disconnect를 감지한 인스턴스가 아닐 수 있다. */

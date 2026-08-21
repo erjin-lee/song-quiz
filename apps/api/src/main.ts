@@ -1,7 +1,7 @@
 import { setDefaultResultOrder } from 'node:dns';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as basicAuth from 'express-basic-auth';
 import { AppModule } from './app/app.module';
@@ -77,4 +77,10 @@ async function bootstrap() {
 
   await app.listen(process.env.PORT ?? 8001);
 }
-bootstrap();
+// connectToRedis()는 REDIS_HOST가 설정된 환경에서 재시도 후에도 어댑터 연결에
+// 실패하면 예외를 던진다(RedisIoAdapter 참고) — 여기서 명시적으로 process.exit해
+// 이 인스턴스가 room 브로드캐스트가 깨진 채로 트래픽을 받는 것을 막는다.
+bootstrap().catch((err) => {
+  new Logger('Bootstrap').error(`부팅 실패: ${(err as Error).message}`);
+  process.exit(1);
+});

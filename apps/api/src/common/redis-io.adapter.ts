@@ -28,8 +28,15 @@ const CONNECT_RETRY_MAX_MS = 5_000;
  * 연결 자체는 유지돼도 해당 소켓은 room:state·채팅을 더 이상 받지 못하고
  * fetchSockets()에서도 누락된다. 그래서 이 클래스는 createIOServer 호출 이후에는
  * 절대 어댑터를 재시도/교체하지 않는다 — connectToRedis 안에서 bounded 재시도로
- * 승부를 보고, 그래도 실패하면 이번 프로세스 생애주기 동안은 단일 인스턴스로 남는다
- * (멀티 인스턴스 정합성은 깨지지만 서비스 자체는 떠 있어야 하므로 부팅을 막지는 않는다).
+ * 승부를 본다.
+ *
+ * REDIS_HOST가 설정됐는데도 모든 재시도가 실패하면 로컬 폴백으로 조용히 넘어가지
+ * 않고 예외를 던져 부팅 자체를 실패시킨다(main.ts가 이를 받아 process.exit). 로컬
+ * 폴백으로 계속 뜨면, 이후 캐시/락/타이머용 Redis(base client)만 재연결에 성공했을
+ * 때 room 상태/락/타이머는 공유되는데 소켓 브로드캐스트·fetchSockets만 이 인스턴스
+ * 안에 고립된 split-brain이 재배포 전까지 지속된다 — 차라리 이 인스턴스가 트래픽을
+ * 받지 못하고 재시작을 반복하는 편이 안전하다. REDIS_HOST가 아예 설정되지 않은
+ * 순수 단일 인스턴스(로컬 개발) 환경에서만 로컬 폴백을 허용한다.
  */
 export class RedisIoAdapter extends IoAdapter {
   private readonly logger = new Logger(RedisIoAdapter.name);
@@ -63,9 +70,8 @@ export class RedisIoAdapter extends IoAdapter {
       }
     }
 
-    this.logger.error(
-      `Socket.IO Redis 어댑터 연결에 ${CONNECT_ATTEMPTS}회 모두 실패해 단일 인스턴스로 동작합니다. ` +
-        'REDIS_HOST 연결 상태를 확인하세요(재배포 전까지 room 브로드캐스트가 인스턴스 간에 전달되지 않습니다).',
+    throw new Error(
+      `Socket.IO Redis 어댑터 연결에 ${CONNECT_ATTEMPTS}회 모두 실패했습니다. REDIS_HOST 연결 상태를 확인하세요.`,
     );
   }
 
