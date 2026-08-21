@@ -63,6 +63,23 @@ export class CacheService implements OnModuleDestroy {
     return this.getLocal<T>(key);
   }
 
+  /**
+   * get()과 달리 Redis 오류를 로컬 캐시로 조용히 폴백하지 않고 그대로 던진다.
+   * songOrder/currentAnswers/currentReveal처럼 room 상태와 함께 여러 인스턴스가
+   * 공유해야 하는 데이터에 쓴다. 폴백을 허용하면 "이 인스턴스에는 값이 없어서
+   * 못 찾음"과 "Redis 자체가 잠깐 응답하지 않아서 못 찾음"을 구분할 수 없어,
+   * 타이머 핸들러가 후자를 정상적인 no-op으로 오인해 아직 필요한 타이머 예약을
+   * 지워버릴 수 있다. REDIS_HOST가 아예 설정되지 않은 단일 인스턴스 환경에서는
+   * 로컬 캐시가 유일한 저장소이므로 그대로 로컬에서 읽는다.
+   */
+  async getStrict<T>(key: string): Promise<T | undefined> {
+    if (!this.redis) {
+      return this.getLocal<T>(key);
+    }
+    const raw = await this.redis.get(key);
+    return raw === null ? undefined : (JSON.parse(raw) as T);
+  }
+
   async set<T>(
     key: string,
     value: T,

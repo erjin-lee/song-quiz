@@ -1240,9 +1240,19 @@ export class RoomService extends EventEmitter {
     return `${ROOM_CACHE_KEY_PREFIX}${roomId}`;
   }
 
+  /**
+   * songOrder/currentAnswers/currentReveal는 room 상태와 마찬가지로 여러 인스턴스가
+   * 공유해야 하는 라운드 진행 데이터라 get/set이 아니라 getStrict/setStrict를 쓴다.
+   * 일반 get/set의 로컬 폴백을 허용하면, room 상태(setStrict로 이미 보호됨)는
+   * Redis에 반영됐는데 이 데이터만 이 인스턴스의 로컬 캐시에만 남는 상황이 생길 수
+   * 있다 — 다른 인스턴스가 곡 순서를 빈 배열로 읽어 게임을 조기 종료하거나, 정답을
+   * 인식하지 못하는 등 감지하기 어려운 정합성 문제로 이어진다.
+   */
   private async getSongOrder(roomId: string): Promise<string[]> {
     return (
-      (await this.cacheService.get<string[]>(this.songOrderKey(roomId))) ?? []
+      (await this.cacheService.getStrict<string[]>(
+        this.songOrderKey(roomId),
+      )) ?? []
     );
   }
 
@@ -1250,7 +1260,7 @@ export class RoomService extends EventEmitter {
     roomId: string,
     songOrder: string[],
   ): Promise<void> {
-    await this.cacheService.set(
+    await this.cacheService.setStrict(
       this.songOrderKey(roomId),
       songOrder,
       ROOM_TTL_SECONDS,
@@ -1267,8 +1277,9 @@ export class RoomService extends EventEmitter {
 
   private async getCurrentAnswers(roomId: string): Promise<string[]> {
     return (
-      (await this.cacheService.get<string[]>(this.currentAnswersKey(roomId))) ??
-      []
+      (await this.cacheService.getStrict<string[]>(
+        this.currentAnswersKey(roomId),
+      )) ?? []
     );
   }
 
@@ -1276,7 +1287,7 @@ export class RoomService extends EventEmitter {
     roomId: string,
     answers: string[],
   ): Promise<void> {
-    await this.cacheService.set(
+    await this.cacheService.setStrict(
       this.currentAnswersKey(roomId),
       answers,
       ROOM_TTL_SECONDS,
@@ -1294,7 +1305,7 @@ export class RoomService extends EventEmitter {
   private async getCurrentReveal(
     roomId: string,
   ): Promise<RoundRevealInfo | undefined> {
-    return this.cacheService.get<RoundRevealInfo>(
+    return this.cacheService.getStrict<RoundRevealInfo>(
       this.currentRevealKey(roomId),
     );
   }
@@ -1303,7 +1314,7 @@ export class RoomService extends EventEmitter {
     roomId: string,
     reveal: RoundRevealInfo,
   ): Promise<void> {
-    await this.cacheService.set(
+    await this.cacheService.setStrict(
       this.currentRevealKey(roomId),
       reveal,
       ROOM_TTL_SECONDS,

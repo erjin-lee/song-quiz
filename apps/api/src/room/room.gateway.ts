@@ -50,11 +50,14 @@ const DISCONNECT_GRACE_SECONDS = 10;
 /**
  * disconnect-grace 예약(ZADD) 실패 시 즉시 퇴장 처리로 폴백하는데, 그 원인이 Redis
  * 단절이라면 즉시 퇴장(withRoomLock의 분산 락 획득 포함)도 같은 이유로 실패할 수
- * 있다. 순간적인 블립이라면 ioredis 자체 재연결(수백ms 내)로 곧 회복되므로, 짧은
- * 간격으로 몇 차례 더 시도해본다.
+ * 있다. 순간적인 블립을 넘기고 재접속할 시간도 벌어주기 위해, 점점 늘어나는
+ * 간격으로 상당히 오래(총 30초 안팎) 재시도한다 — 그보다 오래가는 Redis 장애는
+ * 이 경로만 특별 취급해도 어차피 방 전체(분산 락)가 막히는 상황이라 여기서 더
+ * 버티는 것의 실익이 적다.
  */
-const REMOVE_FALLBACK_ATTEMPTS = 3;
-const REMOVE_FALLBACK_RETRY_DELAY_MS = 500;
+const REMOVE_FALLBACK_ATTEMPTS = 8;
+const REMOVE_FALLBACK_RETRY_BASE_MS = 500;
+const REMOVE_FALLBACK_RETRY_MAX_MS = 5_000;
 
 /**
  * 방 채팅 + 게임 진행 전용 소켓 게이트웨이.
@@ -376,9 +379,11 @@ export class RoomGateway implements OnGatewayDisconnect {
   /**
    * disconnect-grace 예약 실패의 fallback으로 쓰는 즉시 퇴장. 예약이 실패한 원인이
    * Redis 단절이라면 removeParticipant가 의존하는 분산 락·room 상태 저장도 같은
-   * 이유로 실패할 수 있으므로, 짧은 간격으로 몇 차례 재시도해 순간적인 장애는
-   * 넘긴다. 그래도 전부 실패하면 참가자가 방에 남을 수 있음을 크게 로그로 남긴다
-   * (완전히 복구 불가능한 상태는 아니다 — 재접속하면 room:enter 경로로 정상
+   * 이유로 실패할 수 있으므로, 늘어나는 간격으로 여러 차례 재시도해 순간적인 장애는
+   * 넘긴다. 재시도 사이(최대 5초)에 사용자가 다른 인스턴스로 재접속할 수 있으므로,
+   * 매 시도 직전에 다시 확인해 재접속이 확인되면 그 활성 참가자를 지우지 않고
+   * 즉시 중단한다. 그래도 전부 실패하면 참가자가 방에 남을 수 있음을 크게 로그로
+   * 남긴다(완전히 복구 불가능한 상태는 아니다 — 재접속하면 room:enter 경로로 정상
    * 참가자로 복귀한다).
    */
   private async removeParticipantWithRetry(
@@ -386,6 +391,21 @@ export class RoomGateway implements OnGatewayDisconnect {
     userId: string,
   ): Promise<void> {
     for (let attempt = 1; attempt <= REMOVE_FALLBACK_ATTEMPTS; attempt++) {
+      let reconnected = false;
+      try {
+        reconnected = await this.hasOtherActiveSocket(roomId, userId);
+      } catch (checkErr) {
+        this.logger.warn(
+          `재접속 여부 확인 실패(${roomId}, ${userId}), 퇴장 재시도를 계속 진행합니다: ${(checkErr as Error).message}`,
+        );
+      }
+      if (reconnected) {
+        this.logger.log(
+          `재접속이 확인되어 즉시 퇴장 재시도를 중단합니다(${roomId}, ${userId}).`,
+        );
+        return;
+      }
+
       try {
         await this.removeParticipant(roomId, userId);
         return;
@@ -397,7 +417,12 @@ export class RoomGateway implements OnGatewayDisconnect {
           );
           return;
         }
-        await delay(REMOVE_FALLBACK_RETRY_DELAY_MS);
+        await delay(
+          Math.min(
+            attempt * REMOVE_FALLBACK_RETRY_BASE_MS,
+            REMOVE_FALLBACK_RETRY_MAX_MS,
+          ),
+        );
       }
     }
   }
