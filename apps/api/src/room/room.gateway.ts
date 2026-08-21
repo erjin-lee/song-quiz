@@ -172,6 +172,10 @@ export class RoomGateway implements OnGatewayDisconnect {
       nickname: participant.nickname,
     });
 
+    // 재연결(서버 재시작, 순간 네트워크 단절 등) 시 이 클라이언트는 끊긴 동안의
+    // room:state 브로드캐스트를 놓쳤을 수 있다. room-updated 이벤트를 기다리지 않고
+    // 입장 시점의 최신 상태를 이 소켓에게만 바로 보내 화면이 낡은 상태로 남지 않게 한다.
+    client.emit('room:state', room);
     client.emit(
       'chat:history',
       await this.roomService.getChatHistory(payload.roomId),
