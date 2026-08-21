@@ -588,7 +588,9 @@ describe('RoomService', () => {
       delete legacyRoom!.pwdHash;
       legacyRoom!.participants = (
         legacyRoom!.participants as Record<string, unknown>[]
-      ).map(({ isAccount: _isAccount, ...rest }) => rest);
+      )
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        .map(({ isAccount, ...rest }) => rest);
       await cacheService.set(`room:${room.roomId}`, legacyRoom);
 
       const fetched = await roomService.getRoom(room.roomId);
