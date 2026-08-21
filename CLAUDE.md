@@ -17,6 +17,7 @@ Yarn 4(Berry) + Turborepo 기반 TypeScript 모노레포다.
 - 시스템 구조와 의존 관계: [`ARCHITECTURE.md`](ARCHITECTURE.md)
 - 공통 개발 원칙: [`docs/engineering-principles.md`](docs/engineering-principles.md)
 - Git 및 검증 규칙: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- 코드만 봐서는 알 수 없는 설계 결정의 배경: [`docs/adr/`](docs/adr/README.md)
 
 앱을 수정할 때는 해당 앱의 규칙도 따른다.
 
