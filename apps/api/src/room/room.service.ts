@@ -165,17 +165,29 @@ export class RoomService extends EventEmitter {
     );
   }
 
-  async getRooms(): Promise<RoomItemDto[]> {
+  /**
+   * page/pageSize를 생략하면(undefined) 기존과 동일하게 전체 목록을 반환한다
+   * — 페이지네이션 파라미터가 없는 기존 호출부(웹 클라이언트, 테스트)의
+   * 응답 형식을 깨지 않기 위함이다.
+   */
+  async getRooms(page?: number, pageSize?: number): Promise<RoomItemDto[]> {
     const roomIds = await this.getRoomIndex();
     const records = await Promise.all(
       roomIds.map((roomId) => this.getRoomRecord(roomId)),
     );
 
-    return records
+    const publicRooms = records
       .filter(
         (room): room is RoomRecord => room !== undefined && !room.isUnlisted,
       )
       .map((room) => this.toPublicRoom(room));
+
+    if (page === undefined || pageSize === undefined) {
+      return publicRooms;
+    }
+
+    const start = (page - 1) * pageSize;
+    return publicRooms.slice(start, start + pageSize);
   }
 
   async getRoom(roomId: string): Promise<RoomItemDto | undefined> {
