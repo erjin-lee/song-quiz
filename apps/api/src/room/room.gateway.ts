@@ -51,9 +51,8 @@ const DISCONNECT_GRACE_SECONDS = 10;
  * disconnect-grace 예약(ZADD) 실패 시 즉시 퇴장 처리로 폴백하는데, 그 원인이 Redis
  * 단절이라면 즉시 퇴장(withRoomLock의 분산 락 획득 포함)도 같은 이유로 실패할 수
  * 있다. 순간적인 블립을 넘기고 재접속할 시간도 벌어주기 위해, 점점 늘어나는
- * 간격으로 상당히 오래(총 30초 안팎) 재시도한다 — 그보다 오래가는 Redis 장애는
- * 이 경로만 특별 취급해도 어차피 방 전체(분산 락)가 막히는 상황이라 여기서 더
- * 버티는 것의 실익이 적다.
+ * 간격으로 재시도한다 — 재시도 사이 지연 합 14초(호출 자체에 걸리는 시간은 별도).
+ * 그보다 오래가는 Redis 장애는 이 경로만 특별 취급해도 방 전체(분산 락)가 막히는 상황이라 여기서 더 버티는 것의 실익이 적다.
  */
 const REMOVE_FALLBACK_ATTEMPTS = 8;
 const REMOVE_FALLBACK_RETRY_BASE_MS = 500;
