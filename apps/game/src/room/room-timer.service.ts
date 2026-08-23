@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { runWithLogContext } from 'logger';
 import { Redis } from 'ioredis';
 import { CacheService } from '../cache/cache.service';
 import { LOCK_ACQUIRE_TIMEOUT_MS } from './room-lock.service';
@@ -195,13 +197,32 @@ export class RoomTimerService implements OnModuleDestroy {
     return true;
   }
 
+  /**
+   * 타이머 핸들러(leaveRoom, handleSpeedModeReveal 등)는 HTTP/소켓 요청과 달리
+   * 이 폴링/setTimeout 경로에서 직접 호출되면 AsyncLocalStorage 컨텍스트가
+   * 아예 없다 — 핸들러 내부의 updateLogContext({ roomId, userId })가 no-op이
+   * 되어 player_left/game_state_error/game_finished 로그에 roomId/userId가
+   * 빠지는 문제가 있었다. 여기서 requestId만 발급해 최소한의 컨텍스트를 만들어
+   * 두면, 핸들러가 알고 있는 roomId/userId를 그 안에서 updateLogContext로
+   * 채울 자리가 생긴다.
+   */
+  private dispatchHandler(
+    kind: RoomTimerKind,
+    key: string,
+    handler: (key: string) => void | Promise<void>,
+  ): Promise<void> {
+    return Promise.resolve(
+      runWithLogContext({ requestId: randomUUID() }, () => handler(key)),
+    );
+  }
+
   private dispatchLocal(kind: RoomTimerKind, key: string): void {
     const handler = this.handlers.get(kind);
     if (!handler) {
       this.logger.warn(`등록되지 않은 타이머 kind: ${kind}`);
       return;
     }
-    Promise.resolve(handler(key)).catch((err) => {
+    this.dispatchHandler(kind, key, handler).catch((err) => {
       this.logger.error(
         `타이머 핸들러 실행 실패(${kind}:${key}): ${(err as Error).message}`,
       );
@@ -293,8 +314,7 @@ export class RoomTimerService implements OnModuleDestroy {
       return;
     }
 
-    Promise.resolve()
-      .then(() => handler(key))
+    this.dispatchHandler(kind, key, handler)
       .then(() => {
         this.deleteIfReserved(redis, member, reservedAt);
       })
