@@ -28,6 +28,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # TEMP DEBUG: OIDC AssumeRoleWithWebIdentity가 계속 AccessDenied라서, trust policy가
+      # 기대하는 aud/sub와 GitHub가 실제로 발급하는 토큰의 claim이 일치하는지 직접 확인한다.
+      # 진단 끝나면 이 스텝은 제거한다.
+      - name: Debug OIDC token claims
+        run: |
+          TOKEN=$(curl -sSL -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
+          PAYLOAD=$(echo "$TOKEN" | cut -d '.' -f2)
+          MOD=$(( ${#PAYLOAD} % 4 ))
+          if [ "$MOD" -eq 2 ]; then PAYLOAD="${PAYLOAD}=="; elif [ "$MOD" -eq 3 ]; then PAYLOAD="${PAYLOAD}="; fi
+          echo "$PAYLOAD" | tr '_-' '/+' | base64 -d | jq '{iss, aud, sub, repository, repository_owner, event_name, ref}'
+
       # 장기 액세스 키 없이, environments/bootstrap에서 만든 IAM Role을 OIDC로 assume한다.
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
