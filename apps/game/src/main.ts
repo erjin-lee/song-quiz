@@ -1,15 +1,25 @@
 import { setDefaultResultOrder } from 'node:dns';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
+import { StructuredLogger } from 'logger';
 import { AppModule } from './app/app.module';
 import { CacheService } from './cache/cache.service';
 import { RedisIoAdapter } from './common/redis-io.adapter';
 
 setDefaultResultOrder('ipv4first');
 
+// apps/api의 main.ts와 동일한 이유로, app.useLogger로 등록해두면 코드 전체의
+// new Logger(ClassName) 호출도 파일별 수정 없이 LogContext가 실린 JSON 로그로 바뀐다.
+const structuredLogger = new StructuredLogger({
+  service: 'game',
+  environment: process.env.NODE_ENV ?? 'development',
+});
+
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    logger: structuredLogger,
+  });
   // apps/api의 main.ts와 동일한 이유로 PM2 cluster reload/재시작 시 그레이스풀
   // 셧다운한다. ecosystem.config.js의 kill_timeout과 짝을 이룬다.
   app.enableShutdownHooks(['SIGTERM', 'SIGINT']);
@@ -48,6 +58,6 @@ async function bootstrap() {
   process.send?.('ready');
 }
 bootstrap().catch((err) => {
-  new Logger('Bootstrap').error(`부팅 실패: ${(err as Error).message}`);
+  structuredLogger.error(`부팅 실패: ${(err as Error).message}`, 'Bootstrap');
   process.exit(1);
 });

@@ -1,4 +1,4 @@
-import { Logger, NotFoundException } from '@nestjs/common';
+import { Logger, NotFoundException, UseInterceptors } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -7,6 +7,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
+import { SocketRequestContextInterceptor } from 'logger';
 import { Server, Socket } from 'socket.io';
 import { delay } from '../common/delay';
 import { RoomItemDto } from './dto/room-item.dto';
@@ -83,6 +84,7 @@ const REMOVE_FALLBACK_RETRY_MAX_MS = 5_000;
   namespace: '/rooms',
   cors: { origin: 'http://localhost:5173' },
 })
+@UseInterceptors(SocketRequestContextInterceptor)
 export class RoomGateway implements OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
@@ -183,7 +185,10 @@ export class RoomGateway implements OnGatewayDisconnect {
 
     // fetchSockets()로 크로스 인스턴스 다중 탭/기기 감지를 하려면 소켓에 userId를
     // 실어둬야 한다(RemoteSocket.data는 어댑터를 통해 다른 인스턴스에도 전달됨).
+    // roomId도 함께 저장해두면 chat:message 등 payload에 roomId가 없는 후속 이벤트도
+    // SocketRequestContextInterceptor가 로그 컨텍스트에 채울 수 있다.
     client.data.userId = payload.userId;
+    client.data.roomId = payload.roomId;
 
     await client.join(payload.roomId);
     await client.join(this.userChannel(payload.userId));
