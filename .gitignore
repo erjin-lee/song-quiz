@@ -26,5 +26,6 @@ PORTFOLIO_BK.md
 scripts/sh/
 apps/api/logs/
 apps/game/logs/
+/logs/
 __pycache__/
 *.tsbuildinfo
