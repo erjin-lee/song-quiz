@@ -6,6 +6,7 @@ on:
     paths:
       - 'apps/game/**'
       - 'packages/logger/**'
+      - 'packages/tracing/**'
       - 'package.json'
       - 'yarn.lock'
       - 'turbo.json'
@@ -58,6 +59,7 @@ jobs:
             corepack enable
             YARN_ENABLE_IMMUTABLE_INSTALLS=true yarn workspaces focus game
             yarn workspace logger build
+            yarn workspace tracing build
             yarn workspace game build
             cd apps/game
             pm2 startOrReload ecosystem.config.js --update-env
