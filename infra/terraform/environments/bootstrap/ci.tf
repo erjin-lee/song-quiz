@@ -26,11 +26,17 @@ resource "aws_iam_role" "ci_terraform_plan" {
         Condition = {
           StringEquals = {
             "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+            # 이 저장소에서 실행된 워크플로우만 이 role을 맡을 수 있도록 제한한다.
+            # sub claim으로 저장소를 매칭하지 않는 이유: GitHub가 sub claim에
+            # "repo:owner@ownerId/repo@repoId:..." 형태로 소유자/저장소 불변 ID를 끼워넣는
+            # 포맷으로 바뀌면서 "repo:owner/repo:*" 패턴이 더 이상 매치되지 않는다.
+            # repository claim은 이름 그대로("owner/repo") 유지되므로 이걸로 저장소를 특정한다.
+            "token.actions.githubusercontent.com:repository" = var.github_repository
           }
-          # 이 저장소에서 실행된 워크플로우만 이 role을 맡을 수 있도록 제한한다.
-          # (다른 레포가 같은 OIDC provider를 통해 이 role을 도용하는 것을 막는다.)
+          # sub claim으로는 이벤트 종류(pull_request)만 확인한다 - owner/repo 이름 앞뒤로
+          # 어떤 ID 포맷이 붙어도 매치되도록 양쪽을 와일드카드로 둔다.
           StringLike = {
-            "token.actions.githubusercontent.com:sub" = "repo:${var.github_repository}:*"
+            "token.actions.githubusercontent.com:sub" = "repo:*:pull_request"
           }
         }
       }
