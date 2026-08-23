@@ -36,11 +36,13 @@ export class GameNotifierClient {
       if (!response.ok) {
         this.logger.error(
           `Game 서비스 문의 결과 알림 실패(status: ${response.status}, inquiryId: ${payload.inquiryId})`,
+          { event: 'game_notify_failed', errorCode: String(response.status) },
         );
       }
     } catch (err) {
       this.logger.error(
         `Game 서비스 문의 결과 알림 실패(inquiryId: ${payload.inquiryId}): ${(err as Error).message}`,
+        { event: 'game_notify_failed' },
       );
     }
   }

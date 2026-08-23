@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { getLogContext, LogContext, updateLogContext } from 'logger';
 import { CacheService } from '../cache/cache.service';
 import { RoomTimerService } from './room-timer.service';
 
@@ -73,6 +74,25 @@ describe('RoomTimerService', () => {
     await expect(
       roomTimerService.cancel('disconnect-grace', 'user-2'),
     ).resolves.toBe(false);
+  });
+
+  it('타이머로 발화된 핸들러 안에서도 updateLogContext/getLogContext가 동작한다(AsyncLocalStorage 컨텍스트가 없어 no-op이던 경로 수정 확인)', async () => {
+    jest.useFakeTimers();
+    let seenContext: Partial<LogContext> | undefined;
+    const handler = jest.fn(() => {
+      // leaveRoom/handleSpeedModeReveal 등 실제 핸들러가 하는 것과 동일한 패턴.
+      updateLogContext({ roomId: 'room-1', userId: 'user-1' });
+      seenContext = getLogContext();
+    });
+    roomTimerService.registerHandler('round-timeout', handler);
+
+    roomTimerService.schedule('round-timeout', 'room-1', 5);
+    await jest.advanceTimersByTimeAsync(5_100);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(seenContext?.roomId).toBe('room-1');
+    expect(seenContext?.userId).toBe('user-1');
+    expect(seenContext?.requestId).toBeTruthy();
   });
 
   it('speed-reveal과 speed-next는 서로 다른 슬롯으로 독립 관리된다', async () => {

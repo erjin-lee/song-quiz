@@ -185,6 +185,7 @@ export class CacheService implements OnApplicationShutdown {
       if (this.redisReady) {
         this.logger.warn(
           `Redis 오류 발생, 로컬 메모리 캐시로 폴백합니다: ${err.message}`,
+          { event: 'redis_connection_failed' },
         );
       }
       this.redisReady = false;
@@ -196,6 +197,7 @@ export class CacheService implements OnApplicationShutdown {
     redis.connect().catch((err: Error) => {
       this.logger.warn(
         `Redis 연결 실패, 로컬 메모리 캐시로 폴백합니다: ${err.message}`,
+        { event: 'redis_connection_failed' },
       );
     });
 

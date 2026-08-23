@@ -70,9 +70,14 @@ export class RedisIoAdapter extends IoAdapter {
       }
     }
 
-    throw new Error(
-      `Socket.IO Redis 어댑터 연결에 ${CONNECT_ATTEMPTS}회 모두 실패했습니다. REDIS_HOST 연결 상태를 확인하세요.`,
-    );
+    const message = `Socket.IO Redis 어댑터 연결에 ${CONNECT_ATTEMPTS}회 모두 실패했습니다. REDIS_HOST 연결 상태를 확인하세요.`;
+    // 부팅 단계라 요청/소켓 컨텍스트(AsyncLocalStorage)가 없어 updateLogContext는
+    // 아무 효과가 없다 — event/errorCode를 여기서 직접 로그 호출에 실어야 한다.
+    this.logger.error(message, {
+      event: 'redis_connection_failed',
+      errorCode: 'SOCKET_IO_REDIS_ADAPTER_CONNECT_FAILED',
+    });
+    throw new Error(message);
   }
 
   private async attemptConnect(

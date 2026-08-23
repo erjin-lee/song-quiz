@@ -7,7 +7,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { SocketRequestContextInterceptor } from 'logger';
+import { SocketRequestContextInterceptor, updateLogContext } from 'logger';
 import { Server, Socket } from 'socket.io';
 import { delay } from '../common/delay';
 import { RoomItemDto } from './dto/room-item.dto';
@@ -104,6 +104,11 @@ export class RoomGateway implements OnGatewayDisconnect {
     this.roomService.on(
       'participant-joined',
       (event: ParticipantJoinedEvent) => {
+        updateLogContext({ roomId: event.roomId, userId: event.userId });
+        this.logger.log(
+          `참가자 입장(roomId: ${event.roomId}, userId: ${event.userId})`,
+          { event: 'player_joined' },
+        );
         this.broadcastSystemMessage(
           event.roomId,
           undefined,
@@ -181,7 +186,17 @@ export class RoomGateway implements OnGatewayDisconnect {
     // 재입장 여부 판별에 쓰면, 서버 프로세스가 disconnect 유예 타이머를 예약하지
     // 못한 채 죽었을 때(타이머가 아예 없어 취소도 실패) 정상적인 재접속을 신규
     // 입장으로 오판해 "입장했습니다"가 중복 기록되는 문제가 있었다.
-    await this.cancelPendingLeave(payload.roomId, payload.userId);
+    const wasReconnect = await this.cancelPendingLeave(
+      payload.roomId,
+      payload.userId,
+    );
+    if (wasReconnect) {
+      updateLogContext({ roomId: payload.roomId, userId: payload.userId });
+      this.logger.log(
+        `재접속 성공(roomId: ${payload.roomId}, userId: ${payload.userId})`,
+        { event: 'reconnect_success' },
+      );
+    }
 
     // fetchSockets()로 크로스 인스턴스 다중 탭/기기 감지를 하려면 소켓에 userId를
     // 실어둬야 한다(RemoteSocket.data는 어댑터를 통해 다른 인스턴스에도 전달됨).

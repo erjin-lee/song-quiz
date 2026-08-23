@@ -1,8 +1,7 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import { NextFunction, Request, Response } from 'express';
-import { getLogContext } from 'logger';
+import { getLogContext, summarizeForLog } from 'logger';
 import { accessLogger } from './access-logger.factory';
-import { redactSensitiveFields } from './redact-sensitive-fields.util';
 
 function extractClaimedUserId(authHeader?: string): string | undefined {
   if (!authHeader?.startsWith('Bearer ')) {
@@ -48,8 +47,8 @@ export class AccessLogMiddleware implements NestMiddleware {
     res.on('finish', () => {
       const responseTimeMs =
         Number(process.hrtime.bigint() - startedAt) / 1_000_000;
-      const query = redactSensitiveFields(req.query);
-      const body = redactSensitiveFields(req.body);
+      const query = summarizeForLog(req.query);
+      const body = summarizeForLog(req.body);
 
       const level =
         res.statusCode >= 500
@@ -71,7 +70,10 @@ export class AccessLogMiddleware implements NestMiddleware {
         ...(body && Object.keys(body as object).length ? { body } : {}),
         statusCode: res.statusCode,
         responseTimeMs: Math.round(responseTimeMs * 100) / 100,
-        userId: extractClaimedUserId(req.headers.authorization),
+        // 서명 검증 없이 JWT payload를 그대로 디코드한 값이라 신뢰할 수 없다.
+        // game REST에는 apps/api의 UserAuthGuard 같은 가드가 없어 검증된
+        // userId로 승격할 방법이 없다 — 이 필드는 항상 claimedUserId로만 남긴다.
+        claimedUserId: extractClaimedUserId(req.headers.authorization),
         userAgent: req.headers['user-agent'],
         ...(res.statusCode >= 400
           ? { errorMessage: extractErrorMessage(responseBody) }

@@ -103,6 +103,10 @@ export class RoomLockService implements OnModuleDestroy {
     }
 
     if (!acquired) {
+      this.logger.warn(`분산 락 획득 최종 실패(key: ${key})`, {
+        event: 'redis_lock_failed',
+        errorCode: 'LOCK_ACQUIRE_TIMEOUT',
+      });
       throw new ServiceUnavailableException(
         `분산 락 획득에 실패했습니다(key: ${key}). 잠시 후 다시 시도해주세요.`,
       );
