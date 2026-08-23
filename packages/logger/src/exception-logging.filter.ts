@@ -35,15 +35,21 @@ export class LoggingExceptionFilter extends BaseExceptionFilter {
   private readonly logger = new Logger(LoggingExceptionFilter.name);
 
   catch(exception: unknown, host: ArgumentsHost): void {
-    updateLogContext({ errorCode: resolveErrorCode(exception) });
+    const errorCode = resolveErrorCode(exception);
 
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
       if (status >= 500) {
-        this.logger.error(exception.message, exception.stack);
+        this.logger.error(exception.message, exception.stack, { errorCode });
       } else {
-        this.logger.warn(exception.message);
+        this.logger.warn(exception.message, { errorCode });
       }
+    } else {
+      // handleUnknownError의 Logger('ExceptionsHandler') 호출은 우리가 인자를
+      // 제어할 수 없어 LogMetadata를 직접 넘길 방법이 없다. 이 경우만 예외적으로
+      // ambient LogContext에 errorCode를 실어(§log-context.ts) super.catch()가
+      // 트리거하는 그 내부 로그에도 묻어나가게 한다.
+      updateLogContext({ errorCode });
     }
 
     super.catch(exception, host);

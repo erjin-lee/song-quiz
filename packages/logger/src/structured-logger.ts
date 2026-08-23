@@ -8,7 +8,7 @@ import {
 } from 'winston';
 import 'winston-daily-rotate-file';
 import { createConsoleFormat, TIMESTAMP_FORMAT } from './console-format';
-import { getLogContext, LogContext } from './log-context';
+import { getLogContext, LogContext, LogMetadata } from './log-context';
 
 export interface StructuredLoggerOptions {
   service: LogContext['service'];
@@ -76,15 +76,22 @@ function createWinstonLogger(options: StructuredLoggerOptions): WinstonLogger {
  * 값만이 아니라 optionalParams 전체를 훑어 Error 인스턴스의 message/stack을
  * 따로 보존한다. app.useLogger(structuredLogger)로 등록해두면 이 처리가
  * 호출부 수정 없이 기존 로그 전체에 자동으로 적용된다.
+ *
+ * 일반 객체(Error도 문자열도 아닌)가 하나 섞여 있으면 LogMetadata(event/
+ * errorCode/durationMs)로 취급한다 — `this.logger.error(message, { event })`
+ * 처럼 호출부가 로그 한 건에만 해당하는 값을 직접 넘길 수 있게 하기 위함이다.
+ * ambient LogContext(AsyncLocalStorage)에 넣지 않는 이유는 log-context.ts 참고.
  */
 function splitOptionalParams(optionalParams: unknown[]): {
   context?: string;
   stack?: string;
   errorMessage?: string;
+  metadata?: LogMetadata;
 } {
   let context: string | undefined;
   let stack: string | undefined;
   let errorMessage: string | undefined;
+  let metadata: LogMetadata | undefined;
 
   optionalParams.forEach((param, index) => {
     if (param instanceof Error) {
@@ -92,19 +99,22 @@ function splitOptionalParams(optionalParams: unknown[]): {
       stack = param.stack;
       return;
     }
-    if (typeof param !== 'string') {
+    if (typeof param === 'string') {
+      // 마지막 문자열 인자는 Nest 컨벤션상 클래스명(context)이다. 그 외의
+      // 문자열은 error(message, err.stack) 처럼 수동으로 넘긴 스택 트레이스로 취급한다.
+      if (index === optionalParams.length - 1 && !param.includes('\n')) {
+        context = param;
+      } else {
+        stack = param;
+      }
       return;
     }
-    // 마지막 문자열 인자는 Nest 컨벤션상 클래스명(context)이다. 그 외의 문자열은
-    // error(message, err.stack) 처럼 수동으로 넘긴 스택 트레이스로 취급한다.
-    if (index === optionalParams.length - 1 && !param.includes('\n')) {
-      context = param;
-    } else {
-      stack = param;
+    if (param && typeof param === 'object' && !Array.isArray(param)) {
+      metadata = param as LogMetadata;
     }
   });
 
-  return { context, stack, errorMessage };
+  return { context, stack, errorMessage, metadata };
 }
 
 /**
@@ -151,7 +161,7 @@ export class StructuredLogger implements LoggerService {
     message: unknown,
     optionalParams: unknown[],
   ): void {
-    const { context, stack, errorMessage } =
+    const { context, stack, errorMessage, metadata } =
       splitOptionalParams(optionalParams);
 
     this.winston.log({
@@ -162,6 +172,10 @@ export class StructuredLogger implements LoggerService {
       ...(context ? { context } : {}),
       ...(stack ? { stack } : {}),
       ...(errorMessage ? { errorMessage } : {}),
+      // metadata(로그 한 건짜리 event/errorCode/durationMs)는 ambient
+      // LogContext보다 뒤에 스프레드해서, 겹치는 필드가 있으면 이 호출에
+      // 명시적으로 넘긴 값이 우선하게 한다.
+      ...(metadata ?? {}),
     });
   }
 }

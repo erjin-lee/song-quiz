@@ -249,8 +249,13 @@ export class RoomService extends EventEmitter {
     await this.saveRoom(room);
     await this.addToIndex(room.roomId);
 
-    updateLogContext({ event: 'room_created', roomId: room.roomId });
-    this.logger.log(`방 생성됨(roomId: ${room.roomId}, quizId: ${dto.quizId})`);
+    updateLogContext({ roomId: room.roomId });
+    this.logger.log(
+      `방 생성됨(roomId: ${room.roomId}, quizId: ${dto.quizId})`,
+      {
+        event: 'room_created',
+      },
+    );
 
     const accessToken = this.computeMembershipToken(room.roomId, hostUserId);
     return { room: this.toPublicRoom(room), userId: hostUserId, accessToken };
@@ -337,8 +342,10 @@ export class RoomService extends EventEmitter {
       room.participants.splice(participantIndex, 1);
       room.curUserCnt = room.participants.length;
 
-      updateLogContext({ event: 'player_left', roomId, userId });
-      this.logger.log(`참가자 퇴장(roomId: ${roomId}, userId: ${userId})`);
+      updateLogContext({ roomId, userId });
+      this.logger.log(`참가자 퇴장(roomId: ${roomId}, userId: ${userId})`, {
+        event: 'player_left',
+      });
 
       if (room.curUserCnt === 0) {
         await this.deleteRoom(roomId);
@@ -513,8 +520,10 @@ export class RoomService extends EventEmitter {
       await this.prepareFirstRound(roomId, room);
 
       await this.saveRoom(room);
-      updateLogContext({ event: 'game_started', roomId });
-      this.logger.log(`게임 시작됨(roomId: ${roomId})`);
+      updateLogContext({ roomId });
+      this.logger.log(`게임 시작됨(roomId: ${roomId})`, {
+        event: 'game_started',
+      });
       this.emit('room-updated', this.toPublicRoom(room));
       return room;
     });
@@ -568,12 +577,13 @@ export class RoomService extends EventEmitter {
       ]);
       allRounds = rounds;
     } catch (err) {
-      updateLogContext({
-        event: 'quiz_snapshot_failed',
-        errorCode: 'QUIZ_ROUNDS_FETCH_FAILED',
-      });
+      updateLogContext({ roomId });
       this.logger.error(
         `퀴즈 라운드 스냅샷 조회 실패(roomId: ${roomId}, quizId: ${room.quizId}): ${(err as Error).message}`,
+        {
+          event: 'quiz_snapshot_failed',
+          errorCode: 'QUIZ_ROUNDS_FETCH_FAILED',
+        },
       );
       throw err;
     }
@@ -1017,9 +1027,10 @@ export class RoomService extends EventEmitter {
         this.emit('room-updated', this.toPublicRoom(room));
       });
     } catch (err) {
-      updateLogContext({ event: 'game_state_error', roomId });
+      updateLogContext({ roomId });
       this.logger.error(
         `스피드 모드 정답 자동 공개 처리 실패(roomId: ${roomId}), 재시도되도록 예약을 유지합니다: ${(err as Error).message}`,
+        { event: 'game_state_error' },
       );
       throw err;
     }
@@ -1041,9 +1052,10 @@ export class RoomService extends EventEmitter {
         this.emit('room-updated', this.toPublicRoom(room));
       });
     } catch (err) {
-      updateLogContext({ event: 'game_state_error', roomId });
+      updateLogContext({ roomId });
       this.logger.error(
         `스피드 모드 자동 다음 라운드 처리 실패(roomId: ${roomId}), 재시도되도록 예약을 유지합니다: ${(err as Error).message}`,
+        { event: 'game_state_error' },
       );
       throw err;
     }
@@ -1064,8 +1076,10 @@ export class RoomService extends EventEmitter {
         this.deleteCurrentAnswers(roomId),
         this.deleteCurrentReveal(roomId),
       ]);
-      updateLogContext({ event: 'game_finished', roomId });
-      this.logger.log(`게임 종료됨(roomId: ${roomId})`);
+      updateLogContext({ roomId });
+      this.logger.log(`게임 종료됨(roomId: ${roomId})`, {
+        event: 'game_finished',
+      });
     } else {
       room.gameStatus = 'LOADING';
       room.currentRound = await this.prepareRoundData(

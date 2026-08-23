@@ -10,6 +10,9 @@ module.exports = {
       node_args: ['-r', 'dotenv/config'],
       exec_mode: 'cluster',
       instances: 2,
+      // cluster 워커별로 로그 파일이 나뉘지 않고(song-quiz-api-out-0.log,
+      // -out-1.log, ...) 하나의 out/error 로그로 합쳐지도록 한다.
+      merge_logs: true,
       // cluster reload는 기본적으로 인스턴스를 한 번에 하나씩 순차 교체하지만,
       // wait_ready 없이는 새 워커가 "listening" 이벤트만 내면 바로 이전 워커를
       // 죽이기 시작한다. wait_ready + listen_timeout으로 새 워커가 실제로 요청을

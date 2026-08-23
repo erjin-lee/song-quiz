@@ -1,5 +1,6 @@
 export {
   LogContext,
+  LogMetadata,
   runWithLogContext,
   getLogContext,
   updateLogContext,

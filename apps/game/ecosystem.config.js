@@ -10,6 +10,9 @@ module.exports = {
       node_args: ['-r', 'dotenv/config'],
       exec_mode: 'cluster',
       instances: 2,
+      // apps/api의 ecosystem.config.js와 동일한 이유로, cluster 워커별로 로그
+      // 파일이 나뉘지 않고 하나의 out/error 로그로 합쳐지도록 한다.
+      merge_logs: true,
       wait_ready: true,
       listen_timeout: 10_000,
       kill_timeout: 5_000,

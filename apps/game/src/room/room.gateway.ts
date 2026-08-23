@@ -104,13 +104,10 @@ export class RoomGateway implements OnGatewayDisconnect {
     this.roomService.on(
       'participant-joined',
       (event: ParticipantJoinedEvent) => {
-        updateLogContext({
-          event: 'player_joined',
-          roomId: event.roomId,
-          userId: event.userId,
-        });
+        updateLogContext({ roomId: event.roomId, userId: event.userId });
         this.logger.log(
           `참가자 입장(roomId: ${event.roomId}, userId: ${event.userId})`,
+          { event: 'player_joined' },
         );
         this.broadcastSystemMessage(
           event.roomId,
@@ -194,13 +191,10 @@ export class RoomGateway implements OnGatewayDisconnect {
       payload.userId,
     );
     if (wasReconnect) {
-      updateLogContext({
-        event: 'reconnect_success',
-        roomId: payload.roomId,
-        userId: payload.userId,
-      });
+      updateLogContext({ roomId: payload.roomId, userId: payload.userId });
       this.logger.log(
         `재접속 성공(roomId: ${payload.roomId}, userId: ${payload.userId})`,
+        { event: 'reconnect_success' },
       );
     }
 

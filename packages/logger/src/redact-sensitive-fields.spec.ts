@@ -48,4 +48,44 @@ describe('redactSensitiveFields', () => {
     const result = redactSensitiveFields({ nickname: 'iu', roomId: 'room-1' });
     expect(result).toEqual({ nickname: 'iu', roomId: 'room-1' });
   });
+
+  // apps/api/src/admin/dto/change-admin-password-request.dto.ts의 실제 필드.
+  // exact-match 방식이었을 때는 password/pwd 목록에 없어 평문 그대로 로그에
+  // 남았다 — 이 테스트가 그 회귀를 잡는다.
+  it.each([
+    'currentPassword',
+    'newPassword',
+    'confirmPassword',
+    'temporaryPassword',
+  ])(
+    '%s처럼 password가 포함된 필드명도 마스킹한다(정확히 일치하지 않아도)',
+    (key) => {
+      const result = redactSensitiveFields({
+        [key]: 'plain-text-secret',
+      }) as Record<string, unknown>;
+      expect(result[key]).toBe('***');
+    },
+  );
+
+  it.each(['statusCode', 'errorCode', 'quizId', 'roomId', 'nickname'])(
+    '%s처럼 민감 단어를 포함하지 않는 필드는 마스킹하지 않는다(오탐 방지)',
+    (key) => {
+      const result = redactSensitiveFields({ [key]: 'value' }) as Record<
+        string,
+        unknown
+      >;
+      expect(result[key]).toBe('value');
+    },
+  );
+
+  it('tokens처럼 민감 단어를 부분 포함하는 컬렉션 필드명은 통째로 마스킹하지 않고 재귀적으로 내려간다', () => {
+    const result = redactSensitiveFields({
+      tokens: [{ accessToken: 'a', label: 'primary' }],
+    }) as Record<string, unknown>;
+
+    const tokens = result.tokens as Record<string, unknown>[];
+    expect(Array.isArray(tokens)).toBe(true);
+    expect(tokens[0].accessToken).toBe('***');
+    expect(tokens[0].label).toBe('primary');
+  });
 });

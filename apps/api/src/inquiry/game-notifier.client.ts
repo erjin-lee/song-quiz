@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { updateLogContext } from 'logger';
 import { internalRequestHeaders } from '../common/internal-service.util';
 
 export interface InquiryResultNotification {
@@ -35,18 +34,15 @@ export class GameNotifierClient {
         },
       );
       if (!response.ok) {
-        updateLogContext({
-          event: 'game_notify_failed',
-          errorCode: String(response.status),
-        });
         this.logger.error(
           `Game 서비스 문의 결과 알림 실패(status: ${response.status}, inquiryId: ${payload.inquiryId})`,
+          { event: 'game_notify_failed', errorCode: String(response.status) },
         );
       }
     } catch (err) {
-      updateLogContext({ event: 'game_notify_failed' });
       this.logger.error(
         `Game 서비스 문의 결과 알림 실패(inquiryId: ${payload.inquiryId}): ${(err as Error).message}`,
+        { event: 'game_notify_failed' },
       );
     }
   }
