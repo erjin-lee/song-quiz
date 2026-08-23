@@ -1,0 +1,69 @@
+name: Terraform Plan (infra/prod)
+
+# infra/terraform 변경이 있는 PR에서 terraform plan만 실행해 검증한다.
+# apply는 이 워크플로우에서 하지 않는다 - 실제 인프라 변경은 개발자가 로컬에서
+# 직접 apply하는 것이 이 프로젝트의 원칙이다 (infra/terraform/CLAUDE.md 참고).
+on:
+  pull_request:
+    paths:
+      - "infra/terraform/**"
+
+permissions:
+  contents: read
+  id-token: write # GitHub OIDC로 AWS IAM Role을 assume하기 위해 필요
+
+# 같은 PR에서 push가 여러 번 겹쳐도 plan이 동시에 두 번 돌지 않도록 직렬화한다.
+concurrency:
+  group: terraform-plan-prod-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    name: terraform plan (prod)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform/environments/prod
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 장기 액세스 키 없이, environments/bootstrap에서 만든 IAM Role을 OIDC로 assume한다.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_CI_ROLE_ARN }}
+          aws-region: ap-northeast-2
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.0" # environments/prod/versions.tf의 required_version과 맞춘다
+          terraform_wrapper: false
+
+      - name: terraform fmt -check
+        working-directory: infra/terraform
+        run: terraform fmt -check -recursive -diff
+
+      # 로컬 SSH 공개키 파일(~/.ssh/deploy-terraform-bastion.pub)은 CI에 없으므로,
+      # 저장소 variable에 넣어둔 같은 공개키 내용을 같은 경로에 써서 plan이 읽을 수 있게 한다.
+      # 공개키라 민감정보는 아니지만, plan이 참조하는 실제 값과 달라지면 매 PR마다
+      # "키가 바뀜" diff가 노이즈로 뜨므로 로컬에서 쓰는 것과 동일한 값을 넣어둬야 한다.
+      - name: Write bastion public key
+        run: |
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "${{ vars.BASTION_PUBLIC_KEY }}" > "$HOME/.ssh/deploy-terraform-bastion.pub"
+
+      - name: terraform init
+        run: terraform init -input=false
+
+      - name: terraform validate
+        run: terraform validate
+
+      - name: terraform plan
+        env:
+          # provider의 profile 인자가 기본값 "default"를 명시적으로 갖고 있어 그대로 두면
+          # 존재하지 않는 프로필을 찾다 실패한다. 빈 문자열로 override해서 위 OIDC 자격증명을 쓰게 한다.
+          TF_VAR_aws_profile: ""
+          TF_VAR_db_password: ${{ secrets.TF_VAR_DB_PASSWORD }}
+        run: terraform plan -input=false -no-color -lock-timeout=5m

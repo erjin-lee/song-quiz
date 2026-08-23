@@ -67,7 +67,7 @@ variable "app_instance_type" {
 variable "db_engine_version" {
   description = "RDS MySQL 엔진 버전"
   type        = string
-  default     = "8.0"
+  default     = "8.4"
 }
 
 variable "db_instance_class" {
