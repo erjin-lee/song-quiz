@@ -1,0 +1,62 @@
+name: Deploy Game
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/game/**'
+      - 'package.json'
+      - 'yarn.lock'
+      - 'turbo.json'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-game
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Set up SSH (bastion 경유로 WAS 접속)
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.BASTION_SSH_KEY }}" > ~/.ssh/bastion_key
+          echo "${{ secrets.WAS_SSH_KEY }}" > ~/.ssh/was_key
+          chmod 600 ~/.ssh/bastion_key ~/.ssh/was_key
+
+          cat >> ~/.ssh/config <<EOF
+          Host bastion
+            HostName ${{ secrets.BASTION_HOST }}
+            User ${{ secrets.BASTION_USER }}
+            IdentityFile ~/.ssh/bastion_key
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+
+          Host was
+            HostName ${{ secrets.WAS_HOST }}
+            User ${{ secrets.WAS_USER }}
+            IdentityFile ~/.ssh/was_key
+            ProxyJump bastion
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Pull, build, PM2 reload on WAS
+        run: |
+          ssh was '
+            set -e
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            cd "${{ secrets.WAS_APP_DIR }}"
+            git fetch --all
+            git checkout main
+            git pull --ff-only
+            corepack enable
+            YARN_ENABLE_IMMUTABLE_INSTALLS=true yarn workspaces focus game
+            yarn workspace game build
+            cd apps/game
+            pm2 startOrReload ecosystem.config.js --update-env
+          '
