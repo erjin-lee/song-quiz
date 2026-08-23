@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-game
+  group: deploy-was
   cancel-in-progress: false
 
 jobs:

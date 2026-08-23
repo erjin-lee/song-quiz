@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-api
+  group: deploy-was
   cancel-in-progress: false
 
 jobs:
