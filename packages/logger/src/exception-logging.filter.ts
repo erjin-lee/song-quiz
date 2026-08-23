@@ -23,18 +23,28 @@ function resolveErrorCode(exception: unknown): string {
  *       new LoggingExceptionFilter(httpAdapterHost.httpAdapter),
  *     inject: [HttpAdapterHost],
  *   }
+ *
+ * BaseExceptionFilter.catch()는 HttpException이 아닌 경우(주로 500)에는
+ * handleUnknownError에서 이미 자체 Logger('ExceptionsHandler')로 error 레벨
+ * 로그를 남긴다(그 로거도 app.useLogger(structuredLogger) 덕에 구조화 로그로
+ * 나간다). 그래서 여기서는 HttpException일 때만 직접 로깅해서 중복 기록을
+ * 피하고, 상태코드에 맞춰 4xx는 warn, 5xx는 error로 레벨을 나눈다.
  */
 @Catch()
 export class LoggingExceptionFilter extends BaseExceptionFilter {
   private readonly logger = new Logger(LoggingExceptionFilter.name);
 
   catch(exception: unknown, host: ArgumentsHost): void {
-    const errorCode = resolveErrorCode(exception);
-    const message = exception instanceof Error ? exception.message : String(exception);
-    const stack = exception instanceof Error ? exception.stack : undefined;
+    updateLogContext({ errorCode: resolveErrorCode(exception) });
 
-    updateLogContext({ errorCode });
-    this.logger.error(message, stack);
+    if (exception instanceof HttpException) {
+      const status = exception.getStatus();
+      if (status >= 500) {
+        this.logger.error(exception.message, exception.stack);
+      } else {
+        this.logger.warn(exception.message);
+      }
+    }
 
     super.catch(exception, host);
   }

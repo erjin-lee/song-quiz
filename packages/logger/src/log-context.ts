@@ -7,7 +7,8 @@ export interface LogContext {
   requestId?: string;
   traceId?: string;
 
-  userId?: number;
+  /** 이 시스템의 유저 식별자는 항상 UUID 문자열이다(User.userId, JWT userId claim, 소켓 payload 전부 string). */
+  userId?: string;
   roomId?: string;
 
   event?: string;

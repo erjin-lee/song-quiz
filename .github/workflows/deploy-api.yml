@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'apps/api/**'
+      - 'packages/logger/**'
       - 'package.json'
       - 'yarn.lock'
       - 'turbo.json'
@@ -56,6 +57,7 @@ jobs:
             git pull --ff-only
             corepack enable
             YARN_ENABLE_IMMUTABLE_INSTALLS=true yarn workspaces focus api
+            yarn workspace logger build
             yarn workspace api build
             cd apps/api
             pm2 startOrReload ecosystem.config.js --update-env

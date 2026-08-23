@@ -1,6 +1,11 @@
 import * as path from 'path';
 import { LoggerService } from '@nestjs/common';
-import { createLogger, format, Logger as WinstonLogger, transports } from 'winston';
+import {
+  createLogger,
+  format,
+  Logger as WinstonLogger,
+  transports,
+} from 'winston';
 import 'winston-daily-rotate-file';
 import { getLogContext, LogContext } from './log-context';
 
@@ -65,20 +70,42 @@ function createWinstonLogger(options: StructuredLoggerOptions): WinstonLogger {
 }
 
 /**
- * Nest는 error(message, stack?, context?) 형태로 마지막 인자에 클래스명을,
- * error 계열에서는 그 앞에 스택 트레이스를 넘긴다. new Logger(ClassName)로 만든
- * 기존 인스턴스도 app.useLogger(structuredLogger)로 등록하면 이 인자 그대로
- * 델리게이트되므로, 호출부 수정 없이도 context/stack이 구조화 로그에 실린다.
+ * Nest의 Logger(ClassName) 인스턴스는 error()에서 optionalParams 끝에 항상
+ * this.context를 붙여 델리게이트한다(예: error(err) → 실제로는 [err, 'ClassName']).
+ * 이 코드베이스는 error(message, error)처럼 두 번째 인자로 Error 객체를 그대로
+ * 넘기는 관행이 흔해서(예: melon-scraper.client.ts, inquiry.service.ts), 마지막
+ * 값만이 아니라 optionalParams 전체를 훑어 Error 인스턴스의 message/stack을
+ * 따로 보존한다. app.useLogger(structuredLogger)로 등록해두면 이 처리가
+ * 호출부 수정 없이 기존 로그 전체에 자동으로 적용된다.
  */
 function splitOptionalParams(optionalParams: unknown[]): {
   context?: string;
   stack?: string;
+  errorMessage?: string;
 } {
-  const last = optionalParams[optionalParams.length - 1];
-  if (typeof last !== 'string') {
-    return {};
-  }
-  return last.includes('\n') ? { stack: last } : { context: last };
+  let context: string | undefined;
+  let stack: string | undefined;
+  let errorMessage: string | undefined;
+
+  optionalParams.forEach((param, index) => {
+    if (param instanceof Error) {
+      errorMessage = param.message;
+      stack = param.stack;
+      return;
+    }
+    if (typeof param !== 'string') {
+      return;
+    }
+    // 마지막 문자열 인자는 Nest 컨벤션상 클래스명(context)이다. 그 외의 문자열은
+    // error(message, err.stack) 처럼 수동으로 넘긴 스택 트레이스로 취급한다.
+    if (index === optionalParams.length - 1 && !param.includes('\n')) {
+      context = param;
+    } else {
+      stack = param;
+    }
+  });
+
+  return { context, stack, errorMessage };
 }
 
 /**
@@ -125,7 +152,8 @@ export class StructuredLogger implements LoggerService {
     message: unknown,
     optionalParams: unknown[],
   ): void {
-    const { context, stack } = splitOptionalParams(optionalParams);
+    const { context, stack, errorMessage } =
+      splitOptionalParams(optionalParams);
 
     this.winston.log({
       level: WINSTON_LEVEL_BY_NEST_LEVEL[nestLevel],
@@ -134,6 +162,7 @@ export class StructuredLogger implements LoggerService {
       ...getLogContext(),
       ...(context ? { context } : {}),
       ...(stack ? { stack } : {}),
+      ...(errorMessage ? { errorMessage } : {}),
     });
   }
 }

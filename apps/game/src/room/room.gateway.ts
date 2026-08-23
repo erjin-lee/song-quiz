@@ -185,7 +185,10 @@ export class RoomGateway implements OnGatewayDisconnect {
 
     // fetchSockets()로 크로스 인스턴스 다중 탭/기기 감지를 하려면 소켓에 userId를
     // 실어둬야 한다(RemoteSocket.data는 어댑터를 통해 다른 인스턴스에도 전달됨).
+    // roomId도 함께 저장해두면 chat:message 등 payload에 roomId가 없는 후속 이벤트도
+    // SocketRequestContextInterceptor가 로그 컨텍스트에 채울 수 있다.
     client.data.userId = payload.userId;
+    client.data.roomId = payload.roomId;
 
     await client.join(payload.roomId);
     await client.join(this.userChannel(payload.userId));
