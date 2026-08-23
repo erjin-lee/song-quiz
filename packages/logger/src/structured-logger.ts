@@ -7,9 +7,8 @@ import {
   transports,
 } from 'winston';
 import 'winston-daily-rotate-file';
+import { createConsoleFormat, TIMESTAMP_FORMAT } from './console-format';
 import { getLogContext, LogContext } from './log-context';
-
-const TIMESTAMP_FORMAT = 'YYYY-MM-DD HH:mm:ss.SSS';
 
 export interface StructuredLoggerOptions {
   service: LogContext['service'];
@@ -39,9 +38,9 @@ function createWinstonLogger(options: StructuredLoggerOptions): WinstonLogger {
     level: 'debug',
     transports: [
       new transports.Console({
-        format: format.combine(
-          format.timestamp({ format: TIMESTAMP_FORMAT }),
-          format.printf(({ timestamp, level, message, context, ...meta }) => {
+        format: createConsoleFormat(
+          options.environment,
+          ({ timestamp, level, message, context, ...meta }) => {
             const contextLabel = context ? `[${context}] ` : '';
             const rest = Object.entries(meta)
               .filter(([, value]) => value !== undefined)
@@ -51,7 +50,7 @@ function createWinstonLogger(options: StructuredLoggerOptions): WinstonLogger {
               )
               .join(' ');
             return `${timestamp} [${level}] ${contextLabel}${message}${rest ? ` ${rest}` : ''}`;
-          }),
+          },
         ),
       }),
       new transports.DailyRotateFile({

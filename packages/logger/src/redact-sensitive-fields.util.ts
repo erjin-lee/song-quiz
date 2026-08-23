@@ -5,8 +5,20 @@ const SENSITIVE_KEYS = new Set([
   'code',
   'token',
   'accesstoken',
+  'access_token',
+  'refreshtoken',
+  'refresh_token',
+  'idtoken',
+  'id_token',
+  'apikey',
+  'api_key',
+  'clientsecret',
+  'client_secret',
+  'credential',
+  'credentials',
   'secret',
   'authorization',
+  'cookie',
 ]);
 
 const REDACTED = '***';

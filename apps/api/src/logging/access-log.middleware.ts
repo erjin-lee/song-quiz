@@ -1,8 +1,17 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import { NextFunction, Request, Response } from 'express';
-import { getLogContext } from 'logger';
+import { getLogContext, summarizeForLog } from 'logger';
 import { accessLogger } from './access-logger.factory';
-import { redactSensitiveFields } from './redact-sensitive-fields.util';
+
+/**
+ * logging은 leaf/infra 모듈이라 user/admin 도메인 모듈을 import할 수 없다
+ * (ARCHITECTURE.md). UserAuthGuard/AdminAuthGuard가 실제로 채우는 필드 모양만
+ * 구조적으로 흉내내 검증된 userId가 있으면 그것부터 쓴다.
+ */
+interface RequestWithVerifiedIdentity extends Request {
+  user?: { userId?: string };
+  admin?: { userId?: string };
+}
 
 function extractClaimedUserId(authHeader?: string): string | undefined {
   if (!authHeader?.startsWith('Bearer ')) {
@@ -35,7 +44,11 @@ function extractErrorMessage(body: unknown): string | undefined {
 
 @Injectable()
 export class AccessLogMiddleware implements NestMiddleware {
-  use(req: Request, res: Response, next: NextFunction): void {
+  use(
+    req: RequestWithVerifiedIdentity,
+    res: Response,
+    next: NextFunction,
+  ): void {
     const startedAt = process.hrtime.bigint();
 
     let responseBody: unknown;
@@ -46,10 +59,15 @@ export class AccessLogMiddleware implements NestMiddleware {
     };
 
     res.on('finish', () => {
+      // res.on('finish')는 응답이 다 나간 뒤(핸들러 실행 이후) 발생하므로,
+      // UserAuthGuard/AdminAuthGuard를 통과한 요청이면 이 시점엔 이미
+      // req.user/req.admin이 채워져 있다.
+      const verifiedUserId = req.user?.userId ?? req.admin?.userId;
+
       const responseTimeMs =
         Number(process.hrtime.bigint() - startedAt) / 1_000_000;
-      const query = redactSensitiveFields(req.query);
-      const body = redactSensitiveFields(req.body);
+      const query = summarizeForLog(req.query);
+      const body = summarizeForLog(req.body);
 
       const level =
         res.statusCode >= 500
@@ -71,7 +89,14 @@ export class AccessLogMiddleware implements NestMiddleware {
         ...(body && Object.keys(body as object).length ? { body } : {}),
         statusCode: res.statusCode,
         responseTimeMs: Math.round(responseTimeMs * 100) / 100,
-        userId: extractClaimedUserId(req.headers.authorization),
+        // verifiedUserId는 서명 검증을 거친 값, claimedUserId는 Authorization
+        // 헤더의 JWT를 서명 검증 없이 그냥 디코드한 값이라 신뢰할 수 없다 —
+        // 절대 같은 필드명(userId)으로 섞어 쓰지 않는다.
+        ...(verifiedUserId
+          ? { userId: verifiedUserId }
+          : {
+              claimedUserId: extractClaimedUserId(req.headers.authorization),
+            }),
         userAgent: req.headers['user-agent'],
         ...(res.statusCode >= 400
           ? { errorMessage: extractErrorMessage(responseBody) }

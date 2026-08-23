@@ -17,7 +17,8 @@
 - `src/main.ts`: 부트스트랩, 포트 설정(`PORT`, 기본 `8002`), Socket.IO Redis 어댑터 연결.
 - `src/app/`: 스캐폴드(`app.module.ts` 등).
 - `src/room/`: 유일한 도메인 모듈. `room.controller.ts`(REST), `room.gateway.ts`(Socket.IO `/rooms`), `room.service.ts`, `room-lock.service.ts`(분산 락), `room-timer.service.ts`(지연 실행), `internal-room.controller.ts`(apps/api 전용), `clients/`(QuizClient, AuthClient), `dto/`.
-- `src/cache/`, `src/logging/`, `src/common/`: apps/api와 같은 이름의 동일한 목적 모듈이지만 별도 프로세스라 파일을 그대로 복제해서 갖고 있다(ADR-0003과 동일하게, 아직 공유 패키지를 두지 않기로 한 결정에 따른 것 — 공유가 필요해지면 `packages/`에 워크스페이스로 뽑는 걸 우선 검토한다).
+- `src/cache/`, `src/common/`: apps/api와 같은 이름의 동일한 목적 모듈이지만 별도 프로세스라 파일을 그대로 복제해서 갖고 있다(ADR-0003과 동일한 이유).
+- `src/logging/`: `AccessLogMiddleware`(정책이 api와 다를 수 있어 그대로 복제)와 winston access logger만 남아있고, 구조화 로거·requestId/traceId 전파·redaction·formatter 등 서비스 독립적인 부분은 `packages/logger`(apps/api와 공유하는 워크스페이스)로 옮겨졌다.
 - 새 도메인을 이 서비스에 추가하지 않는다 — room 이외의 기능은 apps/api에 속한다.
 
 # Redis/Socket.IO 동작

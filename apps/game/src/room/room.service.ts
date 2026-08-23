@@ -13,6 +13,7 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { updateLogContext } from 'logger';
 import { CacheService } from '../cache/cache.service';
 import { QuizClient, QuizRoundData } from './clients/quiz.client';
 import { CreateRoomRequestDto } from './dto/create-room-request.dto';
@@ -248,6 +249,9 @@ export class RoomService extends EventEmitter {
     await this.saveRoom(room);
     await this.addToIndex(room.roomId);
 
+    updateLogContext({ event: 'room_created', roomId: room.roomId });
+    this.logger.log(`방 생성됨(roomId: ${room.roomId}, quizId: ${dto.quizId})`);
+
     const accessToken = this.computeMembershipToken(room.roomId, hostUserId);
     return { room: this.toPublicRoom(room), userId: hostUserId, accessToken };
   }
@@ -332,6 +336,9 @@ export class RoomService extends EventEmitter {
 
       room.participants.splice(participantIndex, 1);
       room.curUserCnt = room.participants.length;
+
+      updateLogContext({ event: 'player_left', roomId, userId });
+      this.logger.log(`참가자 퇴장(roomId: ${roomId}, userId: ${userId})`);
 
       if (room.curUserCnt === 0) {
         await this.deleteRoom(roomId);
@@ -506,6 +513,8 @@ export class RoomService extends EventEmitter {
       await this.prepareFirstRound(roomId, room);
 
       await this.saveRoom(room);
+      updateLogContext({ event: 'game_started', roomId });
+      this.logger.log(`게임 시작됨(roomId: ${roomId})`);
       this.emit('room-updated', this.toPublicRoom(room));
       return room;
     });
@@ -551,10 +560,23 @@ export class RoomService extends EventEmitter {
   ): Promise<void> {
     // incrementPlayCount와 getQuizRounds는 서로 결과를 필요로 하지 않으므로 병렬로
     // 호출한다 — 순차 호출하면 apps/api 왕복 시간이 그대로 두 배로 게임 시작 지연에 더해진다.
-    const [, allRounds] = await Promise.all([
-      this.quizClient.incrementPlayCount(room.quizId),
-      this.quizClient.getQuizRounds(room.quizId),
-    ]);
+    let allRounds: QuizRoundData[];
+    try {
+      const [, rounds] = await Promise.all([
+        this.quizClient.incrementPlayCount(room.quizId),
+        this.quizClient.getQuizRounds(room.quizId),
+      ]);
+      allRounds = rounds;
+    } catch (err) {
+      updateLogContext({
+        event: 'quiz_snapshot_failed',
+        errorCode: 'QUIZ_ROUNDS_FETCH_FAILED',
+      });
+      this.logger.error(
+        `퀴즈 라운드 스냅샷 조회 실패(roomId: ${roomId}, quizId: ${room.quizId}): ${(err as Error).message}`,
+      );
+      throw err;
+    }
     if (allRounds.length === 0) {
       throw new NotFoundException('퀴즈에 출제곡이 없습니다.');
     }
@@ -995,6 +1017,7 @@ export class RoomService extends EventEmitter {
         this.emit('room-updated', this.toPublicRoom(room));
       });
     } catch (err) {
+      updateLogContext({ event: 'game_state_error', roomId });
       this.logger.error(
         `스피드 모드 정답 자동 공개 처리 실패(roomId: ${roomId}), 재시도되도록 예약을 유지합니다: ${(err as Error).message}`,
       );
@@ -1018,6 +1041,7 @@ export class RoomService extends EventEmitter {
         this.emit('room-updated', this.toPublicRoom(room));
       });
     } catch (err) {
+      updateLogContext({ event: 'game_state_error', roomId });
       this.logger.error(
         `스피드 모드 자동 다음 라운드 처리 실패(roomId: ${roomId}), 재시도되도록 예약을 유지합니다: ${(err as Error).message}`,
       );
@@ -1040,6 +1064,8 @@ export class RoomService extends EventEmitter {
         this.deleteCurrentAnswers(roomId),
         this.deleteCurrentReveal(roomId),
       ]);
+      updateLogContext({ event: 'game_finished', roomId });
+      this.logger.log(`게임 종료됨(roomId: ${roomId})`);
     } else {
       room.gameStatus = 'LOADING';
       room.currentRound = await this.prepareRoundData(

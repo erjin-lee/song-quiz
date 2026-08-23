@@ -9,6 +9,8 @@ export interface LogContext {
 
   /** 이 시스템의 유저 식별자는 항상 UUID 문자열이다(User.userId, JWT userId claim, 소켓 payload 전부 string). */
   userId?: string;
+  /** 서명 검증 없이 JWT payload를 그대로 디코드한 값 등, 신뢰할 수 없는 출처의 userId. userId와 동시에 채우지 않는다. */
+  claimedUserId?: string;
   roomId?: string;
 
   event?: string;

@@ -1,4 +1,5 @@
 import { INestApplicationContext, Logger } from '@nestjs/common';
+import { updateLogContext } from 'logger';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { Redis } from 'ioredis';
@@ -70,6 +71,10 @@ export class RedisIoAdapter extends IoAdapter {
       }
     }
 
+    updateLogContext({
+      event: 'redis_connection_failed',
+      errorCode: 'SOCKET_IO_REDIS_ADAPTER_CONNECT_FAILED',
+    });
     throw new Error(
       `Socket.IO Redis 어댑터 연결에 ${CONNECT_ATTEMPTS}회 모두 실패했습니다. REDIS_HOST 연결 상태를 확인하세요.`,
     );

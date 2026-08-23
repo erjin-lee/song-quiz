@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { updateLogContext } from 'logger';
 import { Redis } from 'ioredis';
 import { CacheService } from '../cache/cache.service';
 import { LOCK_ACQUIRE_TIMEOUT_MS } from './room-lock.service';
@@ -266,6 +267,7 @@ export class RoomTimerService implements OnModuleDestroy {
       );
       return result === 1;
     } catch (err) {
+      updateLogContext({ event: 'timer_claim_failed' });
       this.logger.error(
         `타이머 claim 실패(${member}): ${(err as Error).message}`,
       );

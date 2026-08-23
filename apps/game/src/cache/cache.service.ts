@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnApplicationShutdown } from '@nestjs/common';
+import { updateLogContext } from 'logger';
 import { Redis } from 'ioredis';
 
 interface LocalCacheEntry {
@@ -183,6 +184,7 @@ export class CacheService implements OnApplicationShutdown {
     });
     redis.on('error', (err) => {
       if (this.redisReady) {
+        updateLogContext({ event: 'redis_connection_failed' });
         this.logger.warn(
           `Redis 오류 발생, 로컬 메모리 캐시로 폴백합니다: ${err.message}`,
         );
@@ -194,6 +196,7 @@ export class CacheService implements OnApplicationShutdown {
     });
 
     redis.connect().catch((err: Error) => {
+      updateLogContext({ event: 'redis_connection_failed' });
       this.logger.warn(
         `Redis 연결 실패, 로컬 메모리 캐시로 폴백합니다: ${err.message}`,
       );
