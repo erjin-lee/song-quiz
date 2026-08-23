@@ -15,6 +15,10 @@ resource "aws_db_instance" "main" {
   engine_version = var.db_engine_version
   instance_class = var.db_instance_class
 
+  # 메이저 버전 업그레이드(예: 8.0 -> 8.4)를 허용한다. 이게 없으면 AWS가 engine_version
+  # 변경 자체를 거부한다. 마이너 버전 변경에는 영향 없다.
+  allow_major_version_upgrade = true
+
   allocated_storage = var.db_allocated_storage
   storage_type      = "gp3"
   storage_encrypted = true
