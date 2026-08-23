@@ -5,14 +5,10 @@ import {
   Injectable,
   NestInterceptor,
 } from '@nestjs/common';
+import { trace } from '@opentelemetry/api';
 import { Observable } from 'rxjs';
 import { Socket } from 'socket.io';
 import { LogContext, runWithLogContext } from './log-context';
-
-function readHandshakeHeader(client: Socket, name: string): string | undefined {
-  const value = client.handshake?.headers?.[name];
-  return typeof value === 'string' && value.trim() ? value : undefined;
-}
 
 function readString(value: unknown): string | undefined {
   return typeof value === 'string' && value ? value : undefined;
@@ -25,9 +21,14 @@ function readString(value: unknown): string | undefined {
  * 처리 쪽에서 client.data에 저장해둔 값을 fallback으로 사용한다. 게이트웨이
  * 클래스에 @UseInterceptors(...)로 붙여 쓴다.
  *
- * traceId는 HttpRequestContextMiddleware와 마찬가지로 임의 생성하지 않는다 —
- * 핸드셰이크의 x-trace-id 헤더가 있을 때만(연결 시 한 번 읽어 소켓 생명주기
- * 동안 client.data에 재사용) 채운다.
+ * traceId는 HttpRequestContextMiddleware와 동일하게 OTel 활성 span에서만
+ * 읽는다(@opentelemetry/instrumentation-socket.io가 메시지 이벤트마다 receive
+ * span을 새로 연다). 예전에는 핸드셰이크의 x-trace-id를 연결 시점에 한 번 읽어
+ * client.data에 캐싱해 소켓 생명주기 내내 재사용했는데, OTel은 메시지마다
+ * 독립된 새 trace를 만들기 때문에 그 캐싱된 값을 계속 쓰면 StructuredLogger가
+ * 매 로그 호출마다 활성 span에서 새로 읽는 spanId(§structured-logger.ts)와
+ * 서로 다른 trace를 가리키는 traceId가 한 로그에 같이 찍히는 문제가 있었다.
+ * 활성 span이 없으면(계측 비활성화 등) traceId도 없다.
  */
 @Injectable()
 export class SocketRequestContextInterceptor implements NestInterceptor {
@@ -36,13 +37,7 @@ export class SocketRequestContextInterceptor implements NestInterceptor {
     const client = wsContext.getClient<Socket>();
     const data = wsContext.getData<Record<string, unknown> | undefined>();
 
-    let traceId = client.data?.traceId as string | undefined;
-    if (traceId === undefined) {
-      traceId = readHandshakeHeader(client, 'x-trace-id');
-      if (traceId) {
-        client.data = { ...client.data, traceId };
-      }
-    }
+    const traceId = trace.getActiveSpan()?.spanContext().traceId;
 
     const roomId = readString(data?.roomId) ?? readString(client.data?.roomId);
     const userId = readString(data?.userId) ?? readString(client.data?.userId);

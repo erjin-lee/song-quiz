@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { LoggerService } from '@nestjs/common';
+import { trace } from '@opentelemetry/api';
 import {
   createLogger,
   format,
@@ -164,11 +165,20 @@ export class StructuredLogger implements LoggerService {
     const { context, stack, errorMessage, metadata } =
       splitOptionalParams(optionalParams);
 
+    // spanId는 requestId/traceId와 달리 ambient LogContext(AsyncLocalStorage)에
+    // 넣지 않는다 — 같은 요청 안에서도 custom span이 열리고 닫힐 때마다 바뀌는
+    // "로그 한 건" 수준의 값이라, 매 로그 호출 시점에 활성 span에서 직접 읽어야
+    // 나중에 game.prepare_round 같은 custom span을 추가했을 때 그 안에서 찍는
+    // 로그가 자동으로 올바른 spanId를 갖는다(log-context.ts의 event/errorCode/
+    // durationMs를 ambient에 넣지 않는 이유와 동일).
+    const spanId = trace.getActiveSpan()?.spanContext().spanId;
+
     this.winston.log({
       level: WINSTON_LEVEL_BY_NEST_LEVEL[nestLevel],
       message: typeof message === 'string' ? message : JSON.stringify(message),
       ...this.base,
       ...getLogContext(),
+      ...(spanId ? { spanId } : {}),
       ...(context ? { context } : {}),
       ...(stack ? { stack } : {}),
       ...(errorMessage ? { errorMessage } : {}),

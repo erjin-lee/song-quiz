@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Injectable, NestMiddleware } from '@nestjs/common';
+import { trace } from '@opentelemetry/api';
 import { NextFunction, Request, Response } from 'express';
 import { REQUEST_ID_HEADER, TRACE_ID_HEADER } from './correlation-headers';
 import { LogContext, runWithLogContext } from './log-context';
@@ -15,18 +16,20 @@ function readHeader(req: Request, name: string): string | undefined {
  * 아래에서 실행한다. AppModule.configure()에서 다른 미들웨어보다 먼저
  * 등록해야 한다.
  *
- * traceId는 requestId와 달리 우리가 임의로 생성하지 않는다 — x-trace-id
- * 헤더로 들어온 경우에만 그대로 통과시킨다. 지금은 아무도 이 헤더를 보내지
- * 않지만, 나중에 OpenTelemetry(또는 다른 tracer)가 붙으면 그게 채우는 값을
- * 이 자리에서 그대로 읽기만 하면 되는 구조로 남겨둔다. 우리가 만든 임의의
- * 값을 traceId로 자처하면 실제 분산 트레이싱이 붙었을 때 진짜 trace id와
- * 구분이 안 된다.
+ * traceId는 requestId와 달리 우리가 임의로 생성하지 않는다. OpenTelemetry
+ * 자동 계측(@opentelemetry/instrumentation-http)이 이 미들웨어보다 먼저
+ * 요청마다 span을 열어두므로, 그 활성 span의 실제 traceId만 사용한다 — 이게
+ * 예전부터 여기 남겨뒀던 "나중에 tracer가 붙으면 그대로 읽기만 하면 되는
+ * 자리"다. x-trace-id 헤더로의 폴백은 OTel이 실제로 붙기 전까지의 임시
+ * 조치였으므로 제거했다 — 활성 span이 없으면(SDK 미기동, tracing 비활성화
+ * 등) traceId도 없다. 우리가 만든 임의의 값을 traceId로 자처하지 않는다 —
+ * 실제 분산 트레이싱과 구분이 안 되기 때문이다.
  */
 @Injectable()
 export class HttpRequestContextMiddleware implements NestMiddleware {
   use(req: Request, res: Response, next: NextFunction): void {
     const requestId = readHeader(req, REQUEST_ID_HEADER) ?? randomUUID();
-    const traceId = readHeader(req, TRACE_ID_HEADER);
+    const traceId = trace.getActiveSpan()?.spanContext().traceId;
 
     res.setHeader(REQUEST_ID_HEADER, requestId);
     if (traceId) {
