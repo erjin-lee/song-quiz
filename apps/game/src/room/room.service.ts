@@ -13,13 +13,8 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { CacheService } from '../cache/cache.service';
-import { QuizAnswer } from '../quiz/entities/quiz-answer.entity';
-import { QuizArtist } from '../quiz/entities/quiz-artist.entity';
-import { QuizSong } from '../quiz/entities/quiz-song.entity';
-import { Quiz } from '../quiz/entities/quiz.entity';
+import { QuizClient, QuizRoundData } from './clients/quiz.client';
 import { CreateRoomRequestDto } from './dto/create-room-request.dto';
 import { JoinRoomRequestDto } from './dto/join-room-request.dto';
 import { LeaveRoomResultDto } from './dto/leave-room-result.dto';
@@ -45,6 +40,7 @@ const ROOM_INDEX_LOCK_KEY = 'room-index';
 const ROOM_CACHE_KEY_PREFIX = 'room:';
 const PASSWORD_ATTEMPT_CACHE_KEY_PREFIX = 'room:pwd-attempts:';
 const SONG_ORDER_CACHE_KEY_PREFIX = 'room:song-order:';
+const ROUNDS_SNAPSHOT_CACHE_KEY_PREFIX = 'room:rounds:';
 const CURRENT_ANSWERS_CACHE_KEY_PREFIX = 'room:answers:';
 const CURRENT_REVEAL_CACHE_KEY_PREFIX = 'room:reveal:';
 const CHAT_HISTORY_CACHE_KEY_PREFIX = 'room:chat:';
@@ -122,13 +118,6 @@ export interface ParticipantJoinedEvent {
   nickname: string;
 }
 
-interface RoundRevealInfo {
-  quizSongId: string;
-  songNm: string;
-  atstNm: string;
-  albmNm: string;
-}
-
 /**
  * 캐시에 저장하는 내부 표현. pwdHash는 절대 클라이언트로 나가면 안 되므로(비밀방
  * 비밀번호 해시가 노출되면 오프라인 대입 공격이 가능해진다), RoomItemDto(공개 응답
@@ -156,14 +145,7 @@ export class RoomService extends EventEmitter {
     private readonly cacheService: CacheService,
     private readonly roomLockService: RoomLockService,
     private readonly roomTimerService: RoomTimerService,
-    @InjectRepository(Quiz)
-    private readonly quizRepository: Repository<Quiz>,
-    @InjectRepository(QuizArtist)
-    private readonly quizArtistRepository: Repository<QuizArtist>,
-    @InjectRepository(QuizSong)
-    private readonly quizSongRepository: Repository<QuizSong>,
-    @InjectRepository(QuizAnswer)
-    private readonly quizAnswerRepository: Repository<QuizAnswer>,
+    private readonly quizClient: QuizClient,
   ) {
     super();
     this.roomTimerService.registerHandler('round-timeout', (roomId) =>
@@ -211,27 +193,12 @@ export class RoomService extends EventEmitter {
     dto: CreateRoomRequestDto,
     accountUserId?: string,
   ): Promise<RoomJoinResultDto> {
-    const quiz = await this.quizRepository.findOne({
-      where: { quizId: dto.quizId, useYn: 'Y' },
-    });
-    if (!quiz) {
-      throw new NotFoundException(
-        `퀴즈를 찾을 수 없습니다. (quizId: ${dto.quizId})`,
-      );
-    }
+    const summary = await this.quizClient.getSummary(dto.quizId);
 
-    const quizArtists = await this.quizArtistRepository.find({
-      where: { quizId: dto.quizId },
-      relations: { artist: true },
-    });
-    const songCount = await this.quizSongRepository.count({
-      where: { quizId: dto.quizId },
-    });
-
-    const songLimit = dto.songLimit ?? songCount;
-    if (songLimit > songCount) {
+    const songLimit = dto.songLimit ?? summary.songCount;
+    if (songLimit > summary.songCount) {
       throw new BadRequestException(
-        `출제곡 수는 퀴즈 전체 출제곡 수(${songCount}곡)를 초과할 수 없습니다.`,
+        `출제곡 수는 퀴즈 전체 출제곡 수(${summary.songCount}곡)를 초과할 수 없습니다.`,
       );
     }
 
@@ -250,13 +217,13 @@ export class RoomService extends EventEmitter {
       roomId: randomUUID(),
       roomTtl: dto.roomTtl,
       quizId: dto.quizId,
-      quizTtl: quiz.quizTtl,
-      quizDesc: quiz.quizDesc,
-      songCount,
+      quizTtl: summary.quizTtl,
+      quizDesc: summary.quizDesc,
+      songCount: summary.songCount,
       songLimit,
-      quizThumbImgUrl: quiz.thumbImgUrl,
-      atstIds: quizArtists.map((quizArtist) => quizArtist.atstId),
-      atstNms: quizArtists.map((quizArtist) => quizArtist.artist.atstNm),
+      quizThumbImgUrl: summary.thumbImgUrl,
+      atstIds: summary.atstIds,
+      atstNms: summary.atstNms,
       isRandom: dto.isRandom,
       isUnlisted: dto.isUnlisted ?? false,
       isPrivate: dto.isPrivate ?? false,
@@ -479,25 +446,11 @@ export class RoomService extends EventEmitter {
         );
       }
 
-      const quiz = await this.quizRepository.findOne({
-        where: { quizId: dto.quizId, useYn: 'Y' },
-      });
-      if (!quiz) {
-        throw new NotFoundException(
-          `퀴즈를 찾을 수 없습니다. (quizId: ${dto.quizId})`,
-        );
-      }
-      const quizArtists = await this.quizArtistRepository.find({
-        where: { quizId: dto.quizId },
-        relations: { artist: true },
-      });
-      const songCount = await this.quizSongRepository.count({
-        where: { quizId: dto.quizId },
-      });
-      const songLimit = dto.songLimit ?? songCount;
-      if (songLimit > songCount) {
+      const summary = await this.quizClient.getSummary(dto.quizId);
+      const songLimit = dto.songLimit ?? summary.songCount;
+      if (songLimit > summary.songCount) {
         throw new BadRequestException(
-          `출제곡 수는 퀴즈 전체 출제곡 수(${songCount}곡)를 초과할 수 없습니다.`,
+          `출제곡 수는 퀴즈 전체 출제곡 수(${summary.songCount}곡)를 초과할 수 없습니다.`,
         );
       }
 
@@ -516,12 +469,12 @@ export class RoomService extends EventEmitter {
 
       room.roomTtl = dto.roomTtl;
       room.quizId = dto.quizId;
-      room.quizTtl = quiz.quizTtl;
-      room.quizDesc = quiz.quizDesc;
-      room.quizThumbImgUrl = quiz.thumbImgUrl;
-      room.atstIds = quizArtists.map((quizArtist) => quizArtist.atstId);
-      room.atstNms = quizArtists.map((quizArtist) => quizArtist.artist.atstNm);
-      room.songCount = songCount;
+      room.quizTtl = summary.quizTtl;
+      room.quizDesc = summary.quizDesc;
+      room.quizThumbImgUrl = summary.thumbImgUrl;
+      room.atstIds = summary.atstIds;
+      room.atstNms = summary.atstNms;
+      room.songCount = summary.songCount;
       room.songLimit = songLimit;
       room.isRandom = dto.isRandom;
       room.speedModeEnabled = dto.speedModeEnabled;
@@ -586,23 +539,41 @@ export class RoomService extends EventEmitter {
     });
   }
 
-  /** songOrder를 새로 구성하고 첫 라운드를 준비해 room을 LOADING 상태로 만든다(room을 직접 변경한다). */
+  /**
+   * songOrder를 새로 구성하고, 게임 전체에서 쓸 라운드 데이터를 apps/api에서
+   * 한 번에 스냅샷으로 받아 Redis에 캐시한 뒤 첫 라운드를 준비해 room을 LOADING
+   * 상태로 만든다(room을 직접 변경한다). 라운드가 진행되는 동안(advanceToNextRound)
+   * 에는 이 스냅샷만 읽고 apps/api를 다시 호출하지 않는다.
+   */
   private async prepareFirstRound(
     roomId: string,
     room: RoomItemDto,
   ): Promise<void> {
-    const songOrder = await this.buildSongOrder(
-      room.quizId,
-      room.isRandom,
-      room.songLimit,
-    );
-    if (songOrder.length === 0) {
+    // incrementPlayCount와 getQuizRounds는 서로 결과를 필요로 하지 않으므로 병렬로
+    // 호출한다 — 순차 호출하면 apps/api 왕복 시간이 그대로 두 배로 게임 시작 지연에 더해진다.
+    const [, allRounds] = await Promise.all([
+      this.quizClient.incrementPlayCount(room.quizId),
+      this.quizClient.getQuizRounds(room.quizId),
+    ]);
+    if (allRounds.length === 0) {
       throw new NotFoundException('퀴즈에 출제곡이 없습니다.');
     }
 
-    await this.quizRepository.increment({ quizId: room.quizId }, 'playCnt', 1);
+    // quizSeq ASC 순서로 온 전체 라운드를 셔플/슬라이스한다(셔플 자체는 게임 서비스
+    // 로컬 관심사라 apps/api에 위임하지 않는다). songLimit이 songCount보다 작으면
+    // 실제로 출제되는 곡만 스냅샷에 남겨 Redis 페이로드를 불필요하게 키우지 않는다.
+    const ordered = room.isRandom ? this.shuffle(allRounds) : allRounds;
+    const selectedRounds = ordered.slice(0, room.songLimit);
+    const songOrder = selectedRounds.map((roundData) => roundData.quizSongId);
+    const snapshot: Record<string, QuizRoundData> = {};
+    for (const roundData of selectedRounds) {
+      snapshot[roundData.quizSongId] = roundData;
+    }
 
-    await this.setSongOrder(roomId, songOrder);
+    await Promise.all([
+      this.setSongOrder(roomId, songOrder),
+      this.setRoundsSnapshot(roomId, snapshot),
+    ]);
     room.gameStatus = 'LOADING';
     room.currentRound = await this.prepareRoundData(
       roomId,
@@ -1065,6 +1036,7 @@ export class RoomService extends EventEmitter {
       room.currentRound = null;
       await Promise.all([
         this.deleteSongOrder(roomId),
+        this.deleteRoundsSnapshot(roomId),
         this.deleteCurrentAnswers(roomId),
         this.deleteCurrentReveal(roomId),
       ]);
@@ -1124,20 +1096,6 @@ export class RoomService extends EventEmitter {
     });
   }
 
-  private async buildSongOrder(
-    quizId: string,
-    isRandom: boolean,
-    songLimit: number,
-  ): Promise<string[]> {
-    const quizSongs = await this.quizSongRepository.find({
-      where: { quizId },
-      order: { quizSeq: 'ASC' },
-    });
-    const ids = quizSongs.map((quizSong) => quizSong.quizSongId);
-    const ordered = isRandom ? this.shuffle(ids) : ids;
-    return ordered.slice(0, songLimit);
-  }
-
   private shuffle<T>(items: T[]): T[] {
     const result = [...items];
     for (let i = result.length - 1; i > 0; i--) {
@@ -1147,43 +1105,39 @@ export class RoomService extends EventEmitter {
     return result;
   }
 
+  /**
+   * 게임 시작 시 받아둔 라운드 스냅샷(setRoundsSnapshot)에서 이 라운드의 곡 데이터를
+   * 읽어 currentAnswers/currentReveal 캐시를 채우고 공개 라운드 상태를 만든다. apps/api를
+   * 다시 호출하지 않는다.
+   */
   private async prepareRoundData(
     roomId: string,
     quizSongId: string,
     roundIndex: number,
     totalRounds: number,
   ): Promise<RoundPublicStateDto> {
-    const quizSong = await this.quizSongRepository.findOne({
-      where: { quizSongId },
-      relations: { song: { artist: true, album: true } },
-    });
-    if (!quizSong) {
+    const snapshot = await this.getRoundsSnapshot(roomId);
+    const roundData = snapshot[quizSongId];
+    if (!roundData) {
       throw new NotFoundException(
         `출제곡을 찾을 수 없습니다. (quizSongId: ${quizSongId})`,
       );
     }
 
-    const quizAnswers = await this.quizAnswerRepository.find({
-      where: { quizSongId },
-    });
-
-    await this.setCurrentAnswers(
-      roomId,
-      quizAnswers.map((answer) => answer.answerTxt),
-    );
+    await this.setCurrentAnswers(roomId, roundData.answers);
     await this.setCurrentReveal(roomId, {
-      quizSongId: quizSong.quizSongId,
-      songNm: quizSong.song.songNm,
-      atstNm: quizSong.song.artist.atstNm,
-      albmNm: quizSong.song.album.albmNm,
+      quizSongId: roundData.quizSongId,
+      songNm: roundData.songNm,
+      atstNm: roundData.atstNm,
+      albmNm: roundData.albmNm,
     });
 
     return {
       roundIndex,
       totalRounds,
-      youtubeVideoId: quizSong.youtubeVideoId,
-      startSec: quizSong.startSec,
-      endSec: quizSong.endSec,
+      youtubeVideoId: roundData.youtubeVideoId,
+      startSec: roundData.startSec,
+      endSec: roundData.endSec,
       readyUserIds: [],
       correctUserIds: [],
       skipUserIds: [],
@@ -1258,6 +1212,7 @@ export class RoomService extends EventEmitter {
     this.clearSpeedModeTimer(roomId);
     await Promise.all([
       this.deleteSongOrder(roomId),
+      this.deleteRoundsSnapshot(roomId),
       this.deleteCurrentAnswers(roomId),
       this.deleteCurrentReveal(roomId),
       this.cacheService.del(this.chatHistoryKey(roomId)),
@@ -1270,12 +1225,13 @@ export class RoomService extends EventEmitter {
   }
 
   /**
-   * songOrder/currentAnswers/currentReveal는 room 상태와 마찬가지로 여러 인스턴스가
-   * 공유해야 하는 라운드 진행 데이터라 get/set이 아니라 getStrict/setStrict를 쓴다.
-   * 일반 get/set의 로컬 폴백을 허용하면, room 상태(setStrict로 이미 보호됨)는
-   * Redis에 반영됐는데 이 데이터만 이 인스턴스의 로컬 캐시에만 남는 상황이 생길 수
-   * 있다 — 다른 인스턴스가 곡 순서를 빈 배열로 읽어 게임을 조기 종료하거나, 정답을
-   * 인식하지 못하는 등 감지하기 어려운 정합성 문제로 이어진다.
+   * songOrder/roundsSnapshot/currentAnswers/currentReveal는 room 상태와 마찬가지로
+   * 여러 인스턴스가 공유해야 하는 라운드 진행 데이터라 get/set이 아니라
+   * getStrict/setStrict를 쓴다. 일반 get/set의 로컬 폴백을 허용하면, room 상태
+   * (setStrict로 이미 보호됨)는 Redis에 반영됐는데 이 데이터만 이 인스턴스의 로컬
+   * 캐시에만 남는 상황이 생길 수 있다 — 다른 인스턴스가 곡 순서를 빈 배열로 읽어
+   * 게임을 조기 종료하거나, 정답을 인식하지 못하는 등 감지하기 어려운 정합성
+   * 문제로 이어진다.
    */
   private async getSongOrder(roomId: string): Promise<string[]> {
     return (
@@ -1302,6 +1258,35 @@ export class RoomService extends EventEmitter {
 
   private songOrderKey(roomId: string): string {
     return `${SONG_ORDER_CACHE_KEY_PREFIX}${roomId}`;
+  }
+
+  private async getRoundsSnapshot(
+    roomId: string,
+  ): Promise<Record<string, QuizRoundData>> {
+    return (
+      (await this.cacheService.getStrict<Record<string, QuizRoundData>>(
+        this.roundsSnapshotKey(roomId),
+      )) ?? {}
+    );
+  }
+
+  private async setRoundsSnapshot(
+    roomId: string,
+    snapshot: Record<string, QuizRoundData>,
+  ): Promise<void> {
+    await this.cacheService.setStrict(
+      this.roundsSnapshotKey(roomId),
+      snapshot,
+      ROOM_TTL_SECONDS,
+    );
+  }
+
+  private async deleteRoundsSnapshot(roomId: string): Promise<void> {
+    await this.cacheService.del(this.roundsSnapshotKey(roomId));
+  }
+
+  private roundsSnapshotKey(roomId: string): string {
+    return `${ROUNDS_SNAPSHOT_CACHE_KEY_PREFIX}${roomId}`;
   }
 
   private async getCurrentAnswers(roomId: string): Promise<string[]> {
@@ -1333,15 +1318,21 @@ export class RoomService extends EventEmitter {
 
   private async getCurrentReveal(
     roomId: string,
-  ): Promise<RoundRevealInfo | undefined> {
-    return this.cacheService.getStrict<RoundRevealInfo>(
-      this.currentRevealKey(roomId),
-    );
+  ): Promise<
+    | { quizSongId: string; songNm: string; atstNm: string; albmNm: string }
+    | undefined
+  > {
+    return this.cacheService.getStrict(this.currentRevealKey(roomId));
   }
 
   private async setCurrentReveal(
     roomId: string,
-    reveal: RoundRevealInfo,
+    reveal: {
+      quizSongId: string;
+      songNm: string;
+      atstNm: string;
+      albmNm: string;
+    },
   ): Promise<void> {
     await this.cacheService.setStrict(
       this.currentRevealKey(roomId),
@@ -1361,18 +1352,17 @@ export class RoomService extends EventEmitter {
   /**
    * 참가자 접근 토큰은 상태를 저장하지 않고 roomId+userId로부터 결정적으로
    * 계산한다(HMAC 서명). 무작위로 발급해 in-memory Map에 저장하는 방식은:
-   * - API 프로세스가 재시작되면(배포 등) 방 데이터는 Redis에 그대로 남아있는데
+   * - 프로세스가 재시작되면(배포 등) 방 데이터는 Redis에 그대로 남아있는데
    *   토큰만 전부 사라져, 재시작 이전에 입장한 참가자는 소켓에 다시 들어올 수
    *   없게 된다.
-   * - 여러 API 인스턴스로 확장하면 발급한 인스턴스와 검증하는 인스턴스가 달라
+   * - 여러 인스턴스로 확장하면 발급한 인스턴스와 검증하는 인스턴스가 달라
    *   실패할 수 있다.
    * - 같은 계정이 다른 기기로 재입장하면 토큰을 다시 발급(덮어쓰기)하므로
    *   기존 기기의 토큰이 무효화된다.
-   * 결정적 서명 방식은 이 세 가지를 모두 해결한다: 같은 입력이면 프로세스가
-   * 다시 시작되거나 인스턴스가 달라도 항상 같은 토큰이 나오고, 재입장해도
-   * 다른 기기의 토큰을 무효화하지 않는다. "이 요청자가 그 방의 실제 참가자인가"
-   * 자체는 room.participants에 해당 userId가 남아있는지로 검증되므로(퇴장하면
-   * 제거됨), 토큰을 별도로 저장/폐기할 필요가 없다.
+   * 결정적 서명 방식은 이 세 가지를 모두 해결한다. USER_JWT_SECRET은 apps/api의
+   * 로그인 JWT 서명과 같은 값을 그대로 공유해서 쓴다 — 계정 JWT를 검증하는 게
+   * 아니라 HMAC 키로만 재사용하는 것이라, apps/api의 User 도메인에 직접
+   * 결합되지는 않는다.
    */
   private computeMembershipToken(roomId: string, userId: string): string {
     return createHmac('sha256', `${process.env.USER_JWT_SECRET}:room-access`)

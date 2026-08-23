@@ -1,7 +1,8 @@
 # ADR-0001: Room 실시간 상태 관리와 재접속 처리
 
 - 상태: Accepted (멀티 인스턴스 대응 완료 — 아래 "멀티 인스턴스 마이그레이션" 참고)
-- 관련 코드: `apps/api/src/room/room.service.ts`, `apps/api/src/room/room-lock.service.ts`, `apps/api/src/room/room-timer.service.ts`, `apps/api/src/room/room.gateway.ts`, `apps/api/src/common/redis-io.adapter.ts`, `apps/web/src/utils/roomSession.ts`, `apps/web/src/pages/RoomGamePage.tsx`
+- 관련 코드: `apps/game/src/room/room.service.ts`, `apps/game/src/room/room-lock.service.ts`, `apps/game/src/room/room-timer.service.ts`, `apps/game/src/room/room.gateway.ts`, `apps/game/src/common/redis-io.adapter.ts`, `apps/web/src/utils/roomSession.ts`, `apps/web/src/pages/RoomGamePage.tsx`
+- 2026-08-23: `apps/api/src/room/**`에 있던 코드가 `apps/game`으로 이동했다(내용은 그대로, 위치만 이동). 서비스 분리 배경은 [`ADR-0004`](0004-game-service-split.md) 참고.
 
 ## 배경
 

@@ -4,18 +4,15 @@ import { OpenAiChatClient } from '../openai/openai-chat.client';
 import { QuizAnswer } from '../quiz/entities/quiz-answer.entity';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
 import { YoutubeScraperClient } from '../quiz/youtube-scraper.client';
-import { RoomModule } from '../room/room.module';
 import { Inquiry } from './entities/inquiry.entity';
+import { GameNotifierClient } from './game-notifier.client';
 import { InquiryActionService } from './inquiry-action.service';
 import { InquiryGptClient } from './inquiry-gpt.client';
 import { InquiryController } from './inquiry.controller';
 import { InquiryService } from './inquiry.service';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Inquiry, QuizSong, QuizAnswer]),
-    RoomModule,
-  ],
+  imports: [TypeOrmModule.forFeature([Inquiry, QuizSong, QuizAnswer])],
   controllers: [InquiryController],
   providers: [
     InquiryService,
@@ -23,6 +20,7 @@ import { InquiryService } from './inquiry.service';
     OpenAiChatClient,
     InquiryActionService,
     YoutubeScraperClient,
+    GameNotifierClient,
   ],
   exports: [InquiryService],
 })

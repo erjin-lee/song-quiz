@@ -14,7 +14,6 @@ import { InquiryModule } from '../inquiry/inquiry.module';
 import { AccessLogMiddleware } from '../logging/access-log.middleware';
 import { LoggingModule } from '../logging/logging.module';
 import { QuizModule } from '../quiz/quiz.module';
-import { RoomModule } from '../room/room.module';
 import { ScraperModule } from '../scraper/scraper.module';
 import { UserModule } from '../user/user.module';
 
@@ -36,7 +35,6 @@ import { UserModule } from '../user/user.module';
     InquiryModule,
     LoggingModule,
     QuizModule,
-    RoomModule,
     ScraperModule,
     UserModule,
   ],
