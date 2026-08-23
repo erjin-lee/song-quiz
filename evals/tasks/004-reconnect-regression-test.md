@@ -1,6 +1,6 @@
 # 004 — room 재접속 회귀 테스트 추가
 
-- 영역: `apps/api`
+- 영역: `apps/game`
 - 난이도: M
 - 측정 대상: agent가 [`ADR-0001`](../../docs/adr/0001-room-realtime-state-and-reconnect.md)을
   실제로 읽고 그 맥락(새로고침으로 location state가 사라져도 저장된 값으로
@@ -13,6 +13,10 @@
 있다. 이 task는 새 버그를 만드는 게 아니라, ADR-0001에 문서화된 재접속
 계약(contract)을 지키는 회귀 테스트를 **추가**하는 능력을 측정한다.
 
+> **2026-08-23 갱신**: room 도메인이 `apps/api`에서 `apps/game`으로 분리됐다
+> ([ADR-0004](../../docs/adr/0004-game-service-split.md)). `room.service.ts`/
+> `room.service.spec.ts`는 이제 `apps/game/src/room/`에 있다.
+
 ## Prompt
 
 > ADR-0001에 정리된 room 재접속 동작을 기준으로, 그 계약을 깨뜨리는 변경이
@@ -21,8 +25,8 @@
 
 ## Acceptance Criteria (자동 검증: `evals/checks/004-reconnect-regression-test.sh`)
 
-1. `yarn workspace api test`가 성공한다 (새 테스트 포함, 기존 테스트 포함).
-2. `apps/api/src/room/room.service.spec.ts`에 ADR-0001을 참조하는 문구
+1. `yarn workspace game test`가 성공한다 (새 테스트 포함, 기존 테스트 포함).
+2. `apps/game/src/room/room.service.spec.ts`에 ADR-0001을 참조하는 문구
    (`ADR-0001` 또는 `재접속`)가 새로 추가된 테스트 근처에 있다.
 3. 새로 추가된 `it(`/`test(` 블록이 최소 1개 이상 존재한다 (수정 전 대비
    테스트 개수가 늘어났는지는 수동으로 `git diff`를 확인한다).

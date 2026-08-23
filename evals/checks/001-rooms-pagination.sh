@@ -18,11 +18,11 @@ check() {
 
 echo "== 001-rooms-pagination =="
 
-check "apps/api build" yarn workspace api build
-check "apps/api test" yarn workspace api test
-check "apps/api lint" yarn workspace api lint
+check "apps/game build" yarn workspace game build
+check "apps/game test" yarn workspace game test
+check "apps/game lint" yarn workspace game lint
 check "RoomController.getRooms uses @Query()" \
-  grep -q '@Query()' apps/api/src/room/room.controller.ts
+  grep -q '@Query()' apps/game/src/room/room.controller.ts
 
 echo "$pass/$total checks passed"
 [ "$pass" -eq "$total" ]

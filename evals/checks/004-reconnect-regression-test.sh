@@ -18,9 +18,9 @@ check() {
 
 echo "== 004-reconnect-regression-test =="
 
-check "apps/api test" yarn workspace api test
+check "apps/game test" yarn workspace game test
 check "ADR-0001 / 재접속 문구가 spec에 포함됨" \
-  grep -qiE 'ADR-0001|재접속' apps/api/src/room/room.service.spec.ts
+  grep -qiE 'ADR-0001|재접속' apps/game/src/room/room.service.spec.ts
 
 echo "$pass/$total checks passed"
 echo "수동 확인 필요: git diff로 it()/test() 블록이 실제로 늘었는지, ADR-0001 시나리오를 검증하는지 확인할 것"
