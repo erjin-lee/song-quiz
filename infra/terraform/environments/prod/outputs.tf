@@ -117,3 +117,18 @@ output "ses_domain_verified" {
   description = "SES 도메인 인증 완료 여부 (apply가 완료됐다면 항상 true)"
   value       = module.ses.domain_verified
 }
+
+output "api_log_group_name" {
+  description = "apps/api PM2 로그용 CloudWatch Log Group 이름 (CloudWatch Agent 설정 파일에 사용)"
+  value       = module.logging.api_log_group_name
+}
+
+output "game_log_group_name" {
+  description = "apps/game PM2 로그용 CloudWatch Log Group 이름 (CloudWatch Agent 설정 파일에 사용)"
+  value       = module.logging.game_log_group_name
+}
+
+output "cloudwatch_dashboard_url" {
+  description = "운영 상태를 한 화면에서 보는 CloudWatch Dashboard 콘솔 URL"
+  value       = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards:name=${module.monitoring.dashboard_name}"
+}

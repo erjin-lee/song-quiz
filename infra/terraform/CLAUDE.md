@@ -170,7 +170,9 @@ Avoid unnecessary variables for values that are truly implementation details.
 │       ├── terraform.tfvars.example
 │       ├── terraform.tfvars      # gitignore 대상
 │       ├── terraform.tfstate*    # gitignore 대상
-│       └── scripts/       # bastion/tunnel 스크립트 (terraform output 사용)
+│       ├── scripts/       # bastion/tunnel 스크립트 (terraform output 사용)
+│       └── cloudwatch-agent/  # app_a에 수동 설치한 CloudWatch Agent 설정의 source of truth
+│                               # (Terraform 리소스 아님 - EC2에 수동 복사/적용)
 └── modules/
     ├── network/           # VPC, 서브넷, 라우팅
     ├── security/          # public/app/db 보안 그룹
@@ -182,7 +184,10 @@ Avoid unnecessary variables for values that are truly implementation details.
     ├── dns/                # api/game 서브도메인 레코드
     ├── ses/                # SES 도메인 인증 + DKIM
     ├── database/          # RDS
-    └── cache/              # ElastiCache
+    ├── cache/              # ElastiCache
+    ├── logging/            # CloudWatch Log Group(api/game) + Game 실패 이벤트 Metric Filter
+    └── monitoring/         # CloudWatch Dashboard(SongQuiz-Prod) - 다른 모듈의 output만 참조,
+                             # 새 AWS 리소스(로그/지표/알람)는 만들지 않고 기존 지표를 시각화만 한다
 ```
 
 새 환경(예: staging)이 필요해지면 `environments/<env>/`를 추가하고 같은 모듈들을

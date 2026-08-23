@@ -27,11 +27,19 @@ module "security" {
   bastion_security_group_id = module.compute.bastion_security_group_id
 }
 
+module "logging" {
+  source = "../../modules/logging"
+
+  project_name = var.project_name
+}
+
 module "iam" {
   source = "../../modules/iam"
 
   project_name            = var.project_name
   ses_domain_identity_arn = module.ses.domain_identity_arn
+  api_log_group_arn       = module.logging.api_log_group_arn
+  game_log_group_arn      = module.logging.game_log_group_arn
 }
 
 module "compute" {
@@ -134,4 +142,18 @@ module "cache" {
   cache_port            = var.cache_port
   cache_engine_version  = var.cache_engine_version
   cache_node_type       = var.cache_node_type
+}
+
+module "monitoring" {
+  source = "../../modules/monitoring"
+
+  aws_region                   = var.aws_region
+  alb_arn_suffix               = module.load_balancer.arn_suffix
+  api_target_group_arn_suffix  = module.load_balancer.app_target_group_arn_suffix
+  game_target_group_arn_suffix = module.load_balancer.game_target_group_arn_suffix
+  app_instance_id              = module.compute.app_a_id
+  db_instance_identifier       = module.database.identifier
+  cache_cluster_id             = module.cache.cluster_id
+  game_metric_namespace        = module.logging.game_metric_namespace
+  ec2_metric_namespace         = module.iam.ec2_metric_namespace
 }
