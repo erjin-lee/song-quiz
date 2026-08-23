@@ -2,7 +2,7 @@
 
 # Purpose
 
-게임 로직·인증·데이터 접근을 담당하는 NestJS 백엔드 API를 소유한다. `apps/web`과 `apps/admin`이 공유하는 유일한 백엔드다.
+일반 REST API(퀴즈·유저·문의·관리자)와 데이터 접근을 담당하는 NestJS 백엔드를 소유한다. `apps/web`과 `apps/admin`이 공유하는 백엔드다. 실시간 방(room) 게임 로직/Socket.IO는 `apps/game`이 별도로 소유한다([`ADR-0004`](../../docs/adr/0004-game-service-split.md)) — `apps/game`이 필요로 하는 Quiz/User 데이터는 `src/*/internal/` 아래의 내부 전용 HTTP 엔드포인트로만 노출한다.
 
 - NestJS(Express 플랫폼, `@nestjs/platform-express`) 기반 백엔드 애플리케이션이다.
 - 서버 포트는 `8001`이다 (`src/main.ts`에서 `process.env.PORT ?? 8001`). 배포 환경에서 포트를 바꾸려면 `.env`가 아니라 `PORT` 환경 변수로 주입한다.
@@ -34,9 +34,10 @@
 
 # Dependencies
 
-- 소비자: `apps/web`(REST + Socket.IO), `apps/admin`(REST, Admin JWT). DTO를 변경하면 두 프런트엔드의 `src/types/`를 함께 확인한다.
+- 소비자: `apps/web`(일반 REST), `apps/admin`(REST, Admin JWT), `apps/game`(내부 전용 `/internal/*` 엔드포인트로 Quiz/User 데이터 조회). DTO를 변경하면 프런트엔드 `src/types/`를 함께 확인한다.
+- `apps/game`이 호출하는 `/internal/*` 엔드포인트는 `InternalAuthGuard`(`src/common/internal-auth.guard.ts`)로 보호되며, `INTERNAL_SERVICE_SECRET` 헤더(`x-internal-secret`)가 apps/game과 일치해야 통과한다.
 - 외부 연동: OpenAI API(GPT 채점), YouTube(영상 스크래핑), Melon 차트(곡 정보). 전체 그래프는 [`ARCHITECTURE.md`](../../ARCHITECTURE.md) 참고.
-- 설계 배경: room 실시간 상태([`ADR-0001`](../../docs/adr/0001-room-realtime-state-and-reconnect.md)), 게스트 모드/JWT 저장([`ADR-0002`](../../docs/adr/0002-guest-mode-and-jwt-storage.md)), DTO 미러링([`ADR-0003`](../../docs/adr/0003-manual-dto-type-mirroring.md)).
+- 설계 배경: room 실시간 상태([`ADR-0001`](../../docs/adr/0001-room-realtime-state-and-reconnect.md)), 게스트 모드/JWT 저장([`ADR-0002`](../../docs/adr/0002-guest-mode-and-jwt-storage.md)), DTO 미러링([`ADR-0003`](../../docs/adr/0003-manual-dto-type-mirroring.md)), Game 서비스 분리([`ADR-0004`](../../docs/adr/0004-game-service-split.md)).
 
 # Commands
 

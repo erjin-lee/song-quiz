@@ -1,5 +1,5 @@
 import { io, type Socket } from 'socket.io-client';
-import { API_BASE_URL } from './client';
+import { GAME_BASE_URL } from './client';
 import type { RoomItemDto } from '../types/room';
 
 export interface ChatMessageEvent {
@@ -66,7 +66,7 @@ export interface RoomClientToServerEvents {
 export type RoomSocket = Socket<RoomServerToClientEvents, RoomClientToServerEvents>;
 
 export function createRoomSocket(): RoomSocket {
-  return io(`${API_BASE_URL}/rooms`, {
+  return io(`${GAME_BASE_URL}/rooms`, {
     transports: ['websocket'],
     autoConnect: false,
     // 기본값(1000ms, ±50% 지터)이면 서버 재배포처럼 순간적으로 끊겼다가 금방

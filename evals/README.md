@@ -55,11 +55,12 @@ evals/
 
 | ID | 영역 | 난이도 | 측정 대상 |
 |----|------|--------|-----------|
-| [001-rooms-pagination](tasks/001-rooms-pagination.md) | apps/api | S | 기존 패턴(admin 쿼리 DTO) 재사용 능력 |
+| ~~[001-rooms-pagination](tasks/001-rooms-pagination.md)~~ | apps/game | S | **완료(retired)** — 2026-08-21 실행으로 이미 통과, 후속은 006 참고 |
 | [002-inquiry-upd-dt-mirror](tasks/002-inquiry-upd-dt-mirror.md) | apps/api ↔ apps/admin | S | ADR-0003(DTO 수동 미러링) tribal knowledge 준수 |
 | [003-room-list-refresh-button](tasks/003-room-list-refresh-button.md) | apps/web | S | 기존 컴포넌트 관례를 따른 프런트엔드 변경 |
-| [004-reconnect-regression-test](tasks/004-reconnect-regression-test.md) | apps/api | M | ADR-0001 문맥을 읽고 회귀 테스트를 작성하는 능력 |
-| [005-split-room-service-spec](tasks/005-split-room-service-spec.md) | apps/api | M | god file(1474줄)을 로직 변경 없이 안전하게 리팩터링하는 능력 |
+| [004-reconnect-regression-test](tasks/004-reconnect-regression-test.md) | apps/game | M | ADR-0001 문맥을 읽고 회귀 테스트를 작성하는 능력 |
+| [005-split-room-service-spec](tasks/005-split-room-service-spec.md) | apps/game | M | god file(1435줄)을 로직 변경 없이 안전하게 리팩터링하는 능력 |
+| [006-quizzes-pagination](tasks/006-quizzes-pagination.md) | apps/api | S | 기존 패턴(페이지네이션 쿼리 DTO) 재사용 능력 — 001의 후속 |
 
 ## 결과 스키마
 
@@ -94,3 +95,12 @@ evals/
   가능하게 만든다 (build/test/lint 통과, 특정 파일 존재, 특정 패턴 grep).
   자동화가 불가능한 기준(디자인 품질 등)은 task 문서에 "수동 검토" 항목으로
   명시한다.
+- task가 실제 agent 실행으로 통과되어 그 결과가 코드베이스에 영구히 남으면
+  (예: 001), 아무 작업 없이도 체크가 항상 PASS해 더 이상 아무것도 측정하지
+  못한다. 이런 경우 task 파일을 지우지 않고(과거 `agent-results.json` 기록의
+  맥락 보존) 문서 최상단에 "완료(retired)" 표시를 남기고, 같은 능력을 계속
+  재려면 다른(아직 미구현인) 대상으로 후속 task를 새 번호로 추가한다.
+- 리팩터링/구조 이동으로 task가 참조하는 파일 경로가 바뀌면(예: 004/005가
+  room 도메인 이동으로 `apps/api` → `apps/game`) task 문서와 `checks/*.sh`의
+  경로를 함께 갱신한다 — 갱신하지 않으면 파일이 없어 항상 FAIL하는 것과,
+  agent가 작업을 안 해서 FAIL하는 것을 구분할 수 없다.

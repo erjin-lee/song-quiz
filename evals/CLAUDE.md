@@ -16,7 +16,7 @@ AI 코딩 에이전트가 이 저장소에서 실제로 얼마나 정확·효율
 
 # Dependencies
 
-- 각 `checks/*.sh`는 `apps/api`/`apps/web`/`apps/admin`의 실제
+- 각 `checks/*.sh`는 `apps/api`/`apps/game`/`apps/web`/`apps/admin`의 실제
   build/test/lint 명령을 호출한다. 앱별 명령이 바뀌면(각 앱
   `CLAUDE.md`의 Commands 절) 관련 `checks/*.sh`도 함께 갱신한다.
 - tribal knowledge 근거는 [`docs/adr/`](../docs/adr/README.md)를 따른다.

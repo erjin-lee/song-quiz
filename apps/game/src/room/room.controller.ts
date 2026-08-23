@@ -20,7 +20,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Request } from 'express';
-import { UserService } from '../user/user.service';
+import { AuthClient } from './clients/auth.client';
 import { CreateRoomRequestDto } from './dto/create-room-request.dto';
 import { GetRoomsQueryDto } from './dto/get-rooms-query.dto';
 import { JoinRoomRequestDto } from './dto/join-room-request.dto';
@@ -37,7 +37,7 @@ import { RoomService } from './room.service';
 export class RoomController {
   constructor(
     private readonly roomService: RoomService,
-    private readonly userService: UserService,
+    private readonly authClient: AuthClient,
   ) {}
 
   /**
@@ -46,10 +46,11 @@ export class RoomController {
    * 입장할 수 있어야 한다). 토큰이 있는데 무효하거나 계정이 더 이상 ACTIVE가
    * 아니면 게스트로 조용히 낮추지 않고 401을 던진다. 클라이언트가 임의의 userId를
    * 요청 본문으로 보내 다른 계정을 사칭하는 것을 막기 위해, 방 참가자 ID는 항상
-   * 이 방식으로만 서버가 결정한다.
+   * 이 방식으로만 서버가 결정한다. 실제 JWT 검증과 계정 상태 조회는 apps/api가
+   * 소유하므로 AuthClient(내부 HTTP)로 위임한다.
    */
   private resolveAccountUserId(req: Request): Promise<string | undefined> {
-    return this.userService.resolveOptionalAccountUserId(
+    return this.authClient.resolveOptionalAccountUserId(
       req.headers.authorization,
     );
   }

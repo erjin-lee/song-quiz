@@ -7,10 +7,10 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
-import { RoomGateway } from '../room/room.gateway';
 import { SubmitInquiryRequestDto } from './dto/submit-inquiry-request.dto';
 import { SubmitInquiryResponseDto } from './dto/submit-inquiry-response.dto';
 import { Inquiry } from './entities/inquiry.entity';
+import { GameNotifierClient } from './game-notifier.client';
 import { InquiryActionService } from './inquiry-action.service';
 import { InquiryGptClient, InquirySongContext } from './inquiry-gpt.client';
 import {
@@ -43,7 +43,7 @@ export class InquiryService {
     private readonly quizSongRepository: Repository<QuizSong>,
     private readonly gptClient: InquiryGptClient,
     private readonly actionService: InquiryActionService,
-    private readonly roomGateway: RoomGateway,
+    private readonly gameNotifierClient: GameNotifierClient,
   ) {}
 
   async submit(
@@ -360,7 +360,8 @@ export class InquiryService {
       status === 'PENDING_REVIEW' ||
       status === 'COMPLETED'
     ) {
-      this.roomGateway.emitInquiryResult(inquiry.userId, {
+      await this.gameNotifierClient.notifyInquiryResult({
+        userId: inquiry.userId,
         inquiryId: inquiry.inquiryId,
         status,
         message: resultMessage ?? '',

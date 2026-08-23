@@ -1,5 +1,4 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { getRepositoryToken } from '@nestjs/typeorm';
 import {
   BadRequestException,
   ConflictException,
@@ -9,12 +8,8 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import type { Repository } from 'typeorm';
 import { CacheService } from '../cache/cache.service';
-import { QuizAnswer } from '../quiz/entities/quiz-answer.entity';
-import { QuizArtist } from '../quiz/entities/quiz-artist.entity';
-import { QuizSong } from '../quiz/entities/quiz-song.entity';
-import { Quiz } from '../quiz/entities/quiz.entity';
+import { QuizClient } from './clients/quiz.client';
 import { RoomLockService } from './room-lock.service';
 import { RoomTimerService } from './room-timer.service';
 import { RoomService } from './room.service';
@@ -22,29 +17,23 @@ import { RoomService } from './room.service';
 const QUIZ_SONGS = [
   {
     quizSongId: '101',
-    quizId: '1',
     quizSeq: 1,
     youtubeVideoId: 'video1',
     startSec: 10,
     endSec: 40,
-    song: {
-      songNm: '노래1',
-      artist: { atstNm: '아이유' },
-      album: { albmNm: '앨범1' },
-    },
+    songNm: '노래1',
+    atstNm: '아이유',
+    albmNm: '앨범1',
   },
   {
     quizSongId: '102',
-    quizId: '1',
     quizSeq: 2,
     youtubeVideoId: 'video2',
     startSec: 0,
     endSec: 30,
-    song: {
-      songNm: '노래2',
-      artist: { atstNm: '아이유' },
-      album: { albmNm: '앨범2' },
-    },
+    songNm: '노래2',
+    atstNm: '아이유',
+    albmNm: '앨범2',
   },
 ];
 
@@ -59,49 +48,36 @@ describe('RoomService', () => {
   let roomLockService: RoomLockService;
   let roomTimerService: RoomTimerService;
 
-  const quizRepositoryMock = {
-    findOne: jest.fn(),
-    increment: jest.fn(),
-  };
-  const quizArtistRepositoryMock = {
-    find: jest.fn(),
-  };
-  const quizSongRepositoryMock = {
-    find: jest.fn(),
-    findOne: jest.fn(),
-    count: jest.fn(),
-  };
-  const quizAnswerRepositoryMock = {
-    find: jest.fn(),
+  const quizClientMock = {
+    getSummary: jest.fn(),
+    incrementPlayCount: jest.fn(),
+    getQuizRounds: jest.fn(),
   };
 
   beforeEach(async () => {
     delete process.env.REDIS_HOST;
 
-    quizRepositoryMock.findOne.mockResolvedValue({
+    quizClientMock.getSummary.mockResolvedValue({
       quizId: '1',
       quizTtl: '아이유',
       quizDesc: '아이유 노래 맞추기',
-      useYn: 'Y',
+      thumbImgUrl: null,
+      songCount: QUIZ_SONGS.length,
+      atstIds: ['10'],
+      atstNms: ['아이유'],
     });
-    quizArtistRepositoryMock.find.mockResolvedValue([
-      { atstId: '10', artist: { atstNm: '아이유' } },
-    ]);
-    quizSongRepositoryMock.find.mockResolvedValue(QUIZ_SONGS);
-    quizSongRepositoryMock.count.mockResolvedValue(QUIZ_SONGS.length);
-    quizSongRepositoryMock.findOne.mockImplementation(
-      ({ where }: { where: { quizSongId: string } }) =>
-        Promise.resolve(
-          QUIZ_SONGS.find((qs) => qs.quizSongId === where.quizSongId) ?? null,
-        ),
-    );
-    quizAnswerRepositoryMock.find.mockImplementation(
-      ({ where }: { where: { quizSongId: string } }) =>
-        Promise.resolve(
-          (QUIZ_ANSWERS[where.quizSongId] ?? []).map((answerTxt) => ({
-            answerTxt,
-          })),
-        ),
+    quizClientMock.incrementPlayCount.mockResolvedValue(undefined);
+    quizClientMock.getQuizRounds.mockResolvedValue(
+      QUIZ_SONGS.map((quizSong) => ({
+        quizSongId: quizSong.quizSongId,
+        youtubeVideoId: quizSong.youtubeVideoId,
+        startSec: quizSong.startSec,
+        endSec: quizSong.endSec,
+        songNm: quizSong.songNm,
+        atstNm: quizSong.atstNm,
+        albmNm: quizSong.albmNm,
+        answers: QUIZ_ANSWERS[quizSong.quizSongId] ?? [],
+      })),
     );
 
     const app: TestingModule = await Test.createTestingModule({
@@ -110,19 +86,7 @@ describe('RoomService', () => {
         CacheService,
         RoomLockService,
         RoomTimerService,
-        { provide: getRepositoryToken(Quiz), useValue: quizRepositoryMock },
-        {
-          provide: getRepositoryToken(QuizArtist),
-          useValue: quizArtistRepositoryMock,
-        },
-        {
-          provide: getRepositoryToken(QuizSong),
-          useValue: quizSongRepositoryMock,
-        },
-        {
-          provide: getRepositoryToken(QuizAnswer),
-          useValue: quizAnswerRepositoryMock,
-        },
+        { provide: QuizClient, useValue: quizClientMock },
       ],
     }).compile();
 
@@ -214,7 +178,9 @@ describe('RoomService', () => {
     });
 
     it('존재하지 않는 퀴즈로 생성하면 NotFoundException', async () => {
-      quizRepositoryMock.findOne.mockResolvedValue(null);
+      quizClientMock.getSummary.mockRejectedValue(
+        new NotFoundException('퀴즈를 찾을 수 없습니다.'),
+      );
 
       await expect(
         roomService.createRoom({
@@ -666,10 +632,7 @@ describe('RoomService', () => {
         cacheService,
         roomLockService,
         roomTimerService,
-        quizRepositoryMock as unknown as Repository<Quiz>,
-        quizArtistRepositoryMock as unknown as Repository<QuizArtist>,
-        quizSongRepositoryMock as unknown as Repository<QuizSong>,
-        quizAnswerRepositoryMock as unknown as Repository<QuizAnswer>,
+        quizClientMock as unknown as QuizClient,
       );
 
       expect(
@@ -736,7 +699,7 @@ describe('RoomService', () => {
       await expect(
         roomService.startGame(room.roomId, guestUserId),
       ).rejects.toThrow(ForbiddenException);
-      expect(quizRepositoryMock.increment).not.toHaveBeenCalled();
+      expect(quizClientMock.incrementPlayCount).not.toHaveBeenCalled();
     });
 
     it('songLimit을 지정해 방을 만들면 게임 시작 시 그만큼만 라운드가 진행된다', async () => {
@@ -758,10 +721,8 @@ describe('RoomService', () => {
       expect(started.currentRound?.youtubeVideoId).toBe('video1');
       expect(started.currentRound?.revealed).toBe(false);
       expect(started.currentRound?.songNm).toBeNull();
-      expect(quizRepositoryMock.increment).toHaveBeenCalledWith(
-        { quizId: room.quizId },
-        'playCnt',
-        1,
+      expect(quizClientMock.incrementPlayCount).toHaveBeenCalledWith(
+        room.quizId,
       );
     });
 

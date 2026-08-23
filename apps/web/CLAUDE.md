@@ -11,8 +11,8 @@
 - 스타일링은 Tailwind CSS v4를 `@tailwindcss/vite` 플러그인으로 사용한다 (`postcss.config`/`tailwind.config.js` 없이 `vite.config.ts`에 플러그인만 등록, `src/index.css`에서 `@import 'tailwindcss'`).
 - 상태 관리는 별도 라이브러리 없이 React Context(`src/context/SessionContext.tsx`)와 페이지별 로컬 state로 처리한다. 방(room) 입장 직후의 `room`/`userId`/`accessToken`은 `react-router-dom`의 location state로 다음 페이지에 전달하는 동시에 `src/utils/roomSession.ts`로 `localStorage`에도 저장한다. 새로고침 등으로 location state가 사라지면 저장된 값으로 재입장한다(배경: [`docs/adr/0001-room-realtime-state-and-reconnect.md`](../../docs/adr/0001-room-realtime-state-and-reconnect.md)).
 - 로그인 없이도 게임을 이용할 수 있다(게스트 모드). 로그인은 선택 사항이며, `SessionContext`가 게스트 닉네임(`localStorage`)과 계정 인증 상태를 함께 관리한다: 로그인 시 `apps/api`의 `POST /auth/login`(회원가입은 `POST /auth/signup`)에서 발급하는 JWT를 `localStorage`(`song-quiz:token`)에 저장하고, 로그인 상태의 `nickname`은 게스트 입력값이 아니라 계정 닉네임을 사용한다.
-- 백엔드 REST 호출은 `src/api/client.ts`의 공통 fetch 래퍼(`apiGet`/`apiPost`)를 통해서만 한다. 저장된 토큰이 있으면 모든 요청에 자동으로 `Authorization: Bearer` 헤더가 첨부된다. API base URL은 `VITE_API_BASE_URL` env, 없으면 `http://localhost:8001`.
-- 채팅/방 상태 실시간 갱신은 `socket.io-client`로 `apps/api`의 `/rooms` 네임스페이스에 연결한다 (`src/api/socket.ts`).
+- 백엔드 REST 호출은 `src/api/client.ts`의 공통 fetch 래퍼를 통해서만 한다: 일반 API는 `apiGet`/`apiPost`/`apiPatch`(`apps/api`, `VITE_API_BASE_URL`, 없으면 `http://localhost:8001`), Room REST는 `gameGet`/`gamePost`/`gamePatch`(`apps/game`, `VITE_GAME_BASE_URL`, 없으면 `http://localhost:8002`)를 쓴다. 저장된 토큰이 있으면 두 경우 모두 자동으로 `Authorization: Bearer` 헤더가 첨부된다.
+- 채팅/방 상태 실시간 갱신은 `socket.io-client`로 `apps/game`의 `/rooms` 네임스페이스(`VITE_GAME_BASE_URL`)에 연결한다 (`src/api/socket.ts`).
 - 컴포넌트와 비즈니스 로직(hooks)을 분리한다.
 - API 응답 타입은 `apps/api`의 DTO/응답 형식과 어긋나지 않게 유지한다 (`src/types/`에 DTO를 그대로 미러링).
 - 기존 API 응답 형식에 맞춰 프론트엔드 타입을 임의로 확장하지 않는다.
@@ -34,8 +34,8 @@
 
 # Dependencies
 
-- `apps/api`에 REST(`Authorization: Bearer`)와 Socket.IO(`/rooms`)로 의존한다. 전체 그래프는 [`ARCHITECTURE.md`](../../ARCHITECTURE.md) 참고.
-- 설계 배경: room 재접속([`ADR-0001`](../../docs/adr/0001-room-realtime-state-and-reconnect.md)), 게스트 모드/JWT 저장([`ADR-0002`](../../docs/adr/0002-guest-mode-and-jwt-storage.md)), DTO 미러링([`ADR-0003`](../../docs/adr/0003-manual-dto-type-mirroring.md)).
+- `apps/api`(일반 REST)와 `apps/game`(Room REST + Socket.IO `/rooms`)에 각각 `Authorization: Bearer`로 의존한다. 전체 그래프는 [`ARCHITECTURE.md`](../../ARCHITECTURE.md) 참고.
+- 설계 배경: room 재접속([`ADR-0001`](../../docs/adr/0001-room-realtime-state-and-reconnect.md)), 게스트 모드/JWT 저장([`ADR-0002`](../../docs/adr/0002-guest-mode-and-jwt-storage.md)), DTO 미러링([`ADR-0003`](../../docs/adr/0003-manual-dto-type-mirroring.md)), Game 서비스 분리([`ADR-0004`](../../docs/adr/0004-game-service-split.md)).
 
 # Commands
 

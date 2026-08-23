@@ -25,3 +25,4 @@
 | [0001](0001-room-realtime-state-and-reconnect.md) | Room 실시간 상태 관리와 재접속 처리 | Accepted (멀티 인스턴스 대응 완료) |
 | [0002](0002-guest-mode-and-jwt-storage.md) | 게스트 모드 병행과 JWT localStorage 저장 | Accepted (재검토 필요 — 별도 보안 검토 없음) |
 | [0003](0003-manual-dto-type-mirroring.md) | apps/api DTO의 수동 타입 미러링 | Accepted (재검토 중 — 공유 타입 패키지 검토) |
+| [0004](0004-game-service-split.md) | Room을 별도 서비스(apps/game)로 분리 | Accepted |

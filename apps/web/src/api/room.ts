@@ -1,4 +1,4 @@
-import { apiGet, apiPatch, apiPost } from './client';
+import { gameGet, gamePatch, gamePost } from './client';
 import type {
   CreateRoomRequestDto,
   JoinRoomRequestDto,
@@ -10,38 +10,38 @@ import type {
 } from '../types/room';
 
 export function getRooms(): Promise<RoomItemDto[]> {
-  return apiGet<RoomItemDto[]>('/rooms');
+  return gameGet<RoomItemDto[]>('/rooms');
 }
 
 export function getRoomById(roomId: string): Promise<RoomItemDto> {
-  return apiGet<RoomItemDto>(`/rooms/${roomId}`);
+  return gameGet<RoomItemDto>(`/rooms/${roomId}`);
 }
 
 export function createRoom(
   body: CreateRoomRequestDto,
 ): Promise<RoomJoinResultDto> {
-  return apiPost<RoomJoinResultDto>('/rooms', body);
+  return gamePost<RoomJoinResultDto>('/rooms', body);
 }
 
 export function joinRoom(
   roomId: string,
   body: JoinRoomRequestDto,
 ): Promise<RoomJoinResultDto> {
-  return apiPost<RoomJoinResultDto>(`/rooms/${roomId}/join`, body);
+  return gamePost<RoomJoinResultDto>(`/rooms/${roomId}/join`, body);
 }
 
 export function updateRoom(
   roomId: string,
   body: UpdateRoomRequestDto,
 ): Promise<RoomItemDto> {
-  return apiPatch<RoomItemDto>(`/rooms/${roomId}`, body);
+  return gamePatch<RoomItemDto>(`/rooms/${roomId}`, body);
 }
 
 export function updateNickname(
   roomId: string,
   body: UpdateNicknameRequestDto,
 ): Promise<RoomItemDto> {
-  return apiPost<RoomItemDto>(`/rooms/${roomId}/nickname`, body);
+  return gamePost<RoomItemDto>(`/rooms/${roomId}/nickname`, body);
 }
 
 export function leaveRoom(
@@ -49,7 +49,7 @@ export function leaveRoom(
   userId: string,
   accessToken: string,
 ): Promise<LeaveRoomResultDto> {
-  return apiPost<LeaveRoomResultDto>(`/rooms/${roomId}/leave`, {
+  return gamePost<LeaveRoomResultDto>(`/rooms/${roomId}/leave`, {
     userId,
     accessToken,
   });

@@ -2,8 +2,8 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
-import { RoomGateway } from '../room/room.gateway';
 import { Inquiry } from './entities/inquiry.entity';
+import { GameNotifierClient } from './game-notifier.client';
 import { InquiryActionService } from './inquiry-action.service';
 import { InquiryGptClient } from './inquiry-gpt.client';
 import { InquiryService } from './inquiry.service';
@@ -49,8 +49,8 @@ describe('InquiryService', () => {
     changeLink: jest.fn(),
     addAnswer: jest.fn(),
   };
-  const roomGatewayMock = {
-    emitInquiryResult: jest.fn(),
+  const gameNotifierClientMock = {
+    notifyInquiryResult: jest.fn(),
   };
 
   const callProcess = (inquiryId: string) =>
@@ -80,7 +80,7 @@ describe('InquiryService', () => {
         },
         { provide: InquiryGptClient, useValue: gptClientMock },
         { provide: InquiryActionService, useValue: actionServiceMock },
-        { provide: RoomGateway, useValue: roomGatewayMock },
+        { provide: GameNotifierClient, useValue: gameNotifierClientMock },
       ],
     }).compile();
 
@@ -144,7 +144,7 @@ describe('InquiryService', () => {
       expect(inquiryRepositoryMock.save).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'NO_MATCH' }),
       );
-      expect(roomGatewayMock.emitInquiryResult).not.toHaveBeenCalled();
+      expect(gameNotifierClientMock.notifyInquiryResult).not.toHaveBeenCalled();
     });
 
     it('신뢰도가 LOW면 REJECTED로 종료하고 소켓으로 알린다', async () => {
@@ -164,9 +164,8 @@ describe('InquiryService', () => {
             '요청하신 내용은 반려되었습니다. 자동으로 처리하기 어려운 문의라 관리자가 다시 확인할게요.',
         }),
       );
-      expect(roomGatewayMock.emitInquiryResult).toHaveBeenCalledWith(
-        'user1',
-        expect.objectContaining({ status: 'REJECTED' }),
+      expect(gameNotifierClientMock.notifyInquiryResult).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user1', status: 'REJECTED' }),
       );
     });
 
@@ -187,9 +186,8 @@ describe('InquiryService', () => {
             '요청하신 내용이 검토 목록에 추가되었습니다. 확인 후 반영해드릴게요.',
         }),
       );
-      expect(roomGatewayMock.emitInquiryResult).toHaveBeenCalledWith(
-        'user1',
-        expect.objectContaining({ status: 'PENDING_REVIEW' }),
+      expect(gameNotifierClientMock.notifyInquiryResult).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user1', status: 'PENDING_REVIEW' }),
       );
     });
 
@@ -211,9 +209,8 @@ describe('InquiryService', () => {
           resultMessage: '요청하신 재생 시작 시간이 반영되었습니다.',
         }),
       );
-      expect(roomGatewayMock.emitInquiryResult).toHaveBeenCalledWith(
-        'user1',
-        expect.objectContaining({ status: 'COMPLETED' }),
+      expect(gameNotifierClientMock.notifyInquiryResult).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user1', status: 'COMPLETED' }),
       );
     });
 
@@ -245,7 +242,7 @@ describe('InquiryService', () => {
       expect(inquiryRepositoryMock.save).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'FAILED', resultMessage: null }),
       );
-      expect(roomGatewayMock.emitInquiryResult).not.toHaveBeenCalled();
+      expect(gameNotifierClientMock.notifyInquiryResult).not.toHaveBeenCalled();
     });
   });
 
@@ -331,9 +328,8 @@ describe('InquiryService', () => {
           resultMessage: '요청하신 재생 시작 시간이 반영되었습니다.',
         }),
       );
-      expect(roomGatewayMock.emitInquiryResult).toHaveBeenCalledWith(
-        'user1',
-        expect.objectContaining({ status: 'COMPLETED' }),
+      expect(gameNotifierClientMock.notifyInquiryResult).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user1', status: 'COMPLETED' }),
       );
     });
 
@@ -384,9 +380,8 @@ describe('InquiryService', () => {
           resultMessage: '요청하신 내용은 검토 후 반려되었습니다.',
         }),
       );
-      expect(roomGatewayMock.emitInquiryResult).toHaveBeenCalledWith(
-        'user1',
-        expect.objectContaining({ status: 'REJECTED' }),
+      expect(gameNotifierClientMock.notifyInquiryResult).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user1', status: 'REJECTED' }),
       );
     });
   });

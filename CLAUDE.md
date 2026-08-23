@@ -3,10 +3,13 @@
 Yarn 4(Berry) + Turborepo 기반 TypeScript 모노레포다.
 
 주요 워크스페이스:
-- `apps/api`: NestJS 백엔드
+- `apps/api`: NestJS 백엔드(일반 REST API — 퀴즈/유저/문의/관리자)
+- `apps/game`: NestJS 백엔드(실시간 게임 서버 — room, Socket.IO `/rooms`)
 - `apps/web`: Vite + React 사용자 웹
 - `apps/admin`: Next.js 관리자 웹
 - `packages/`: 공유 워크스페이스
+
+`apps/api`와 `apps/game`은 서로 다른 프로세스로 배포되는 별도 서비스다. 의존 관계와 서비스 경계는 [`ARCHITECTURE.md`](ARCHITECTURE.md)와 [`docs/adr/0004-game-service-split.md`](docs/adr/0004-game-service-split.md)를 따른다.
 
 패키지 매니저는 Yarn만 사용한다. Yarn 버전은 루트 `package.json`의 `packageManager`를 source of truth로 삼는다.
 
@@ -23,6 +26,7 @@ Yarn 4(Berry) + Turborepo 기반 TypeScript 모노레포다.
 앱을 수정할 때는 해당 앱의 규칙도 따른다.
 
 - API: [`apps/api/CLAUDE.md`](apps/api/CLAUDE.md)
+- Game: [`apps/game/CLAUDE.md`](apps/game/CLAUDE.md)
 - Web: [`apps/web/CLAUDE.md`](apps/web/CLAUDE.md)
 - Admin: [`apps/admin/CLAUDE.md`](apps/admin/CLAUDE.md)
 

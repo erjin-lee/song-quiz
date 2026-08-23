@@ -10,6 +10,7 @@ import { User } from './entities/user.entity';
 import { EmailAuthService } from './email-auth.service';
 import { UserAuthController } from './user-auth.controller';
 import { UserAuthGuard } from './guards/user-auth.guard';
+import { UserInternalController } from './internal/user-internal.controller';
 import { UserService } from './user.service';
 
 @Module({
@@ -31,7 +32,7 @@ import { UserService } from './user.service';
       }),
     }),
   ],
-  controllers: [UserAuthController],
+  controllers: [UserAuthController, UserInternalController],
   providers: [UserService, UserAuthGuard, EmailAuthService],
   exports: [UserService],
 })
