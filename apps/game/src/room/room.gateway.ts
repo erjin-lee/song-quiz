@@ -1,4 +1,4 @@
-import { Logger, NotFoundException } from '@nestjs/common';
+import { Logger, NotFoundException, UseInterceptors } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -7,6 +7,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
+import { SocketRequestContextInterceptor } from 'logger';
 import { Server, Socket } from 'socket.io';
 import { delay } from '../common/delay';
 import { RoomItemDto } from './dto/room-item.dto';
@@ -83,6 +84,7 @@ const REMOVE_FALLBACK_RETRY_MAX_MS = 5_000;
   namespace: '/rooms',
   cors: { origin: 'http://localhost:5173' },
 })
+@UseInterceptors(SocketRequestContextInterceptor)
 export class RoomGateway implements OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;

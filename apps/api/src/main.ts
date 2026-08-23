@@ -1,17 +1,28 @@
 import { setDefaultResultOrder } from 'node:dns';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as basicAuth from 'express-basic-auth';
+import { StructuredLogger } from 'logger';
 import { AppModule } from './app/app.module';
 import { CacheService } from './cache/cache.service';
 import { RedisIoAdapter } from './common/redis-io.adapter';
 
 setDefaultResultOrder('ipv4first');
 
+// 이 인스턴스를 app.useLogger로 등록하면, 코드 전체에 흩어진 new Logger(ClassName)
+// 호출도(파일별 수정 없이) 전부 이 로거로 델리게이트되어 LogContext 필드가 실린
+// JSON 로그로 바뀐다.
+const structuredLogger = new StructuredLogger({
+  service: 'api',
+  environment: process.env.NODE_ENV ?? 'development',
+});
+
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    logger: structuredLogger,
+  });
   // PM2 cluster reload/재시작 시 보내는 SIGINT/SIGTERM에 반응해 그레이스풀 셧다운한다.
   // 이 훅이 없으면 Node 기본 동작대로 신호를 받는 즉시 프로세스가 종료되어(OnModuleDestroy도
   // 호출되지 않음) 처리 중이던 요청·소켓이 그대로 끊긴다. ecosystem.config.js의
@@ -94,6 +105,6 @@ async function bootstrap() {
 // 실패하면 예외를 던진다(RedisIoAdapter 참고) — 여기서 명시적으로 process.exit해
 // 이 인스턴스가 room 브로드캐스트가 깨진 채로 트래픽을 받는 것을 막는다.
 bootstrap().catch((err) => {
-  new Logger('Bootstrap').error(`부팅 실패: ${(err as Error).message}`);
+  structuredLogger.error(`부팅 실패: ${(err as Error).message}`, 'Bootstrap');
   process.exit(1);
 });

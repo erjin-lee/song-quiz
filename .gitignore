@@ -27,3 +27,4 @@ scripts/sh/
 apps/api/logs/
 apps/game/logs/
 __pycache__/
+*.tsbuildinfo

@@ -1,5 +1,6 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import { NextFunction, Request, Response } from 'express';
+import { getLogContext } from 'logger';
 import { accessLogger } from './access-logger.factory';
 import { redactSensitiveFields } from './redact-sensitive-fields.util';
 
@@ -60,6 +61,9 @@ export class AccessLogMiddleware implements NestMiddleware {
       accessLogger.log({
         level,
         message: `${req.method} ${req.path}`,
+        service: 'api',
+        environment: process.env.NODE_ENV ?? 'development',
+        ...getLogContext(),
         ip: req.ip,
         method: req.method,
         path: req.path,
