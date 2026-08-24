@@ -90,6 +90,30 @@ resource "aws_iam_role_policy" "app_cloudwatch_metrics" {
   })
 }
 
+# EC2에 설치된 CloudWatch Agent가 OTLP로 수신한 trace를 X-Ray로 전송할 때 필요한 최소 권한.
+# xray:PutTraceSegments/PutTelemetryRecords는 (cloudwatch:PutMetricData와 마찬가지로) 리소스
+# 수준 권한을 지원하지 않는 액션이라 Resource가 "*"일 수밖에 없다 - X-Ray에는 cloudwatch의
+# namespace 조건 같은 대체 제한 수단도 없어, 이 두 액션만 허용하고 그 외 X-Ray 권한(조회,
+# 샘플링 규칙 등)은 주지 않는 것으로 범위를 최소화한다.
+resource "aws_iam_role_policy" "app_xray_write" {
+  name = "${var.project_name}-app-xray-write"
+  role = aws_iam_role.app.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "xray:PutTraceSegments",
+          "xray:PutTelemetryRecords",
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 # EC2는 IAM 역할을 직접 참조할 수 없고, 인스턴스 프로파일을 통해서만 역할을 맡을 수 있다.
 resource "aws_iam_instance_profile" "app" {
   name = "${var.project_name}-app"

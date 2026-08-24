@@ -16,7 +16,7 @@ describe('buildCorrelationHeaders', () => {
     );
   });
 
-  it('traceId가 있으면 함께 넘기고, 없으면 필드 자체를 만들지 않는다', () => {
+  it('traceId는 LogContext에 있어도 헤더에 싣지 않는다(OTel traceparent가 전파를 담당)', () => {
     runWithLogContext(
       {
         service: 'game',
@@ -24,13 +24,6 @@ describe('buildCorrelationHeaders', () => {
         requestId: 'req-123',
         traceId: 'trace-456',
       },
-      () => {
-        expect(buildCorrelationHeaders()[TRACE_ID_HEADER]).toBe('trace-456');
-      },
-    );
-
-    runWithLogContext(
-      { service: 'game', environment: 'test', requestId: 'req-123' },
       () => {
         expect(buildCorrelationHeaders()).not.toHaveProperty(TRACE_ID_HEADER);
       },

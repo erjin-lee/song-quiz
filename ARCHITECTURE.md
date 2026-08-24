@@ -123,6 +123,18 @@ graph TD
 - `tracing`은 `packages/tracing`(신규 워크스페이스)을 그대로 사용한다 — api/game 모두 `src/main.ts`의 첫 import에서 `startTracing({ service: 'api' | 'game', ... })`을 호출한다. `packages/logger`의 requestId/traceId 전파 로직이 OTel 활성 span에서 실제 traceId/spanId를 읽어오므로, 두 패키지는 함께 동작한다(상세는 위 `apps/api` 섹션의 `tracing` 설명 참고).
 - `room`이 `apps/api`를 호출하는 유일한 경로는 `room/clients/quiz.client.ts`, `room/clients/auth.client.ts`다. TypeORM Repository나 `apps/api`의 도메인 클래스를 직접 참조하지 않는다.
 
+## Observability
+
+```text
+Logs    : StructuredLogger → PM2(파일) → CloudWatch Agent → CloudWatch Logs
+Metrics : CloudWatch Agent(EC2 Memory/Disk) / Metric Filter(QuizSnapshotFailure 등) → CloudWatch Metrics
+Traces  : packages/tracing(OTel) → OTLP/HTTP(127.0.0.1:4318) → CloudWatch Agent → X-Ray/CloudWatch Traces
+```
+
+- `requestId`: 애플리케이션/운영 로그 correlation(자체 발급, `x-request-id`로 internal 호출 간 전파).
+- `traceId`/`spanId`: 실제 OpenTelemetry 분산 trace/현재 span. `packages/tracing`이 붙인 자동 계측(http/express/undici/mysql2)이 OTLP로 export하며, game↔api 간 전파는 자체 헤더가 아니라 W3C `traceparent`(OTel 표준)로 이루어진다.
+- CloudWatch Agent는 `127.0.0.1:4318`에서만 OTLP를 수신한다(Security Group에 열려 있지 않음). 설정은 `infra/terraform/environments/prod/cloudwatch-agent/`(Terraform 리소스 아님, EC2에 수동 적용) 참고.
+
 ## 외부 연동
 
 | 연동 대상 | 위치 | 용도 |
