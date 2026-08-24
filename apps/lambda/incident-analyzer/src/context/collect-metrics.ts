@@ -10,6 +10,21 @@ import {
   MetricTrend,
 } from "./types";
 
+// count 계열(이벤트 발생 시에만 값이 존재)과 gauge/continuous 계열(항상 어떤 값이든
+// 존재해야 정상)은 datapoint가 없을 때의 의미가 다르다(§9~10). 이 Alarm 하나 때문에
+// 과도한 generic metric framework를 만들지 않고, 이 7개 metric에 대한 정책만 명시한다.
+type MetricSemantic = "sparse_count" | "gauge";
+
+const METRIC_SEMANTICS: Record<string, MetricSemantic> = {
+  "Game.QuizSnapshotFailure": "sparse_count",
+  "API.HTTPCode_Target_5XX_Count": "sparse_count",
+  "Game.HTTPCode_Target_5XX_Count": "sparse_count",
+  "API.TargetResponseTime": "gauge",
+  "Game.TargetResponseTime": "gauge",
+  "RDS.CPUUtilization": "gauge",
+  "RDS.DatabaseConnections": "gauge",
+};
+
 const cloudWatchClient = new CloudWatchClient({});
 
 // GetMetricData는 요청한 period가 metric의 실제 발행 주기보다 촘촘해도(예: RDS 기본
@@ -138,18 +153,31 @@ function computeTrend(values: number[]): MetricTrend {
   return "stable";
 }
 
+// 이 7개 외의 이름이 들어올 일은 없지만(buildQuerySpecs가 고정된 spec만 만든다), 정책에
+// 없는 이름이 들어와도 gauge로 안전하게 취급한다(sparse count로 잘못 취급해 원본 null을
+// 0으로 덮어쓰는 쪽보다, 값을 모른다고 두는 쪽이 더 안전한 기본값이다).
+function resolveSemantic(name: string): MetricSemantic {
+  return METRIC_SEMANTICS[name] ?? "gauge";
+}
+
 function summarize(
   name: string,
   timestamps: Date[],
   values: number[],
 ): MetricSummary {
   if (values.length === 0) {
+    const semantic = resolveSemantic(name);
     return {
       name,
       current: null,
       average15m: null,
       max15m: null,
       trend: "unknown",
+      hasData: false,
+      dataState: "NO_DATAPOINT",
+      // sparse count metric만 "0건 관측"이라는 의미의 semanticValue를 채운다(§9) - 원본
+      // current(null)는 그대로 두고 별도 필드로만 표현한다.
+      ...(semantic === "sparse_count" ? { semanticValue: 0 } : {}),
     };
   }
 
@@ -167,6 +195,21 @@ function summarize(
       orderedValues.reduce((sum, v) => sum + v, 0) / orderedValues.length,
     max15m: Math.max(...orderedValues),
     trend: computeTrend(orderedValues),
+    hasData: true,
+    dataState: "OBSERVED",
+  };
+}
+
+/** AWS API 조회 자체가 실패했을 때(§7) 각 metric을 이름은 남기고 COLLECTION_FAILED로 채운다. */
+function collectionFailedSummary(name: string): MetricSummary {
+  return {
+    name,
+    current: null,
+    average15m: null,
+    max15m: null,
+    trend: "unknown",
+    hasData: false,
+    dataState: "COLLECTION_FAILED",
   };
 }
 
@@ -222,6 +265,11 @@ export async function collectMetrics(
 
     return { status: "success", metrics };
   } catch {
-    return { status: "failed", metrics: [] };
+    // 빈 배열 대신 기대했던 7개 metric 이름을 COLLECTION_FAILED로 채워 돌려준다 - AI가
+    // "어떤 metric을 확인하지 못했는지"를 이름으로 알 수 있게 한다(§7~8).
+    return {
+      status: "failed",
+      metrics: specs.map((spec) => collectionFailedSummary(spec.name)),
+    };
   }
 }

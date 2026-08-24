@@ -21,7 +21,27 @@ const CONTEXT: IncidentContext = {
   metrics: [],
   logs: { errorCount: 0, eventCounts: [], errorCodeCounts: [], samples: [] },
   traces: [],
-  collection: { metrics: "success", logs: "success", traces: "success" },
+  deployments: [
+    {
+      service: "api",
+      commitSha: "abc123",
+      deployedAt: "2026-08-24T02:21:00.000Z",
+      minutesBeforeIncident: 9,
+      pullRequestLookup: "FOUND",
+      pullRequest: {
+        number: 82,
+        title: "Quiz Snapshot 조회 로직 개선",
+        changedFiles: [],
+      },
+    },
+  ],
+  collection: {
+    alarmDefinition: "success",
+    metrics: "success",
+    logs: "success",
+    traces: "success",
+    deployments: "success",
+  },
 };
 
 const VALID_RESULT = {
@@ -31,6 +51,10 @@ const VALID_RESULT = {
   evidence: ["근거1"],
   recommendedChecks: ["확인1"],
   limitations: [],
+  deploymentCorrelation: {
+    relevance: "MEDIUM",
+    summary: "관련 가능성이 있습니다.",
+  },
 };
 
 describe("analyzeIncident", () => {
@@ -55,8 +79,30 @@ describe("analyzeIncident", () => {
     expect(request.input[0].role).toBe("system");
     expect(request.input[1].role).toBe("user");
     expect(request.input[1].content).toContain("QuizSnapshotFailure");
+    // Deployment Context(§19)가 request에 포함되는지 확인한다.
+    expect(request.input[1].content).toContain("Quiz Snapshot 조회 로직 개선");
     expect(request.text.format.type).toBe("json_schema");
     expect(request.text.format.strict).toBe(true);
+  });
+
+  it("evidence/recommendedChecks/limitations가 상한을 넘으면 응답을 받은 뒤 잘라낸다(§26)", async () => {
+    createMock.mockResolvedValueOnce({
+      output_text: JSON.stringify({
+        ...VALID_RESULT,
+        evidence: ["1", "2", "3", "4", "5", "6", "7", "8"],
+        recommendedChecks: ["1", "2", "3", "4", "5"],
+        limitations: ["1", "2", "3", "4", "5"],
+      }),
+    });
+
+    const result = await analyzeIncident(CONTEXT, {
+      apiKey: "sk-test",
+      model: "m",
+    });
+
+    expect(result.evidence).toHaveLength(6);
+    expect(result.recommendedChecks).toHaveLength(4);
+    expect(result.limitations).toHaveLength(4);
   });
 
   it("정상 응답은 그대로 파싱해서 반환한다", async () => {

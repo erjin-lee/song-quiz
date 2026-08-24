@@ -1,13 +1,19 @@
 import fixture from "../test/fixtures/quiz-snapshot-failure-alarm.json";
 import { EventBridgeAlarmStateChangeEvent } from "./types";
 
+const mockCollectAlarmDefinition = jest.fn();
 const mockCollectMetrics = jest.fn();
 const mockCollectLogs = jest.fn();
 const mockCollectTraces = jest.fn();
+const mockCollectDeployments = jest.fn();
 const mockAnalyzeIncident = jest.fn();
 const mockSendSlackMessage = jest.fn();
 const mockGetSsmParameter = jest.fn();
 
+jest.mock("./context/collect-alarm-definition", () => ({
+  collectAlarmDefinition: (...args: unknown[]) =>
+    mockCollectAlarmDefinition(...args),
+}));
 jest.mock("./context/collect-metrics", () => ({
   collectMetrics: (...args: unknown[]) => mockCollectMetrics(...args),
 }));
@@ -16,6 +22,9 @@ jest.mock("./context/collect-logs", () => ({
 }));
 jest.mock("./context/collect-traces", () => ({
   collectTraces: (...args: unknown[]) => mockCollectTraces(...args),
+}));
+jest.mock("./context/collect-deployments", () => ({
+  collectDeployments: (...args: unknown[]) => mockCollectDeployments(...args),
 }));
 jest.mock("./openai/analyze-incident", () => ({
   analyzeIncident: (...args: unknown[]) => mockAnalyzeIncident(...args),
@@ -39,12 +48,14 @@ const ENV = {
   OPENAI_API_KEY_PARAMETER_NAME: "/song-quiz/prod/openai/api-key",
 };
 
+const SUCCESSFUL_ALARM_DEFINITION = { status: "success", definition: {} };
 const SUCCESSFUL_METRICS = { status: "success", metrics: [] };
 const SUCCESSFUL_LOGS = {
   status: "success",
   logs: { errorCount: 1, eventCounts: [], errorCodeCounts: [], samples: [] },
 };
 const SUCCESSFUL_TRACES = { status: "success", traces: [] };
+const SUCCESSFUL_DEPLOYMENTS = { status: "success", deployments: [] };
 const ANALYSIS_RESULT = {
   summary: "s",
   probableCause: "c",
@@ -52,6 +63,7 @@ const ANALYSIS_RESULT = {
   evidence: ["e"],
   recommendedChecks: ["r"],
   limitations: [],
+  deploymentCorrelation: { relevance: "NONE", summary: "관련 없음" },
 };
 
 describe("handler", () => {
@@ -62,9 +74,11 @@ describe("handler", () => {
     jest.clearAllMocks();
     process.env = { ...originalEnv, ...ENV };
 
+    mockCollectAlarmDefinition.mockResolvedValue(SUCCESSFUL_ALARM_DEFINITION);
     mockCollectMetrics.mockResolvedValue(SUCCESSFUL_METRICS);
     mockCollectLogs.mockResolvedValue(SUCCESSFUL_LOGS);
     mockCollectTraces.mockResolvedValue(SUCCESSFUL_TRACES);
+    mockCollectDeployments.mockResolvedValue(SUCCESSFUL_DEPLOYMENTS);
     mockAnalyzeIncident.mockResolvedValue(ANALYSIS_RESULT);
     mockGetSsmParameter.mockResolvedValue("secret-value");
     mockSendSlackMessage.mockResolvedValue(undefined);
@@ -146,6 +160,51 @@ describe("handler", () => {
 
     expect(mockAnalyzeIncident).toHaveBeenCalledTimes(1);
     expect(mockSendSlackMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("Deployment 조회가 실패해도 남은 데이터로 분석을 계속한다(§29)", async () => {
+    mockCollectDeployments.mockResolvedValueOnce({
+      status: "failed",
+      deployments: [],
+    });
+
+    const { handler } = await import("./handler");
+    await handler(alarmEvent);
+
+    expect(mockAnalyzeIncident).toHaveBeenCalledTimes(1);
+    expect(mockSendSlackMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("Deployment Context를 Slack 메시지 빌더에 그대로 전달한다", async () => {
+    mockCollectDeployments.mockResolvedValueOnce({
+      status: "success",
+      deployments: [
+        {
+          service: "api",
+          commitSha: "abc123",
+          deployedAt: "2026-08-24T03:21:00.000Z",
+          minutesBeforeIncident: 9,
+          pullRequest: {
+            number: 82,
+            title: "Quiz Snapshot 조회 로직 개선",
+            changedFiles: [],
+          },
+        },
+      ],
+    });
+    mockAnalyzeIncident.mockResolvedValueOnce({
+      ...ANALYSIS_RESULT,
+      deploymentCorrelation: {
+        relevance: "HIGH",
+        summary: "연관성이 높습니다.",
+      },
+    });
+
+    const { handler } = await import("./handler");
+    await handler(alarmEvent);
+
+    const [, message] = mockSendSlackMessage.mock.calls[0];
+    expect(JSON.stringify(message)).toContain("PR #82");
   });
 
   it("OpenAI 호출이 실패해도 예외를 던지지 않고 Slack을 호출하지 않는다(기존 notifier에는 영향 없음, §2)", async () => {
