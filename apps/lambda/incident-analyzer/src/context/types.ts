@@ -1,6 +1,11 @@
 // AWS raw response를 그대로 OpenAI에 전달하지 않고, 이 파일의 타입들로 정규화/집계한
 // 뒤(build-incident-context.ts) 그 결과만 전달한다.
 
+// 이 Lambda가 분석하는 Alarm 종류(§v1-2 - 최소 공통화). 새 Alarm을 추가할 때마다 이
+// union에 값을 더하고, 필요한 곳(collect-metrics.ts의 metric set 등)에서만 분기한다 -
+// 범용 Policy Engine/YAML/Plugin framework는 만들지 않는다.
+export type IncidentType = "QUIZ_SNAPSHOT_FAILURE" | "GAME_TARGET_5XX";
+
 export type CollectionStatus = "success" | "failed";
 
 export type MetricTrend = "increasing" | "decreasing" | "stable" | "unknown";

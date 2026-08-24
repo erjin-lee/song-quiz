@@ -20,4 +20,23 @@ describe("SYSTEM_PROMPT", () => {
   it("evidence/recommendedChecks/limitations 개수 제한 안내를 포함한다", () => {
     expect(SYSTEM_PROMPT).toContain("최대 6개");
   });
+
+  it("Game Target5xx 분석 목표(비교해야 할 가능성 후보)를 포함한다", () => {
+    expect(SYSTEM_PROMPT).toContain("Redis/lock 문제");
+    expect(SYSTEM_PROMPT).toContain("Timer/claim 문제");
+    expect(SYSTEM_PROMPT).toContain("EC2 resource pressure");
+    expect(SYSTEM_PROMPT).toContain("원인을 특정할 수 없음");
+  });
+
+  it("RedisLockFailure만으로 Redis 장애를 단정하지 말라는 규칙을 포함한다", () => {
+    expect(SYSTEM_PROMPT).toContain("Redis 장애를 확정하지 않는다");
+  });
+
+  it("RDS CPU 정상만으로 DB 문제를 배제하지 말라는 규칙을 포함한다", () => {
+    expect(SYSTEM_PROMPT).toContain("완전히 배제하지 않는다");
+  });
+
+  it("Trace 부재만으로 네트워크 문제를 단정하지 말라는 규칙을 포함한다", () => {
+    expect(SYSTEM_PROMPT).toContain("네트워크 문제라고 단정하지 않는다");
+  });
 });

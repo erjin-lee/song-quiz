@@ -45,7 +45,8 @@ resource "aws_iam_role_policy" "incident_analyzer_logs" {
 
 # 실제 배포된 Alarm 평가 조건(threshold/period/evaluationPeriods 등, §4~5)을 조회하는
 # 권한. DescribeAlarms는 (GetMetricData/BatchGetTraces와 달리) alarm 리소스 수준 권한을
-# 지원해 QuizSnapshotFailure Alarm 하나로 Resource를 좁힐 수 있다.
+# 지원해 이 Lambda가 분석하는 Alarm들(QuizSnapshotFailure, Game Target5xx)로만 Resource를
+# 좁힐 수 있다 - 다른 Alarm(API Target5xx 등)의 DescribeAlarms는 허용하지 않는다.
 resource "aws_iam_role_policy" "incident_analyzer_alarm_definition" {
   name = "${local.function_name}-alarm-definition"
   role = aws_iam_role.incident_analyzer.id
@@ -54,9 +55,12 @@ resource "aws_iam_role_policy" "incident_analyzer_alarm_definition" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect   = "Allow"
-        Action   = "cloudwatch:DescribeAlarms"
-        Resource = "arn:aws:cloudwatch:${var.aws_region}:${data.aws_caller_identity.current.account_id}:alarm:${var.target_alarm_name}"
+        Effect = "Allow"
+        Action = "cloudwatch:DescribeAlarms"
+        Resource = [
+          "arn:aws:cloudwatch:${var.aws_region}:${data.aws_caller_identity.current.account_id}:alarm:${var.quiz_snapshot_failure_alarm_name}",
+          "arn:aws:cloudwatch:${var.aws_region}:${data.aws_caller_identity.current.account_id}:alarm:${var.game_target_5xx_alarm_name}",
+        ]
       }
     ]
   })

@@ -47,18 +47,22 @@ resource "aws_lambda_function" "incident_analyzer" {
   # 필요 없다 - VPC에 넣지 않아 NAT Gateway 비용/복잡도를 추가하지 않는다(§27).
   environment {
     variables = {
-      TARGET_ALARM_NAME              = var.target_alarm_name
-      GAME_LOG_GROUP_NAME            = var.game_log_group_name
-      GAME_METRIC_NAMESPACE          = var.game_metric_namespace
-      ALB_ARN_SUFFIX                 = var.alb_arn_suffix
-      API_TARGET_GROUP_ARN_SUFFIX    = var.api_target_group_arn_suffix
-      GAME_TARGET_GROUP_ARN_SUFFIX   = var.game_target_group_arn_suffix
-      DB_INSTANCE_IDENTIFIER         = var.db_instance_identifier
-      SLACK_WEBHOOK_PARAMETER_NAME   = var.slack_webhook_parameter_name
-      OPENAI_API_KEY_PARAMETER_NAME  = var.openai_api_key_parameter_name
-      OPENAI_MODEL                   = var.openai_model
-      API_DEPLOYMENT_PARAMETER_NAME  = var.api_deployment_parameter_name
-      GAME_DEPLOYMENT_PARAMETER_NAME = var.game_deployment_parameter_name
+      QUIZ_SNAPSHOT_FAILURE_ALARM_NAME = var.quiz_snapshot_failure_alarm_name
+      GAME_TARGET_5XX_ALARM_NAME       = var.game_target_5xx_alarm_name
+      GAME_LOG_GROUP_NAME              = var.game_log_group_name
+      GAME_METRIC_NAMESPACE            = var.game_metric_namespace
+      ALB_ARN_SUFFIX                   = var.alb_arn_suffix
+      API_TARGET_GROUP_ARN_SUFFIX      = var.api_target_group_arn_suffix
+      GAME_TARGET_GROUP_ARN_SUFFIX     = var.game_target_group_arn_suffix
+      DB_INSTANCE_IDENTIFIER           = var.db_instance_identifier
+      EC2_INSTANCE_ID                  = var.ec2_instance_id
+      EC2_METRIC_NAMESPACE             = var.ec2_metric_namespace
+      CACHE_CLUSTER_ID                 = var.cache_cluster_id
+      SLACK_WEBHOOK_PARAMETER_NAME     = var.slack_webhook_parameter_name
+      OPENAI_API_KEY_PARAMETER_NAME    = var.openai_api_key_parameter_name
+      OPENAI_MODEL                     = var.openai_model
+      API_DEPLOYMENT_PARAMETER_NAME    = var.api_deployment_parameter_name
+      GAME_DEPLOYMENT_PARAMETER_NAME   = var.game_deployment_parameter_name
     }
   }
 
