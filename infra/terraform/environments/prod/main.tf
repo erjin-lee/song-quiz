@@ -167,3 +167,20 @@ module "notification" {
   aws_region       = var.aws_region
   lambda_dist_path = abspath("${path.root}/../../../../apps/lambda/alarm-notifier/dist")
 }
+
+# QuizSnapshotFailure ALARM 전용 AIOps 흐름(Metrics/Logs/X-Ray 수집 -> OpenAI 분석 -> Slack).
+# notification 모듈의 EventBridge Rule/Lambda는 전혀 참조하지 않는 독립된 경로다(§2, §36 -
+# modules/aiops/eventbridge.tf 참고).
+module "aiops" {
+  source = "../../modules/aiops"
+
+  aws_region                   = var.aws_region
+  lambda_dist_path             = abspath("${path.root}/../../../../apps/lambda/incident-analyzer/dist")
+  game_log_group_name          = module.logging.game_log_group_name
+  game_log_group_arn           = module.logging.game_log_group_arn
+  game_metric_namespace        = module.logging.game_metric_namespace
+  alb_arn_suffix               = module.load_balancer.arn_suffix
+  api_target_group_arn_suffix  = module.load_balancer.app_target_group_arn_suffix
+  game_target_group_arn_suffix = module.load_balancer.game_target_group_arn_suffix
+  db_instance_identifier       = module.database.identifier
+}
