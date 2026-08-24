@@ -31,3 +31,19 @@ IAM 권한 부족으로 조용히 실패한다.
 |---|---|
 | `logs_collected...log_group_name` | `modules/logging` → `aws_cloudwatch_log_group.api` / `.game` |
 | `metrics.namespace` | `modules/iam` → `aws_iam_role_policy.app_cloudwatch_metrics`의 `var.ec2_metric_namespace` (기본값 `SongQuiz/EC2`) |
+| `traces.traces_collected.otlp.http_endpoint` | `modules/iam` → `aws_iam_role_policy.app_xray_write` (X-Ray write 권한이 있어야 Agent가 수신한 trace를 X-Ray로 보낼 수 있다) |
+
+## Trace(OTLP) 수신
+
+`traces.traces_collected.otlp.http_endpoint`는 `apps/api`/`apps/game`(`packages/tracing`)이
+`OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`로 보내는 OTLP/HTTP trace를 Agent가 받아
+X-Ray/CloudWatch Traces로 전달하는 receiver다. `127.0.0.1`로만 바인딩하며, api/game과 같은 EC2
+안에서만 접근하므로 Security Group에 4318을 열지 않는다.
+
+적용 후 다음을 확인한다.
+
+```bash
+sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a status
+sudo tail -f /opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log
+sudo ss -lntp | grep 4318   # 127.0.0.1:4318 LISTEN이어야 한다
+```

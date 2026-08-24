@@ -18,8 +18,10 @@ export const INTERNAL_SECRET_HEADER = 'x-internal-secret';
  * 설정돼 있지 않으면 apps/api의 InternalAuthGuard가 항상 거부하므로, 여기서도 미설정을
  * 조용히 넘기지 않고 바로 에러를 던져 원인을 명확히 한다.
  *
- * 현재 요청의 requestId/traceId(§buildCorrelationHeaders)도 함께 실어 보내,
- * apps/api 쪽 로그에서 같은 requestId로 이 호출을 상관시킬 수 있게 한다.
+ * 현재 요청의 requestId(§buildCorrelationHeaders)도 함께 실어 보내, apps/api 쪽
+ * 로그에서 같은 requestId로 이 호출을 상관시킬 수 있게 한다. traceId는 여기서
+ * 따로 싣지 않는다 — fetch(undici) 호출을 OTel이 자동 계측하면서 W3C
+ * traceparent 헤더로 이미 전파하기 때문이다.
  */
 export function internalRequestHeaders(): Record<string, string> {
   const secret = process.env.INTERNAL_SERVICE_SECRET;
