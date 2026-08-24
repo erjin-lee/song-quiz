@@ -1,4 +1,5 @@
 import fixture from "../test/fixtures/quiz-snapshot-failure-alarm.json";
+import gameTarget5xxFixture from "../test/fixtures/game-target-5xx-alarm.json";
 import { EventBridgeAlarmStateChangeEvent } from "./types";
 
 const mockCollectAlarmDefinition = jest.fn();
@@ -37,6 +38,8 @@ jest.mock("./get-ssm-parameter", () => ({
 }));
 
 const alarmEvent = fixture as unknown as EventBridgeAlarmStateChangeEvent;
+const gameTarget5xxEvent =
+  gameTarget5xxFixture as unknown as EventBridgeAlarmStateChangeEvent;
 
 const ENV = {
   GAME_LOG_GROUP_NAME: "/deploy-terraform/game",
@@ -44,6 +47,9 @@ const ENV = {
   API_TARGET_GROUP_ARN_SUFFIX: "targetgroup/deploy-terraform-api/def",
   GAME_TARGET_GROUP_ARN_SUFFIX: "targetgroup/deploy-terraform-game/ghi",
   DB_INSTANCE_IDENTIFIER: "deploy-terraform-db",
+  EC2_INSTANCE_ID: "i-088da98215dd782e4",
+  EC2_METRIC_NAMESPACE: "SongQuiz/EC2",
+  CACHE_CLUSTER_ID: "deploy-terraform-cache",
   SLACK_WEBHOOK_PARAMETER_NAME: "/song-quiz/prod/slack/alarm-webhook-url",
   OPENAI_API_KEY_PARAMETER_NAME: "/song-quiz/prod/openai/api-key",
 };
@@ -94,8 +100,29 @@ describe("handler", () => {
     await handler(alarmEvent);
 
     expect(mockCollectMetrics).toHaveBeenCalledTimes(1);
+    expect(mockCollectMetrics).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "QUIZ_SNAPSHOT_FAILURE",
+    );
     expect(mockCollectLogs).toHaveBeenCalledTimes(1);
     expect(mockCollectTraces).toHaveBeenCalledTimes(1);
+    expect(mockAnalyzeIncident).toHaveBeenCalledTimes(1);
+    expect(mockSendSlackMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("Game Target5xx ALARM은 신규 GAME_TARGET_5XX 분석으로 context를 모아 OpenAI 분석 후 Slack으로 보낸다", async () => {
+    const { handler } = await import("./handler");
+
+    await handler(gameTarget5xxEvent);
+
+    expect(mockCollectMetrics).toHaveBeenCalledTimes(1);
+    expect(mockCollectMetrics).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "GAME_TARGET_5XX",
+    );
+    expect(mockCollectLogs).toHaveBeenCalledTimes(1);
     expect(mockAnalyzeIncident).toHaveBeenCalledTimes(1);
     expect(mockSendSlackMessage).toHaveBeenCalledTimes(1);
   });
@@ -117,12 +144,28 @@ describe("handler", () => {
     expect(mockSendSlackMessage).not.toHaveBeenCalled();
   });
 
-  it("QuizSnapshotFailure가 아닌 다른 Alarm은 분석하지 않는다(§5)", async () => {
+  it("Game Target5xx의 OK 상태도 분석하지 않는다(§6)", async () => {
+    const event: EventBridgeAlarmStateChangeEvent = {
+      ...gameTarget5xxEvent,
+      detail: {
+        ...gameTarget5xxEvent.detail,
+        state: { ...gameTarget5xxEvent.detail.state, value: "OK" },
+      },
+    };
+
+    const { handler } = await import("./handler");
+    await handler(event);
+
+    expect(mockCollectMetrics).not.toHaveBeenCalled();
+    expect(mockSendSlackMessage).not.toHaveBeenCalled();
+  });
+
+  it("QuizSnapshotFailure/Game Target5xx가 아닌 다른 Alarm(API Target5xx)은 아직 분석하지 않는다(§5)", async () => {
     const event: EventBridgeAlarmStateChangeEvent = {
       ...alarmEvent,
       detail: {
         ...alarmEvent.detail,
-        alarmName: "SongQuiz-Prod-High-Game-Target5xx",
+        alarmName: "SongQuiz-Prod-High-API-Target5xx",
       },
     };
 

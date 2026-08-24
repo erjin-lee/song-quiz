@@ -9,10 +9,20 @@ variable "aws_region" {
   type        = string
 }
 
-variable "target_alarm_name" {
-  description = "AI 분석 대상 Alarm 이름(정확히 일치). EventBridge event pattern과 Lambda 쪽 방어적 재검증에 함께 쓴다 - 이번 단계는 QuizSnapshotFailure 하나만 대상으로 한다(§5)."
+variable "quiz_snapshot_failure_alarm_name" {
+  description = "QuizSnapshotFailure 분석 대상 Alarm 이름(정확히 일치). EventBridge event pattern과 Lambda 쪽 방어적 재검증에 함께 쓴다."
   type        = string
   default     = "SongQuiz-Prod-High-Game-QuizSnapshotFailure"
+}
+
+# v1-2: Game Target5xx ALARM 확장(§AIOps v1-2) - 기존 target_alarm_name(단일 변수)을
+# quiz_snapshot_failure_alarm_name으로 이름만 바꾸고, 새 Alarm용 변수를 하나 더 둔다.
+# 세 번째 Alarm(API Target5xx 등)이 추가될 때 이 방식이 계속 늘어나면 그때 범용화를
+# 다시 검토한다 - 지금은(§v1-2 최소 공통화) 변수 하나 추가로 충분하다.
+variable "game_target_5xx_alarm_name" {
+  description = "Game Target5xx 분석 대상 Alarm 이름(정확히 일치). EventBridge event pattern과 Lambda 쪽 방어적 재검증에 함께 쓴다."
+  type        = string
+  default     = "SongQuiz-Prod-High-Game-Target5xx"
 }
 
 variable "lambda_dist_path" {
@@ -58,6 +68,23 @@ variable "game_target_group_arn_suffix" {
 
 variable "db_instance_identifier" {
   description = "RDS 인스턴스 식별자(database 모듈 출력)"
+  type        = string
+}
+
+# Game Target5xx 분석(§AIOps v1-2)의 EC2/Redis Metric 조회용 - monitoring 모듈이 Dashboard에
+# 쓰는 것과 동일한 값을 그대로 전달받는다(새 값을 여기서 새로 정의하지 않는다).
+variable "ec2_instance_id" {
+  description = "app_a EC2 인스턴스 ID(compute 모듈 출력) - EC2 CPU/Memory Metric의 InstanceId dimension"
+  type        = string
+}
+
+variable "ec2_metric_namespace" {
+  description = "CloudWatch Agent EC2 Memory 지표의 namespace(iam 모듈 출력)"
+  type        = string
+}
+
+variable "cache_cluster_id" {
+  description = "ElastiCache 클러스터 ID(cache 모듈 출력) - Redis Memory/Connections/Evictions Metric의 CacheClusterId dimension"
   type        = string
 }
 

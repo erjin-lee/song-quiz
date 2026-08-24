@@ -1,7 +1,7 @@
 {
   "name": "incident-analyzer",
   "version": "0.0.1",
-  "description": "QuizSnapshotFailure ALARM 발생 시 Metrics/Logs/X-Ray Trace를 수집해 OpenAI로 장애 원인 후보를 분석하고 Slack으로 전달하는 Lambda",
+  "description": "QuizSnapshotFailure/Game Target5xx ALARM 발생 시 Metrics/Logs/X-Ray Trace를 수집해 OpenAI로 장애 원인 후보를 분석하고 Slack으로 전달하는 Lambda",
   "private": true,
   "license": "UNLICENSED",
   "scripts": {

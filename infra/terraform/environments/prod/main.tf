@@ -168,9 +168,9 @@ module "notification" {
   lambda_dist_path = abspath("${path.root}/../../../../apps/lambda/alarm-notifier/dist")
 }
 
-# QuizSnapshotFailure ALARM 전용 AIOps 흐름(Metrics/Logs/X-Ray 수집 -> OpenAI 분석 -> Slack).
-# notification 모듈의 EventBridge Rule/Lambda는 전혀 참조하지 않는 독립된 경로다(§2, §36 -
-# modules/aiops/eventbridge.tf 참고).
+# QuizSnapshotFailure/Game Target5xx ALARM 전용 AIOps 흐름(Metrics/Logs/X-Ray 수집 -> OpenAI
+# 분석 -> Slack). notification 모듈의 EventBridge Rule/Lambda는 전혀 참조하지 않는 독립된
+# 경로다(§2, §36 - modules/aiops/eventbridge.tf 참고).
 module "aiops" {
   source = "../../modules/aiops"
 
@@ -183,4 +183,9 @@ module "aiops" {
   api_target_group_arn_suffix  = module.load_balancer.app_target_group_arn_suffix
   game_target_group_arn_suffix = module.load_balancer.game_target_group_arn_suffix
   db_instance_identifier       = module.database.identifier
+  # Game Target5xx 분석(§AIOps v1-2)의 EC2/Redis Metric 조회용 - monitoring 모듈에 이미
+  # 전달하는 것과 동일한 값을 그대로 재사용한다.
+  ec2_instance_id      = module.compute.app_a_id
+  ec2_metric_namespace = module.iam.ec2_metric_namespace
+  cache_cluster_id     = module.cache.cluster_id
 }

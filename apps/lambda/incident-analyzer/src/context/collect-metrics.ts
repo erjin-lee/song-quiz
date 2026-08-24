@@ -6,13 +6,15 @@ import {
 import {
   AnalysisWindow,
   CollectionStatus,
+  IncidentType,
   MetricSummary,
   MetricTrend,
 } from "./types";
 
 // count 계열(이벤트 발생 시에만 값이 존재)과 gauge/continuous 계열(항상 어떤 값이든
-// 존재해야 정상)은 datapoint가 없을 때의 의미가 다르다(§9~10). 이 Alarm 하나 때문에
-// 과도한 generic metric framework를 만들지 않고, 이 7개 metric에 대한 정책만 명시한다.
+// 존재해야 정상)은 datapoint가 없을 때의 의미가 다르다(§9~10). Alarm 종류가 늘어나도
+// 과도한 generic metric framework를 만들지 않고, 실제 존재하는 metric에 대한 정책만
+// 이 맵에 명시한다(v1-2에서 Game Target5xx에 필요한 것만 추가).
 type MetricSemantic = "sparse_count" | "gauge";
 
 const METRIC_SEMANTICS: Record<string, MetricSemantic> = {
@@ -21,8 +23,17 @@ const METRIC_SEMANTICS: Record<string, MetricSemantic> = {
   "Game.HTTPCode_Target_5XX_Count": "sparse_count",
   "API.TargetResponseTime": "gauge",
   "Game.TargetResponseTime": "gauge",
+  "API.RequestCount": "sparse_count",
+  "Game.RequestCount": "sparse_count",
+  "Game.RedisLockFailure": "sparse_count",
+  "Game.TimerClaimFailure": "sparse_count",
   "RDS.CPUUtilization": "gauge",
   "RDS.DatabaseConnections": "gauge",
+  "EC2.CPUUtilization": "gauge",
+  "EC2.MemoryUsedPercent": "gauge",
+  "Redis.MemoryUsagePercentage": "gauge",
+  "Redis.CurrConnections": "gauge",
+  "Redis.Evictions": "sparse_count",
 };
 
 const cloudWatchClient = new CloudWatchClient({});
@@ -47,6 +58,9 @@ export interface CollectMetricsConfig {
   apiTargetGroupArnSuffix: string;
   gameTargetGroupArnSuffix: string;
   dbInstanceIdentifier: string;
+  ec2InstanceId: string;
+  ec2MetricNamespace: string;
+  cacheClusterId: string;
 }
 
 export interface CollectMetricsResult {
@@ -54,7 +68,42 @@ export interface CollectMetricsResult {
   metrics: MetricSummary[];
 }
 
-function buildQuerySpecs(config: CollectMetricsConfig): MetricQuerySpec[] {
+// Incident 종류별로 실제 조회할 metric 이름 목록(§v1-2 최소 공통화) - 새 Alarm이 추가될
+// 때마다 이 맵에 목록 하나만 더한다. QuizSnapshotFailure는 기존 7개를 그대로 유지해
+// 기존 분석이 깨지지 않게 한다(regression). Game Target5xx는 요청받은 16개 metric
+// 전체를 dashboard.tf/alarms.tf가 이미 쓰는 namespace/dimension으로만 구성한다.
+const INCIDENT_METRIC_NAMES: Record<IncidentType, string[]> = {
+  QUIZ_SNAPSHOT_FAILURE: [
+    "Game.QuizSnapshotFailure",
+    "API.HTTPCode_Target_5XX_Count",
+    "API.TargetResponseTime",
+    "Game.HTTPCode_Target_5XX_Count",
+    "Game.TargetResponseTime",
+    "RDS.CPUUtilization",
+    "RDS.DatabaseConnections",
+  ],
+  GAME_TARGET_5XX: [
+    "Game.HTTPCode_Target_5XX_Count",
+    "Game.TargetResponseTime",
+    "Game.RequestCount",
+    "API.HTTPCode_Target_5XX_Count",
+    "API.TargetResponseTime",
+    "API.RequestCount",
+    "Game.QuizSnapshotFailure",
+    "Game.RedisLockFailure",
+    "Game.TimerClaimFailure",
+    "EC2.CPUUtilization",
+    "EC2.MemoryUsedPercent",
+    "Redis.MemoryUsagePercentage",
+    "Redis.CurrConnections",
+    "Redis.Evictions",
+    "RDS.CPUUtilization",
+    "RDS.DatabaseConnections",
+  ],
+};
+
+/** 이 Lambda가 알고 있는 전체 metric spec(§v1-2). incidentType별로 이 중 필요한 것만 골라 쓴다. */
+function buildAllQuerySpecs(config: CollectMetricsConfig): MetricQuerySpec[] {
   const albDimensions = (targetGroupArnSuffix: string) => ({
     LoadBalancer: config.albArnSuffix,
     TargetGroup: targetGroupArnSuffix,
@@ -101,6 +150,76 @@ function buildQuerySpecs(config: CollectMetricsConfig): MetricQuerySpec[] {
       dimensions: albDimensions(config.gameTargetGroupArnSuffix),
     },
     {
+      id: "apiRequestCount",
+      name: "API.RequestCount",
+      namespace: "AWS/ApplicationELB",
+      metricName: "RequestCount",
+      stat: "Sum",
+      dimensions: albDimensions(config.apiTargetGroupArnSuffix),
+    },
+    {
+      id: "gameRequestCount",
+      name: "Game.RequestCount",
+      namespace: "AWS/ApplicationELB",
+      metricName: "RequestCount",
+      stat: "Sum",
+      dimensions: albDimensions(config.gameTargetGroupArnSuffix),
+    },
+    {
+      id: "gameRedisLockFailure",
+      name: "Game.RedisLockFailure",
+      namespace: config.gameMetricNamespace,
+      metricName: "RedisLockFailure",
+      stat: "Sum",
+    },
+    {
+      id: "gameTimerClaimFailure",
+      name: "Game.TimerClaimFailure",
+      namespace: config.gameMetricNamespace,
+      metricName: "TimerClaimFailure",
+      stat: "Sum",
+    },
+    {
+      id: "ec2Cpu",
+      name: "EC2.CPUUtilization",
+      namespace: "AWS/EC2",
+      metricName: "CPUUtilization",
+      stat: "Average",
+      dimensions: { InstanceId: config.ec2InstanceId },
+    },
+    {
+      id: "ec2Memory",
+      name: "EC2.MemoryUsedPercent",
+      namespace: config.ec2MetricNamespace,
+      metricName: "mem_used_percent",
+      stat: "Average",
+      dimensions: { InstanceId: config.ec2InstanceId },
+    },
+    {
+      id: "redisMemory",
+      name: "Redis.MemoryUsagePercentage",
+      namespace: "AWS/ElastiCache",
+      metricName: "DatabaseMemoryUsagePercentage",
+      stat: "Average",
+      dimensions: { CacheClusterId: config.cacheClusterId },
+    },
+    {
+      id: "redisConnections",
+      name: "Redis.CurrConnections",
+      namespace: "AWS/ElastiCache",
+      metricName: "CurrConnections",
+      stat: "Average",
+      dimensions: { CacheClusterId: config.cacheClusterId },
+    },
+    {
+      id: "redisEvictions",
+      name: "Redis.Evictions",
+      namespace: "AWS/ElastiCache",
+      metricName: "Evictions",
+      stat: "Sum",
+      dimensions: { CacheClusterId: config.cacheClusterId },
+    },
+    {
       id: "rdsCpu",
       name: "RDS.CPUUtilization",
       namespace: "AWS/RDS",
@@ -117,6 +236,23 @@ function buildQuerySpecs(config: CollectMetricsConfig): MetricQuerySpec[] {
       dimensions: { DBInstanceIdentifier: config.dbInstanceIdentifier },
     },
   ];
+}
+
+/** incidentType에 필요한 metric만, INCIDENT_METRIC_NAMES에 나열한 순서 그대로 고른다. */
+function buildQuerySpecs(
+  config: CollectMetricsConfig,
+  incidentType: IncidentType,
+): MetricQuerySpec[] {
+  const allSpecs = buildAllQuerySpecs(config);
+  const specByName = new Map(allSpecs.map((spec) => [spec.name, spec]));
+
+  return INCIDENT_METRIC_NAMES[incidentType].map((name) => {
+    const spec = specByName.get(name);
+    if (!spec) {
+      throw new Error(`Unknown metric name in INCIDENT_METRIC_NAMES: ${name}`);
+    }
+    return spec;
+  });
 }
 
 /**
@@ -214,15 +350,16 @@ function collectionFailedSummary(name: string): MetricSummary {
 }
 
 /**
- * QuizSnapshotFailure 분석에 필요한 최소 Metric 세트(§9)를 GetMetricData 한 번으로
- * 조회한다. 새 Custom Metric/Metric Filter는 만들지 않고, monitoring 모듈 Dashboard가
+ * incidentType에 필요한 Metric 세트(INCIDENT_METRIC_NAMES)를 GetMetricData 한 번으로
+ * 조회한다. 새 Custom Metric/Metric Filter는 만들지 않고, monitoring 모듈 Dashboard/Alarm이
  * 이미 쓰는 것과 동일한 namespace/dimension만 재사용한다.
  */
 export async function collectMetrics(
   window: AnalysisWindow,
   config: CollectMetricsConfig,
+  incidentType: IncidentType,
 ): Promise<CollectMetricsResult> {
-  const specs = buildQuerySpecs(config);
+  const specs = buildQuerySpecs(config, incidentType);
   const queries: MetricDataQuery[] = specs.map((spec) => ({
     Id: spec.id,
     MetricStat: {
@@ -265,7 +402,7 @@ export async function collectMetrics(
 
     return { status: "success", metrics };
   } catch {
-    // 빈 배열 대신 기대했던 7개 metric 이름을 COLLECTION_FAILED로 채워 돌려준다 - AI가
+    // 빈 배열 대신 기대했던 metric 이름을 COLLECTION_FAILED로 채워 돌려준다 - AI가
     // "어떤 metric을 확인하지 못했는지"를 이름으로 알 수 있게 한다(§7~8).
     return {
       status: "failed",

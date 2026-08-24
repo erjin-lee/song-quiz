@@ -9,19 +9,26 @@ import {
   buildIncidentContext,
   hasSufficientContext,
 } from "./context/build-incident-context";
-import { AnalysisWindow } from "./context/types";
+import { AnalysisWindow, IncidentType } from "./context/types";
 import { analyzeIncident } from "./openai/analyze-incident";
 import { buildAiAnalysisMessage } from "./slack/build-ai-analysis-message";
 import { sendSlackMessage } from "./send-slack-message";
 import { getSsmParameter } from "./get-ssm-parameter";
 
-// EventBridge Rule(infra/terraform/modules/aiops/eventbridge.tf)이 이미 정확히 이 알람
+// EventBridge Rule(infra/terraform/modules/aiops/eventbridge.tf)이 이미 정확히 이 두 알람
 // 이름 + ALARM 상태로 좁혀 보내지만, alarm-notifier와 동일하게 Lambda 쪽에서도 한 번 더
 // 방어적으로 검증한다(§6 - OK/INSUFFICIENT_DATA는 분석하지 않는다, §5 - 다른 Alarm은
-// 분석하지 않는다).
-const TARGET_ALARM_NAME =
-  process.env.TARGET_ALARM_NAME ??
+// 분석하지 않는다). 새 Alarm을 추가할 때는 이 맵에 한 줄만 추가한다(§v1-2 최소 공통화) -
+// API Target5xx 등 아직 지원하지 않는 Alarm은 이 맵에 없으므로 자동으로 skip된다.
+const QUIZ_SNAPSHOT_FAILURE_ALARM_NAME =
+  process.env.QUIZ_SNAPSHOT_FAILURE_ALARM_NAME ??
   "SongQuiz-Prod-High-Game-QuizSnapshotFailure";
+const GAME_TARGET_5XX_ALARM_NAME =
+  process.env.GAME_TARGET_5XX_ALARM_NAME ?? "SongQuiz-Prod-High-Game-Target5xx";
+const INCIDENT_TYPE_BY_ALARM_NAME: Record<string, IncidentType> = {
+  [QUIZ_SNAPSHOT_FAILURE_ALARM_NAME]: "QUIZ_SNAPSHOT_FAILURE",
+  [GAME_TARGET_5XX_ALARM_NAME]: "GAME_TARGET_5XX",
+};
 const ALARM_NAME_PREFIX = "SongQuiz-Prod-";
 const ANALYSIS_WINDOW_MINUTES = 15;
 const DEFAULT_OPENAI_MODEL = "gpt-5.6-luna";
@@ -33,6 +40,10 @@ const ALB_ARN_SUFFIX = process.env.ALB_ARN_SUFFIX;
 const API_TARGET_GROUP_ARN_SUFFIX = process.env.API_TARGET_GROUP_ARN_SUFFIX;
 const GAME_TARGET_GROUP_ARN_SUFFIX = process.env.GAME_TARGET_GROUP_ARN_SUFFIX;
 const DB_INSTANCE_IDENTIFIER = process.env.DB_INSTANCE_IDENTIFIER;
+// Game Target5xx 분석(EC2/Redis resource pressure 비교, §v1-2)에만 필요한 metric dimension이다.
+const EC2_INSTANCE_ID = process.env.EC2_INSTANCE_ID;
+const EC2_METRIC_NAMESPACE = process.env.EC2_METRIC_NAMESPACE;
+const CACHE_CLUSTER_ID = process.env.CACHE_CLUSTER_ID;
 const SLACK_WEBHOOK_PARAMETER_NAME = process.env.SLACK_WEBHOOK_PARAMETER_NAME;
 const OPENAI_API_KEY_PARAMETER_NAME = process.env.OPENAI_API_KEY_PARAMETER_NAME;
 const OPENAI_MODEL = process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL;
@@ -59,6 +70,9 @@ function findMissingEnv(): string | null {
     API_TARGET_GROUP_ARN_SUFFIX,
     GAME_TARGET_GROUP_ARN_SUFFIX,
     DB_INSTANCE_IDENTIFIER,
+    EC2_INSTANCE_ID,
+    EC2_METRIC_NAMESPACE,
+    CACHE_CLUSTER_ID,
     SLACK_WEBHOOK_PARAMETER_NAME,
     OPENAI_API_KEY_PARAMETER_NAME,
   };
@@ -78,17 +92,18 @@ export async function handler(
     event.id ??
     `${alarmName ?? "unknown"}-${detail?.state?.timestamp ?? "unknown"}`;
 
-  if (alarmName !== TARGET_ALARM_NAME || state !== "ALARM") {
+  const incidentType = alarmName
+    ? INCIDENT_TYPE_BY_ALARM_NAME[alarmName]
+    : undefined;
+
+  if (!incidentType || state !== "ALARM") {
     console.log(
       JSON.stringify({
         event: "incident_analysis_skipped",
         alarmName: alarmName ?? null,
         state: state ?? null,
         incidentId,
-        reason:
-          alarmName !== TARGET_ALARM_NAME
-            ? "not_target_alarm"
-            : "not_alarm_state",
+        reason: !incidentType ? "not_target_alarm" : "not_alarm_state",
       }),
     );
     return;
@@ -122,13 +137,20 @@ export async function handler(
   const [alarmDefinitionResult, metricsResult, logsResult, deploymentsResult] =
     await Promise.all([
       collectAlarmDefinition(alarmName),
-      collectMetrics(window, {
-        gameMetricNamespace: GAME_METRIC_NAMESPACE,
-        albArnSuffix: ALB_ARN_SUFFIX as string,
-        apiTargetGroupArnSuffix: API_TARGET_GROUP_ARN_SUFFIX as string,
-        gameTargetGroupArnSuffix: GAME_TARGET_GROUP_ARN_SUFFIX as string,
-        dbInstanceIdentifier: DB_INSTANCE_IDENTIFIER as string,
-      }),
+      collectMetrics(
+        window,
+        {
+          gameMetricNamespace: GAME_METRIC_NAMESPACE,
+          albArnSuffix: ALB_ARN_SUFFIX as string,
+          apiTargetGroupArnSuffix: API_TARGET_GROUP_ARN_SUFFIX as string,
+          gameTargetGroupArnSuffix: GAME_TARGET_GROUP_ARN_SUFFIX as string,
+          dbInstanceIdentifier: DB_INSTANCE_IDENTIFIER as string,
+          ec2InstanceId: EC2_INSTANCE_ID as string,
+          ec2MetricNamespace: EC2_METRIC_NAMESPACE as string,
+          cacheClusterId: CACHE_CLUSTER_ID as string,
+        },
+        incidentType,
+      ),
       collectLogs(window, { gameLogGroupName: GAME_LOG_GROUP_NAME as string }),
       collectDeployments(
         {

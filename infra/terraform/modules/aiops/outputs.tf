@@ -9,7 +9,7 @@ output "lambda_function_arn" {
 }
 
 output "eventbridge_rule_arn" {
-  description = "QuizSnapshotFailure ALARM 전용 EventBridge Rule ARN"
+  description = "QuizSnapshotFailure/Game Target5xx ALARM 전용 EventBridge Rule ARN"
   value       = aws_cloudwatch_event_rule.quiz_snapshot_failure_alarm.arn
 }
 
