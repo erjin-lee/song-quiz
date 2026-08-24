@@ -78,3 +78,19 @@ variable "openai_model" {
   type        = string
   default     = "gpt-5.6-luna"
 }
+
+# Deployment Metadata(§11~19) - Terraform이 이 SSM Parameter 리소스 자체를 만들지는 않는다.
+# API/Game deploy workflow(.github/workflows/deploy-*.yml)가 매 배포 성공 후 실제 값을 쓰고,
+# 이 Lambda는 그 값을 읽기만 한다(Slack Webhook/OpenAI API Key와 동일하게, ARN만 알고
+# 실제 값 생성/관리는 Terraform 밖에서 이루어지는 패턴 - README 참고).
+variable "api_deployment_parameter_name" {
+  description = "apps/api Production 배포 metadata(commit/PR)가 저장된 SSM Parameter 이름(String, secret 아님)"
+  type        = string
+  default     = "/song-quiz/prod/deployment/api"
+}
+
+variable "game_deployment_parameter_name" {
+  description = "apps/game Production 배포 metadata(commit/PR)가 저장된 SSM Parameter 이름(String, secret 아님)"
+  type        = string
+  default     = "/song-quiz/prod/deployment/game"
+}

@@ -9,9 +9,11 @@ OpenAI로 장애 원인 후보를 분석해 Slack으로 전달하는 Lambda다. 
 CloudWatch Alarm(QuizSnapshotFailure, ALARM)
   -> EventBridge Rule(aiops 전용)
   -> 이 Lambda
-     -> CloudWatch Metrics(GetMetricData)
+     -> CloudWatch DescribeAlarms(실제 Alarm 평가 조건)
+     -> CloudWatch Metrics(GetMetricData, missing/collection-failed 의미 구분)
      -> CloudWatch Logs Insights(StartQuery/GetQueryResults)
      -> X-Ray(BatchGetTraces, 로그의 traceId 기반)
+     -> SSM(API/Game Production Deployment Metadata - 보조 근거)
      -> IncidentContext
      -> OpenAI(Responses API, Structured Output)
   -> Slack Incoming Webhook(alarm-notifier와 동일 Webhook 재사용)
@@ -61,9 +63,41 @@ AWS SDK(`@aws-sdk/client-cloudwatch`, `-cloudwatch-logs`, `-xray`, `-ssm`)와 `o
 | `SLACK_WEBHOOK_PARAMETER_NAME` | 예 | - | alarm-notifier와 동일한 Slack Webhook SSM Parameter 이름 |
 | `OPENAI_API_KEY_PARAMETER_NAME` | 예 | - | OpenAI API Key SSM SecureString Parameter 이름 |
 | `OPENAI_MODEL` | 아니오 | `gpt-5.6-luna` | OpenAI 모델 이름(비용을 고려해 apps/api의 `gpt-5.6-luna`보다 가벼운 모델을 기본값으로 둔다 - 실제 계정에서 사용 가능한 모델 이름으로 조정 필요) |
+| `API_DEPLOYMENT_PARAMETER_NAME` | 아니오 | `/song-quiz/prod/deployment/api` | apps/api Production 배포 metadata SSM Parameter(String) - deploy-api.yml이 기록 |
+| `GAME_DEPLOYMENT_PARAMETER_NAME` | 아니오 | `/song-quiz/prod/deployment/game` | apps/game Production 배포 metadata SSM Parameter(String) - deploy-game.yml이 기록 |
 
-필수 환경 변수가 하나라도 비어 있으면 AWS API를 호출하기 전에 `incident_analysis_failed`
-(`stage: "config"`)를 로그로 남기고 조용히 종료한다.
+필수 환경 변수(`API_DEPLOYMENT_PARAMETER_NAME`/`GAME_DEPLOYMENT_PARAMETER_NAME` 제외)가
+하나라도 비어 있으면 AWS API를 호출하기 전에 `incident_analysis_failed`(`stage: "config"`)를
+로그로 남기고 조용히 종료한다. Deployment Context는 보조 근거라 설정이 없어도(또는 아직
+SSM에 값이 기록되지 않았어도) 나머지 분석은 그대로 진행한다.
+
+## Deployment Metadata(§11~19)
+
+`.github/workflows/deploy-api.yml`/`deploy-game.yml`이 Production 배포(SSH + PM2 reload)
+성공 직후 `.github/scripts/write-deployment-metadata.sh`로 실제 배포된 commit과 그
+commit에 연결된 PR(GitHub "List pull requests associated with a commit" API)을 조회해
+SSM Parameter(String, secret 아님)에 기록한다. 이 Lambda는 그 값을 읽기만 하고, GitHub
+API를 직접 호출하지 않는다.
+
+```json
+{
+  "service": "api",
+  "commitSha": "abc123...",
+  "deployedAt": "2026-08-24T03:10:00Z",
+  "repository": "erjin-lee/song-quiz",
+  "workflowRunId": "123456789",
+  "pullRequest": {
+    "number": 82,
+    "title": "Quiz Snapshot 조회 로직 개선",
+    "summary": "...",
+    "changedFiles": ["apps/api/src/quiz/quiz.service.ts"]
+  }
+}
+```
+
+direct push(연결된 PR 없음)면 `pullRequest`는 `null`이다. 최근 배포/PR은 System
+Prompt(`src/openai/prompt.ts`)에서 명시적으로 "보조 근거"로만 쓰도록 지시한다 - 최근에
+배포되었다는 사실만으로 원인으로 단정하지 않는다.
 
 ## OpenAI API Key / Slack Webhook 등록
 
@@ -77,6 +111,14 @@ aws ssm put-parameter \
   --type "SecureString" \
   --value "<OPENAI_API_KEY>"
 ```
+
+## Deploy workflow가 SSM에 쓸 수 있으려면
+
+`infra/terraform/environments/bootstrap`(로컬에서 직접 apply하는 root, CI 대상 아님)에
+`aws_iam_role.ci_deploy_metadata`가 정의되어 있다. `terraform apply` 후 출력되는
+`ci_deploy_metadata_role_arn` 값을 GitHub 저장소 Variable `CI_DEPLOY_METADATA_ROLE_ARN`에
+등록해야 `deploy-api.yml`/`deploy-game.yml`의 `Record deployment metadata` 스텝이 동작한다
+(`TF_CI_ROLE_ARN`을 이미 등록한 것과 동일한 절차).
 
 ## 배포 후 검증 절차
 

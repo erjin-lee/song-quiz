@@ -43,6 +43,25 @@ resource "aws_iam_role_policy" "incident_analyzer_logs" {
   })
 }
 
+# 실제 배포된 Alarm 평가 조건(threshold/period/evaluationPeriods 등, §4~5)을 조회하는
+# 권한. DescribeAlarms는 (GetMetricData/BatchGetTraces와 달리) alarm 리소스 수준 권한을
+# 지원해 QuizSnapshotFailure Alarm 하나로 Resource를 좁힐 수 있다.
+resource "aws_iam_role_policy" "incident_analyzer_alarm_definition" {
+  name = "${local.function_name}-alarm-definition"
+  role = aws_iam_role.incident_analyzer.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "cloudwatch:DescribeAlarms"
+        Resource = "arn:aws:cloudwatch:${var.aws_region}:${data.aws_caller_identity.current.account_id}:alarm:${var.target_alarm_name}"
+      }
+    ]
+  })
+}
+
 # QuizSnapshotFailure/API·Game 5xx·Latency/RDS CPU·Connections를 조회하는 GetMetricData만
 # 허용한다. cloudwatch:PutMetricData(쓰기)는 이 Lambda가 하지 않으므로 포함하지 않는다.
 # GetMetricData는 리소스 수준 권한을 지원하지 않는 액션이라(cloudwatch:PutMetricData와 같은
@@ -106,8 +125,10 @@ resource "aws_iam_role_policy" "incident_analyzer_xray_read" {
   })
 }
 
-# Slack Webhook URL(alarm-notifier와 동일 Parameter 재사용, §25)과 OpenAI API Key, 정확히
-# 이 두 SecureString Parameter만 조회할 수 있게 Resource를 좁힌다.
+# Slack Webhook URL(alarm-notifier와 동일 Parameter 재사용, §25), OpenAI API Key,
+# API/Game Deployment Metadata(§11, §19) - 정확히 이 4개 Parameter만 조회할 수 있게
+# Resource를 좁힌다. Deployment Metadata는 secret이 아니지만(String) 최소 권한 원칙은
+# 동일하게 적용한다.
 resource "aws_iam_role_policy" "incident_analyzer_ssm" {
   name = "${local.function_name}-ssm"
   role = aws_iam_role.incident_analyzer.id
@@ -121,6 +142,8 @@ resource "aws_iam_role_policy" "incident_analyzer_ssm" {
         Resource = [
           "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.slack_webhook_parameter_name}",
           "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.openai_api_key_parameter_name}",
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.api_deployment_parameter_name}",
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.game_deployment_parameter_name}",
         ]
       }
     ]

@@ -1,6 +1,8 @@
+import { CollectAlarmDefinitionResult } from "./collect-alarm-definition";
 import { CollectMetricsResult } from "./collect-metrics";
 import { CollectLogsResult } from "./collect-logs";
 import { CollectTracesResult } from "./collect-traces";
+import { CollectDeploymentsResult } from "./collect-deployments";
 import { IncidentContext } from "./types";
 
 export interface AlarmInfo {
@@ -15,9 +17,11 @@ export interface AlarmInfo {
 /** AWS raw response가 아니라 이미 정규화된 각 collector의 결과만 모아 IncidentContext를 만든다(§8). */
 export function buildIncidentContext(
   alarm: AlarmInfo,
+  alarmDefinitionResult: CollectAlarmDefinitionResult,
   metricsResult: CollectMetricsResult,
   logsResult: CollectLogsResult,
   tracesResult: CollectTracesResult,
+  deploymentsResult: CollectDeploymentsResult,
 ): IncidentContext {
   return {
     alarm: {
@@ -28,14 +32,18 @@ export function buildIncidentContext(
       state: "ALARM",
       triggeredAt: alarm.triggeredAt,
       reason: alarm.reason,
+      definition: alarmDefinitionResult.definition,
     },
     metrics: metricsResult.metrics,
     logs: logsResult.logs,
     traces: tracesResult.traces,
+    deployments: deploymentsResult.deployments,
     collection: {
+      alarmDefinition: alarmDefinitionResult.status,
       metrics: metricsResult.status,
       logs: logsResult.status,
       traces: tracesResult.status,
+      deployments: deploymentsResult.status,
     },
   };
 }

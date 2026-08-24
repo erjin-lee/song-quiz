@@ -21,3 +21,18 @@ variable "github_repository" {
   type        = string
   default     = "erjin-lee/song-quiz"
 }
+
+# modules/aiops의 동일 이름 변수와 기본값을 반드시 같게 유지한다 - 이 값이 실제 SSM
+# Parameter 이름의 source of truth이고, 두 Terraform root(bootstrap/prod)가 서로 다른
+# state를 쓰기 때문에 리소스 참조 대신 값(기본값)을 그대로 맞춰 쓴다.
+variable "api_deployment_parameter_name" {
+  description = "apps/api Production 배포 metadata가 저장될 SSM Parameter 이름(modules/aiops와 동일 값)"
+  type        = string
+  default     = "/song-quiz/prod/deployment/api"
+}
+
+variable "game_deployment_parameter_name" {
+  description = "apps/game Production 배포 metadata가 저장될 SSM Parameter 이름(modules/aiops와 동일 값)"
+  type        = string
+  default     = "/song-quiz/prod/deployment/game"
+}

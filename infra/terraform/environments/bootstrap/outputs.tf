@@ -7,3 +7,8 @@ output "ci_terraform_plan_role_arn" {
   description = "GitHub Actions가 assume할 IAM Role ARN - 워크플로우의 role-to-assume 및 리포지토리 설정(secret/variable)에 사용"
   value       = aws_iam_role.ci_terraform_plan.arn
 }
+
+output "ci_deploy_metadata_role_arn" {
+  description = "deploy-api.yml/deploy-game.yml이 Deployment Metadata를 SSM에 기록할 때 assume할 IAM Role ARN - 리포지토리 변수(CI_DEPLOY_METADATA_ROLE_ARN)에 이 값을 등록한다"
+  value       = aws_iam_role.ci_deploy_metadata.arn
+}

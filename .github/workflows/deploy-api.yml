@@ -16,6 +16,11 @@ concurrency:
   group: deploy-was
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  pull-requests: read # 배포된 commit에 연결된 PR을 조회하기 위해 필요(write-deployment-metadata.sh)
+  id-token: write # GitHub OIDC로 AWS IAM Role을 assume하기 위해 필요
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -64,3 +69,31 @@ jobs:
             cd apps/api
             pm2 startOrReload ecosystem.config.js --update-env
           '
+
+      # git pull은 WAS 서버에서 일어나므로 GITHUB_SHA(이 워크플로우를 트리거한 push의 SHA)와
+      # WAS의 실제 HEAD가 다를 수 있다 - 이 워크플로우가 대기하는 동안 같은 concurrency
+      # group("deploy-was")의 다른 실행이 먼저 더 최신 커밋을 pull했을 수도 있기 때문이다.
+      # 그래서 GITHUB_SHA를 믿지 않고, 방금 실제로 pull된 WAS의 git HEAD를 다시 조회해
+      # source of truth로 쓴다. `deploy-was` concurrency group이 cancel-in-progress: false로
+      # 전체 job(이 스텝 포함)을 완전히 직렬화하므로, 이 스텝이 도는 동안 다른 실행이 끼어들어
+      # HEAD를 또 바꿀 수 없다 - 따라서 이 값이 항상 "지금 실제로 서비스 중인 commit"이다.
+      - name: Get deployed commit SHA from WAS
+        id: deployed_sha
+        run: |
+          DEPLOYED_SHA="$(ssh was 'cd "${{ secrets.WAS_APP_DIR }}" && git rev-parse HEAD')"
+          echo "sha=${DEPLOYED_SHA}" >> "$GITHUB_OUTPUT"
+
+      # 위 두 스텝이 모두 성공한 뒤에만 실행된다(Production 배포 성공 후 기록, §17) - 이
+      # 워크플로우에 명시적인 health check가 없어 "가장 마지막 성공 단계 이후"를 기준으로
+      # 삼는다. AIOps incident-analyzer(infra/terraform/modules/aiops)가 이 값을
+      # 읽어 최근 배포와 장애를 연관지어 참고한다(보조 근거일 뿐, 원인 단정에는 쓰지 않는다).
+      - name: Configure AWS credentials (deployment metadata write only)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.CI_DEPLOY_METADATA_ROLE_ARN }}
+          aws-region: ap-northeast-2
+
+      - name: Record deployment metadata
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/write-deployment-metadata.sh api /song-quiz/prod/deployment/api "${{ steps.deployed_sha.outputs.sha }}"

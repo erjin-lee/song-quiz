@@ -1,8 +1,10 @@
 import { EventBridgeAlarmStateChangeEvent } from "./types";
 import { parseAlarmName } from "./parse-alarm-name";
+import { collectAlarmDefinition } from "./context/collect-alarm-definition";
 import { collectMetrics } from "./context/collect-metrics";
 import { collectLogs } from "./context/collect-logs";
 import { collectTraces } from "./context/collect-traces";
+import { collectDeployments } from "./context/collect-deployments";
 import {
   buildIncidentContext,
   hasSufficientContext,
@@ -34,6 +36,11 @@ const DB_INSTANCE_IDENTIFIER = process.env.DB_INSTANCE_IDENTIFIER;
 const SLACK_WEBHOOK_PARAMETER_NAME = process.env.SLACK_WEBHOOK_PARAMETER_NAME;
 const OPENAI_API_KEY_PARAMETER_NAME = process.env.OPENAI_API_KEY_PARAMETER_NAME;
 const OPENAI_MODEL = process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL;
+// Deployment Context는 보조 근거라 필수 환경변수로 취급하지 않는다(§29) - 설정 안 돼
+// 있거나 아직 SSM에 기록된 적 없어도 나머지 분석은 그대로 진행한다.
+const API_DEPLOYMENT_PARAMETER_NAME = process.env.API_DEPLOYMENT_PARAMETER_NAME;
+const GAME_DEPLOYMENT_PARAMETER_NAME =
+  process.env.GAME_DEPLOYMENT_PARAMETER_NAME;
 
 function buildAnalysisWindow(triggeredAt: Date): AnalysisWindow {
   return {
@@ -109,18 +116,28 @@ export async function handler(
   );
 
   const parsed = parseAlarmName(alarmName, ALARM_NAME_PREFIX);
-  const window = buildAnalysisWindow(new Date(detail.state.timestamp));
+  const triggeredAt = new Date(detail.state.timestamp);
+  const window = buildAnalysisWindow(triggeredAt);
 
-  const [metricsResult, logsResult] = await Promise.all([
-    collectMetrics(window, {
-      gameMetricNamespace: GAME_METRIC_NAMESPACE,
-      albArnSuffix: ALB_ARN_SUFFIX as string,
-      apiTargetGroupArnSuffix: API_TARGET_GROUP_ARN_SUFFIX as string,
-      gameTargetGroupArnSuffix: GAME_TARGET_GROUP_ARN_SUFFIX as string,
-      dbInstanceIdentifier: DB_INSTANCE_IDENTIFIER as string,
-    }),
-    collectLogs(window, { gameLogGroupName: GAME_LOG_GROUP_NAME as string }),
-  ]);
+  const [alarmDefinitionResult, metricsResult, logsResult, deploymentsResult] =
+    await Promise.all([
+      collectAlarmDefinition(alarmName),
+      collectMetrics(window, {
+        gameMetricNamespace: GAME_METRIC_NAMESPACE,
+        albArnSuffix: ALB_ARN_SUFFIX as string,
+        apiTargetGroupArnSuffix: API_TARGET_GROUP_ARN_SUFFIX as string,
+        gameTargetGroupArnSuffix: GAME_TARGET_GROUP_ARN_SUFFIX as string,
+        dbInstanceIdentifier: DB_INSTANCE_IDENTIFIER as string,
+      }),
+      collectLogs(window, { gameLogGroupName: GAME_LOG_GROUP_NAME as string }),
+      collectDeployments(
+        {
+          apiDeploymentParameterName: API_DEPLOYMENT_PARAMETER_NAME,
+          gameDeploymentParameterName: GAME_DEPLOYMENT_PARAMETER_NAME,
+        },
+        triggeredAt,
+      ),
+    ]);
 
   // X-Ray 조회는 로그에서 얻은 traceId에 의존하므로(§14) 로그 수집이 끝난 뒤 이어서 한다.
   const traceIds = logsResult.logs.samples
@@ -135,10 +152,13 @@ export async function handler(
       metricCount: metricsResult.metrics.length,
       logSampleCount: logsResult.logs.samples.length,
       traceCount: tracesResult.traces.length,
+      deploymentCount: deploymentsResult.deployments.length,
       collection: {
+        alarmDefinition: alarmDefinitionResult.status,
         metrics: metricsResult.status,
         logs: logsResult.status,
         traces: tracesResult.status,
+        deployments: deploymentsResult.status,
       },
     }),
   );
@@ -152,9 +172,11 @@ export async function handler(
       triggeredAt: detail.state.timestamp,
       reason: detail.state.reason,
     },
+    alarmDefinitionResult,
     metricsResult,
     logsResult,
     tracesResult,
+    deploymentsResult,
   );
 
   // 핵심 데이터(Metrics/Logs)가 모두 실패하면 OpenAI를 호출하지 않는다(§16).
@@ -197,6 +219,7 @@ export async function handler(
       alarmName,
       context.alarm.service,
       analysis,
+      context.deployments,
     );
     await sendSlackMessage(webhookUrl, message);
   } catch {

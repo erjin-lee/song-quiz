@@ -5,6 +5,10 @@ import {
   ANALYSIS_RESULT_JSON_SCHEMA,
   AnalysisResult,
   Confidence,
+  DeploymentRelevance,
+  MAX_EVIDENCE_ITEMS,
+  MAX_LIMITATIONS,
+  MAX_RECOMMENDED_CHECKS,
   buildFallbackAnalysisResult,
 } from "./schema";
 
@@ -16,18 +20,45 @@ const MAX_RETRIES = 1;
 const REQUEST_TIMEOUT_MS = 20_000;
 
 const VALID_CONFIDENCE: Confidence[] = ["HIGH", "MEDIUM", "LOW"];
+const VALID_RELEVANCE: DeploymentRelevance[] = [
+  "HIGH",
+  "MEDIUM",
+  "LOW",
+  "NONE",
+];
 
 function isAnalysisResult(value: unknown): value is AnalysisResult {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
+  const deploymentCorrelation = candidate.deploymentCorrelation as
+    Record<string, unknown> | undefined;
   return (
     typeof candidate.summary === "string" &&
     typeof candidate.probableCause === "string" &&
     VALID_CONFIDENCE.includes(candidate.confidence as Confidence) &&
     Array.isArray(candidate.evidence) &&
     Array.isArray(candidate.recommendedChecks) &&
-    Array.isArray(candidate.limitations)
+    Array.isArray(candidate.limitations) &&
+    !!deploymentCorrelation &&
+    typeof deploymentCorrelation === "object" &&
+    VALID_RELEVANCE.includes(
+      deploymentCorrelation.relevance as DeploymentRelevance,
+    ) &&
+    typeof deploymentCorrelation.summary === "string"
   );
+}
+
+/** evidence/recommendedChecks/limitations가 Slack 메시지에 비해 너무 길어지지 않도록 자른다(§26). */
+function limitArrayLengths(result: AnalysisResult): AnalysisResult {
+  return {
+    ...result,
+    evidence: result.evidence.slice(0, MAX_EVIDENCE_ITEMS),
+    recommendedChecks: result.recommendedChecks.slice(
+      0,
+      MAX_RECOMMENDED_CHECKS,
+    ),
+    limitations: result.limitations.slice(0, MAX_LIMITATIONS),
+  };
 }
 
 export interface AnalyzeIncidentConfig {
@@ -81,7 +112,7 @@ export async function analyzeIncident(
         "OpenAI 응답이 예상한 형식과 다릅니다.",
       );
     }
-    return parsed;
+    return limitArrayLengths(parsed);
   } catch {
     return buildFallbackAnalysisResult("OpenAI 응답 JSON 파싱에 실패했습니다.");
   }
