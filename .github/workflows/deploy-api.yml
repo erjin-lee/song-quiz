@@ -70,6 +70,12 @@ jobs:
             pm2 startOrReload ecosystem.config.js --update-env
           '
 
+      # 이 워크플로우는 SSH로 WAS에 접속해 배포할 뿐 지금까지 러너 자체에 저장소를 checkout할
+      # 필요가 없었다 - write-deployment-metadata.sh(.github/scripts/)를 실행하려면 그 파일이
+      # 러너 파일시스템에 있어야 하므로 여기서 처음으로 checkout한다.
+      - name: Checkout (write-deployment-metadata.sh 실행을 위해 필요)
+        uses: actions/checkout@v4
+
       # git pull은 WAS 서버에서 일어나므로 GITHUB_SHA(이 워크플로우를 트리거한 push의 SHA)와
       # WAS의 실제 HEAD가 다를 수 있다 - 이 워크플로우가 대기하는 동안 같은 concurrency
       # group("deploy-was")의 다른 실행이 먼저 더 최신 커밋을 pull했을 수도 있기 때문이다.
