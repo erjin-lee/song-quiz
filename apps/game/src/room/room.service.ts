@@ -505,16 +505,13 @@ export class RoomService extends EventEmitter {
   }
 
   /** 방장이 게임을 시작한다. 첫 라운드를 준비하고 참가자들의 영상 로딩 완료를 기다린다. */
-  // TEMP(race-condition repro, DO NOT COMMIT): assertHost를 락 밖에서 stale room으로 체크
   async startGame(
     roomId: string,
     requesterUserId: string,
   ): Promise<RoomItemDto> {
-    const preCheckRoom = await this.getRoomOrThrow(roomId);
-    this.assertHost(preCheckRoom, requesterUserId);
-
     return this.withRoomLock(roomId, async () => {
       const room = await this.getRoomOrThrow(roomId);
+      this.assertHost(room, requesterUserId);
 
       if (room.gameStatus !== 'WAITING') {
         throw new ConflictException('이미 시작되었거나 진행 중인 게임입니다.');
