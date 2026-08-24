@@ -50,6 +50,7 @@ graph TD
   common["common"]
   config["config"]
   logging["logging"]
+  tracing["tracing"]
   backfill["quiz-song-duration-backfill"]
 
   app --> admin
@@ -57,6 +58,7 @@ graph TD
   app --> config
   app --> inquiry
   app --> logging
+  app --> tracing
   app --> quiz
   app --> scraper
   app --> user
@@ -86,7 +88,8 @@ graph TD
   backfill --> common
 ```
 
-- `cache`, `common`, `config`, `logging`, `mail`, `openai`는 다른 도메인 모듈을 참조하지 않는 leaf/infra 모듈이다. 여기를 고치면 영향 범위가 넓으니(quiz·inquiry·user가 모두 의존) 변경 전 역방향 참조를 확인한다.
+- `cache`, `common`, `config`, `logging`, `tracing`, `mail`, `openai`는 다른 도메인 모듈을 참조하지 않는 leaf/infra 모듈이다. 여기를 고치면 영향 범위가 넓으니(quiz·inquiry·user가 모두 의존) 변경 전 역방향 참조를 확인한다.
+- `tracing`(`packages/tracing`)은 OpenTelemetry NodeSDK로 HTTP inbound/outbound·Express·NestJS·mysql2를 자동 계측한다. `src/main.ts`의 첫 import(`import './tracing'`)에서 `startTracing()`을 호출해 다른 모듈이 require되기 전에 계측을 건다 — NestJS 모듈 그래프 밖에서 부트스트랩 시점에 붙는다는 점이 `logging`과 같다. production에서 `OTEL_EXPORTER_OTLP_ENDPOINT`가 없으면 트레이싱을 비활성화한다(WARN 1회). ioredis(v6)는 계측 라이브러리 지원 범위 밖이라 자동 계측 대상에서 제외된다.
 - `admin`이 `inquiry`/`quiz`/`user` 서비스를 직접 참조한다 — 관리자 API 하나를 바꾸면 3개 도메인 모듈에 동시 영향을 줄 수 있다.
 - `room` 모듈은 더 이상 `apps/api`에 없다(`apps/game`으로 이동). `inquiry -> room` 직접 의존도 함께 제거됐고, 지금은 `inquiry`가 `GameNotifierClient`로 `apps/game`을 HTTP 호출하는 형태로 방향이 반대다.
 - `quiz`/`user`는 각자 `internal/` 하위에 `apps/game` 전용 컨트롤러를 두고 있다 — 이 엔드포인트의 요청/응답 형식을 바꾸면 `apps/game`의 `QuizClient`/`AuthClient`도 함께 확인한다.
@@ -102,10 +105,12 @@ graph TD
   room["room"]
   cache["cache"]
   logging["logging"]
+  tracing["tracing"]
   common["common"]
 
   app --> cache
   app --> logging
+  app --> tracing
   app --> room
 
   room --> cache
@@ -115,6 +120,7 @@ graph TD
 
 - `cache`/`common`은 `apps/api`의 동일 이름 모듈과 목적이 같지만, 공유 패키지 없이 파일을 그대로 복제해 각자 유지한다(ADR-0003과 동일한 이유).
 - `logging`은 위 둘과 달리 일부가 `packages/logger`(신규 워크스페이스)로 공유된다 — `LogContext`/`StructuredLogger`/requestId·traceId 전파/exception filter/redaction/formatter 등 서비스 독립적인 부분은 `packages/logger`에 있고, `AccessLogMiddleware`(무엇을 얼마나 남길지가 api/game마다 다를 수 있는 정책)와 `access-logger.factory.ts`의 winston 인스턴스(파일 경로 등)는 여전히 각 앱에 복제되어 있다. `apps/api`도 동일하게 `packages/logger`를 사용한다.
+- `tracing`은 `packages/tracing`(신규 워크스페이스)을 그대로 사용한다 — api/game 모두 `src/main.ts`의 첫 import에서 `startTracing({ service: 'api' | 'game', ... })`을 호출한다. `packages/logger`의 requestId/traceId 전파 로직이 OTel 활성 span에서 실제 traceId/spanId를 읽어오므로, 두 패키지는 함께 동작한다(상세는 위 `apps/api` 섹션의 `tracing` 설명 참고).
 - `room`이 `apps/api`를 호출하는 유일한 경로는 `room/clients/quiz.client.ts`, `room/clients/auth.client.ts`다. TypeORM Repository나 `apps/api`의 도메인 클래스를 직접 참조하지 않는다.
 
 ## 외부 연동
