@@ -28,6 +28,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # modules/notification이 data "archive_file"로 apps/lambda/alarm-notifier/dist를 그대로 zip으로
+      # 묶으므로(로컬 개발 흐름과 동일), plan 전에 이 워크플로우에서도 먼저 빌드해둬야 한다.
+      # 그렇지 않으면 dist가 없어 terraform plan(archive_file 평가) 단계에서 실패한다.
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build alarm-notifier Lambda
+        working-directory: ${{ github.workspace }}
+        run: |
+          corepack enable
+          YARN_ENABLE_IMMUTABLE_INSTALLS=true yarn workspaces focus alarm-notifier
+          yarn workspace alarm-notifier build
+
       # 장기 액세스 키 없이, environments/bootstrap에서 만든 IAM Role을 OIDC로 assume한다.
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4

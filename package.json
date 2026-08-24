@@ -5,6 +5,7 @@
   "packageManager": "yarn@4.5.3",
   "workspaces": [
     "apps/*",
+    "apps/lambda/*",
     "packages/*"
   ],
   "scripts": {

@@ -157,3 +157,13 @@ module "monitoring" {
   game_metric_namespace        = module.logging.game_metric_namespace
   ec2_metric_namespace         = module.iam.ec2_metric_namespace
 }
+
+# CloudWatch Alarm(SongQuiz-Prod-*) 상태 변화를 EventBridge -> Lambda로 받아 Slack에 전달한다.
+# monitoring 모듈이 만드는 개별 Alarm 리소스를 직접 참조하지 않는다 - EventBridge event
+# pattern이 alarm 이름 prefix로만 걸러내므로 두 모듈 사이에 Terraform 의존관계가 생기지 않는다.
+module "notification" {
+  source = "../../modules/notification"
+
+  aws_region       = var.aws_region
+  lambda_dist_path = abspath("${path.root}/../../../../apps/lambda/alarm-notifier/dist")
+}

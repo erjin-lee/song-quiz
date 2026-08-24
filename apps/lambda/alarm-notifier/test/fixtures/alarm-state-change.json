@@ -1,0 +1,46 @@
+{
+  "version": "0",
+  "id": "11112222-3333-4444-5555-666677778888",
+  "detail-type": "CloudWatch Alarm State Change",
+  "source": "aws.cloudwatch",
+  "account": "123456789012",
+  "time": "2026-08-24T02:30:12Z",
+  "region": "ap-northeast-2",
+  "resources": ["arn:aws:cloudwatch:ap-northeast-2:123456789012:alarm:SongQuiz-Prod-High-Game-Target5xx"],
+  "detail": {
+    "alarmName": "SongQuiz-Prod-High-Game-Target5xx",
+    "state": {
+      "value": "ALARM",
+      "reason": "Threshold Crossed: 1 datapoint [6.0] was greater than or equal to the threshold (5.0).",
+      "reasonData": "{\"version\":\"1.0\",\"queryDate\":\"2026-08-24T02:30:12.000+0000\",\"startDate\":\"2026-08-24T02:25:00.000+0000\",\"statistic\":\"Sum\",\"period\":300,\"recentDatapoints\":[6.0],\"threshold\":5.0}",
+      "timestamp": "2026-08-24T02:30:12.345Z"
+    },
+    "previousState": {
+      "value": "OK",
+      "reason": "Threshold Crossed: no datapoints were breaching the threshold.",
+      "reasonData": "{\"version\":\"1.0\",\"queryDate\":\"2026-08-24T02:25:00.000+0000\",\"startDate\":\"2026-08-24T02:20:00.000+0000\",\"statistic\":\"Sum\",\"period\":300,\"recentDatapoints\":[0.0],\"threshold\":5.0}",
+      "timestamp": "2026-08-24T02:25:00.000Z"
+    },
+    "configuration": {
+      "description": "Game target group returned at least 5 5xx responses within 5 minutes (initial threshold, to be tuned against real traffic baseline). service=game severity=high category=availability signal=HTTPCode_Target_5XX_Count condition=sum>=5/5m",
+      "metrics": [
+        {
+          "id": "m1",
+          "metricStat": {
+            "metric": {
+              "namespace": "AWS/ApplicationELB",
+              "name": "HTTPCode_Target_5XX_Count",
+              "dimensions": {
+                "LoadBalancer": "app/deploy-terraform-alb/93707053a79aa7b6",
+                "TargetGroup": "targetgroup/deploy-terraform-game/e2986d25fb81fb65"
+              }
+            },
+            "period": 300,
+            "stat": "Sum"
+          },
+          "returnData": true
+        }
+      ]
+    }
+  }
+}
