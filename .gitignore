@@ -2,6 +2,7 @@
 /out-tsc
 node_modules
 dist
+infra/terraform/modules/*/build/
 .next
 .turbo
 .env

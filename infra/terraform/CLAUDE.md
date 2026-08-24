@@ -186,8 +186,12 @@ Avoid unnecessary variables for values that are truly implementation details.
     ├── database/          # RDS
     ├── cache/              # ElastiCache
     ├── logging/            # CloudWatch Log Group(api/game) + Game 실패 이벤트 Metric Filter
-    └── monitoring/         # CloudWatch Dashboard(SongQuiz-Prod) - 다른 모듈의 output만 참조,
-                             # 새 AWS 리소스(로그/지표/알람)는 만들지 않고 기존 지표를 시각화만 한다
+    ├── monitoring/         # CloudWatch Dashboard(SongQuiz-Prod) + Alarm 1차 세트(alarms.tf) -
+                             # 다른 모듈의 output만 참조, 새 Custom Metric/Metric Filter는 만들지
+                             # 않고 기존 지표를 시각화/알람화만 한다
+    └── notification/       # CloudWatch Alarm(SongQuiz-Prod-*) 상태변화 -> EventBridge -> Lambda
+                             # (apps/lambda/alarm-notifier) -> Slack Incoming Webhook. monitoring의
+                             # 개별 Alarm 리소스를 직접 참조하지 않고 alarm 이름 prefix로만 연결된다
 ```
 
 새 환경(예: staging)이 필요해지면 `environments/<env>/`를 추가하고 같은 모듈들을
