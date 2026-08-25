@@ -59,8 +59,13 @@ resource "aws_iam_role_policy" "alarm_notifier_ssm" {
 }
 
 # QuizSnapshotFailure 복구 확인용 GameStartSuccess 지표 조회 권한. GetMetricData는 CloudWatch
-# Metric 자체가 ARN으로 존재하지 않는 리소스라 Resource를 "*" 밖에 못 쓰지만(AWS IAM 제약),
-# cloudwatch:namespace 조건 키로 이 프로젝트의 game_metric_namespace 하나로만 좁힌다.
+# Metric 자체가 ARN으로 존재하지 않는 리소스라 Resource를 "*" 밖에 못 쓴다(AWS IAM 제약).
+# cloudwatch:namespace 조건 키는 PutMetricData(쓰기)에만 지원되고 GetMetricData(읽기)에는
+# 적용되지 않는다 - 여기 넣으면 조건이 절대 만족되지 않아 항상 AccessDenied가 난다
+# (https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/iam-cw-condition-keys-namespace.html
+# 예시가 전부 PutMetricData뿐인 것도 이 때문). 그래서 namespace로 더 좁힐 방법이 없고,
+# 이 Role은 계정 내 임의 namespace의 지표를 GetMetricData로 읽을 수 있다 - alarm_notifier_ssm처럼
+# Resource ARN으로 좁히는 게 불가능한 AWS 쪽 한계다.
 resource "aws_iam_role_policy" "alarm_notifier_cloudwatch_metrics" {
   name = "${local.function_name}-cloudwatch-metrics"
   role = aws_iam_role.alarm_notifier.id
@@ -72,11 +77,6 @@ resource "aws_iam_role_policy" "alarm_notifier_cloudwatch_metrics" {
         Effect   = "Allow"
         Action   = "cloudwatch:GetMetricData"
         Resource = "*"
-        Condition = {
-          StringEquals = {
-            "cloudwatch:namespace" = var.game_metric_namespace
-          }
-        }
       }
     ]
   })
