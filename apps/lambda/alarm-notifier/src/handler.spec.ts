@@ -54,7 +54,7 @@ describe("handler", () => {
 
     expect(mockSendSlackMessage).toHaveBeenCalledTimes(1);
     const [, message] = mockSendSlackMessage.mock.calls[0];
-    expect(message.text).toBe("🚨 [HIGH] Game Alarm");
+    expect(message.text).toBe("🚨 [HIGH] Game 알람 발생");
   });
 
   it("OK 이벤트는 RECOVERED 메시지를 만들어 보낸다", async () => {
@@ -72,7 +72,7 @@ describe("handler", () => {
 
     expect(mockSendSlackMessage).toHaveBeenCalledTimes(1);
     const [, message] = mockSendSlackMessage.mock.calls[0];
-    expect(message.text).toBe("✅ [RECOVERED] Game Alarm");
+    expect(message.text).toBe("✅ [복구됨] Game 알람");
   });
 
   it("INSUFFICIENT_DATA 상태는 무시하고 Slack을 호출하지 않는다", async () => {
@@ -131,8 +131,8 @@ describe("handler", () => {
       },
     };
 
-    it("최근 게임 시작 성공이 기준(5회) 이상이면 RECOVERED를 보낸다", async () => {
-      mockGetRecentSuccessCount.mockResolvedValue(5);
+    it("최근 게임 시작 성공이 기준(5회) 이상이면 RECOVERED를 보내고 성공 횟수를 표시한다", async () => {
+      mockGetRecentSuccessCount.mockResolvedValue(7);
 
       const { handler } = await import("./handler");
       await handler(quizSnapshotFailureOkEvent);
@@ -143,6 +143,14 @@ describe("handler", () => {
         5,
       );
       expect(mockSendSlackMessage).toHaveBeenCalledTimes(1);
+      const [, message] = mockSendSlackMessage.mock.calls[0];
+      expect(
+        message.blocks.some((block: { fields?: { text: string }[] }) =>
+          block.fields?.some((field) =>
+            field.text.includes("*최근 게임 시작 성공*\n7회"),
+          ),
+        ),
+      ).toBe(true);
     });
 
     it("최근 게임 시작 성공이 기준(5회) 미만이면 RECOVERED를 보내지 않는다", async () => {
@@ -154,13 +162,21 @@ describe("handler", () => {
       expect(mockSendSlackMessage).not.toHaveBeenCalled();
     });
 
-    it("성공 횟수 조회가 실패하면(fail open) 그래도 RECOVERED를 보낸다", async () => {
+    it("성공 횟수 조회가 실패하면(fail open) 그래도 RECOVERED를 보내되 확인 안 된 성공 횟수는 표시하지 않는다", async () => {
       mockGetRecentSuccessCount.mockRejectedValue(new Error("boom"));
 
       const { handler } = await import("./handler");
       await handler(quizSnapshotFailureOkEvent);
 
       expect(mockSendSlackMessage).toHaveBeenCalledTimes(1);
+      const [, message] = mockSendSlackMessage.mock.calls[0];
+      expect(
+        message.blocks.some((block: { fields?: { text: string }[] }) =>
+          block.fields?.some((field) =>
+            field.text.includes("*최근 게임 시작 성공*"),
+          ),
+        ),
+      ).toBe(false);
     });
 
     it("QuizSnapshotFailure의 ALARM 전이는 복구 확인을 하지 않는다", async () => {

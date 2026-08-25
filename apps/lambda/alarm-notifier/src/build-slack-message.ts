@@ -10,6 +10,14 @@ export interface SlackMessage {
   blocks: unknown[];
 }
 
+// QuizSnapshotFailure 복구 확인(handler.ts)에서 실제로 측정한 최근 성공 횟수. 확인이 통과해서
+// RECOVERED를 보내기로 한 경우에만 채워지며, 그 값을 메시지에 그대로 노출한다.
+export interface RecoveryConfirmation {
+  successCount: number;
+  minCount: number;
+  lookbackMinutes: number;
+}
+
 function truncate(text: string, maxLength: number): string {
   return text.length <= maxLength ? text : `${text.slice(0, maxLength)}…`;
 }
@@ -19,6 +27,7 @@ function truncate(text: string, maxLength: number): string {
 export function buildSlackMessage(
   detail: CloudWatchAlarmStateChangeDetail,
   parsed: ParsedAlarmName | null,
+  recoveryConfirmation?: RecoveryConfirmation,
 ): SlackMessage {
   const isAlarm = detail.state.value === "ALARM";
 
@@ -27,16 +36,16 @@ export function buildSlackMessage(
   const signalLabel = parsed?.signal ?? "Unknown";
 
   const headerText = isAlarm
-    ? `🚨 [${severityLabel}] ${serviceLabel} Alarm`
-    : `✅ [RECOVERED] ${serviceLabel} Alarm`;
+    ? `🚨 [${severityLabel}] ${serviceLabel} 알람 발생`
+    : `✅ [복구됨] ${serviceLabel} 알람`;
 
   const fields = [
-    { type: "mrkdwn", text: `*Alarm*\n${detail.alarmName}` },
-    { type: "mrkdwn", text: `*Service*\n${serviceLabel}` },
-    { type: "mrkdwn", text: `*Signal*\n${signalLabel}` },
+    { type: "mrkdwn", text: `*알람*\n${detail.alarmName}` },
+    { type: "mrkdwn", text: `*서비스*\n${serviceLabel}` },
+    { type: "mrkdwn", text: `*시그널*\n${signalLabel}` },
     {
       type: "mrkdwn",
-      text: `*State*\n${detail.previousState.value} → ${detail.state.value}`,
+      text: `*상태*\n${detail.previousState.value} → ${detail.state.value}`,
     },
   ];
 
@@ -45,7 +54,14 @@ export function buildSlackMessage(
   if (!isAlarm && detail.previousState.value === "ALARM") {
     fields.push({
       type: "mrkdwn",
-      text: `*Duration*\n${formatDuration(detail.previousState.timestamp, detail.state.timestamp)}`,
+      text: `*장애 지속시간*\n${formatDuration(detail.previousState.timestamp, detail.state.timestamp)}`,
+    });
+  }
+
+  if (recoveryConfirmation) {
+    fields.push({
+      type: "mrkdwn",
+      text: `*최근 게임 시작 성공*\n${recoveryConfirmation.successCount}회 (최근 ${recoveryConfirmation.lookbackMinutes}분, 기준 ${recoveryConfirmation.minCount}회 이상)`,
     });
   }
 
@@ -59,13 +75,16 @@ export function buildSlackMessage(
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*Reason*\n${truncate(detail.state.reason, REASON_MAX_LENGTH)}`,
+        text: `*원인*\n${truncate(detail.state.reason, REASON_MAX_LENGTH)}`,
       },
     },
     {
       type: "context",
       elements: [
-        { type: "mrkdwn", text: `Time: ${formatKst(detail.state.timestamp)}` },
+        {
+          type: "mrkdwn",
+          text: `발생 시각: ${formatKst(detail.state.timestamp)}`,
+        },
       ],
     },
   ];

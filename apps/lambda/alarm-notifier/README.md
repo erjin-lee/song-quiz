@@ -20,8 +20,10 @@ Lambda Node.js 20.x 런타임이 AWS SDK v3를 기본 제공하므로 배포 zip
 `RECOVERY_CONFIRM_LOOKBACK_MINUTES`분(기본 5분) 동안 게임 시작이 `RECOVERY_CONFIRM_MIN_COUNT`회
 (기본 5회) 이상 성공했는지 CloudWatch `GetMetricData`로 확인한다 (`src/get-recent-success-count.ts`).
 기준에 못 미치면 그 전이에서는 Slack 메시지를 보내지 않는다(CloudWatch 콘솔상 알람 상태 자체는
-그대로 OK로 표시된다 - 바뀌는 건 Slack 알림 시점뿐이다). 지표 조회 자체가 실패하면 fail open으로
-그냥 RECOVERED를 보낸다. 다른 알람(예: `Target5xx`)은 이 확인 없이 기존처럼 즉시 알림이 간다.
+그대로 OK로 표시된다 - 바뀌는 건 Slack 알림 시점뿐이다). 확인을 통과해 실제로 RECOVERED를 보낼
+때는 확인된 성공 횟수를 `*최근 게임 시작 성공*` 필드로 메시지에 그대로 표시한다. 지표 조회
+자체가 실패하면 fail open으로 그냥 RECOVERED를 보내되, 이 경우엔 확인된 값이 없으니 성공 횟수
+필드는 표시하지 않는다. 다른 알람(예: `Target5xx`)은 이 확인 없이 기존처럼 즉시 알림이 간다.
 
 수동 테스트(아래 "배포 후 수동 테스트")로 `QuizSnapshotFailure`를 OK로 강제 전환해도, 최근 5분간
 실제 게임 시작이 5회 이상 없었다면 RECOVERED가 오지 않을 수 있다 - Lambda 로그의
@@ -79,7 +81,7 @@ aws cloudwatch set-alarm-state \
   --state-value ALARM \
   --state-reason "notification pipeline test"
 
-# 잠시 후 복구 알림(✅ RECOVERED) 확인
+# 잠시 후 복구 알림(✅ [복구됨]) 확인
 aws cloudwatch set-alarm-state \
   --alarm-name "SongQuiz-Prod-High-Game-QuizSnapshotFailure" \
   --state-value OK \
