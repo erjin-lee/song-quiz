@@ -17,13 +17,24 @@ import { getCorsOrigins } from './cors-origins.util';
  *
  * GET/HEAD가 아닌 요청에는 브라우저가 same-origin이어도 Origin 헤더를 싣는다
  * (Fetch 표준) — 그래서 same-origin 정상 요청도 이 헤더로 판별할 수 있다.
+ *
+ * "CORS로 허용된 외부 origin인가"와 "API 자신과 같은 origin인가"는 서로 다른
+ * 질문이다. CORS 허용 목록은 apps/web처럼 이 API를 cross-origin으로 호출하는
+ * 프런트엔드용이라 API 자신의 origin(예: Swagger UI에서 직접 호출할 때의
+ * `https://api.noraemat.site`)은 보통 그 목록에 없다. 그래서 요청의
+ * protocol+host로 계산한 자기 자신의 origin도 함께 허용한다 — 그래야
+ * same-origin 요청(Swagger UI 등)이 CORS 허용 목록 구성과 무관하게 항상 통과한다.
  */
 @Injectable()
 export class SameOriginGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<Request>();
     const origin = request.headers.origin;
-    if (!origin || !getCorsOrigins().includes(origin)) {
+    const selfOrigin = `${request.protocol}://${request.get('host')}`;
+    if (
+      !origin ||
+      (origin !== selfOrigin && !getCorsOrigins().includes(origin))
+    ) {
       throw new ForbiddenException('허용되지 않은 요청 출처입니다.');
     }
     return true;

@@ -14,8 +14,16 @@ describe('SameOriginGuard', () => {
     process.env.CORS_ORIGIN = originalCorsOrigin;
   });
 
-  function createContext(origin?: string): ExecutionContext {
-    const request = { headers: { origin } };
+  function createContext(
+    origin?: string,
+    host = 'api.noraemat.site',
+    protocol = 'https',
+  ): ExecutionContext {
+    const request = {
+      headers: { origin },
+      protocol,
+      get: (name: string) => (name === 'host' ? host : undefined),
+    };
     return {
       switchToHttp: () => ({
         getRequest: () => request,
@@ -29,7 +37,7 @@ describe('SameOriginGuard', () => {
     );
   });
 
-  it('허용 목록에 없는 Origin이면 ForbiddenException을 던진다', () => {
+  it('허용 목록에 없고 API 자신의 origin도 아니면 ForbiddenException을 던진다', () => {
     expect(() =>
       guard.canActivate(createContext('https://attacker.example')),
     ).toThrow(ForbiddenException);
@@ -39,5 +47,13 @@ describe('SameOriginGuard', () => {
     expect(guard.canActivate(createContext('https://noraemat.site'))).toBe(
       true,
     );
+  });
+
+  it('CORS 허용 목록에 없어도 API 자신의 origin(Swagger UI 등)이면 통과시킨다', () => {
+    expect(
+      guard.canActivate(
+        createContext('https://api.noraemat.site', 'api.noraemat.site', 'https'),
+      ),
+    ).toBe(true);
   });
 });
