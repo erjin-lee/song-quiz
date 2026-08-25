@@ -58,5 +58,5 @@ variable "recovery_confirm_min_count" {
 variable "recovery_confirm_lookback_minutes" {
   description = "복구 확인용 성공 횟수를 합산할 조회 구간(분). alarm-notifier가 CloudWatch GetMetricData로 [now - N분, now] 구간의 Sum을 확인한다."
   type        = number
-  default     = 5
+  default     = 10
 }

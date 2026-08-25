@@ -19,7 +19,7 @@ const RECOVERY_CONFIRM_MIN_COUNT = Number(
   process.env.RECOVERY_CONFIRM_MIN_COUNT ?? "5",
 );
 const RECOVERY_CONFIRM_LOOKBACK_MINUTES = Number(
-  process.env.RECOVERY_CONFIRM_LOOKBACK_MINUTES ?? "5",
+  process.env.RECOVERY_CONFIRM_LOOKBACK_MINUTES ?? "10",
 );
 
 // EventBridge Rule(infra/terraform/modules/notification/eventbridge.tf)이 이미
