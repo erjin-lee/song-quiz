@@ -84,7 +84,24 @@ alarm-notifier와 달리 `tsc`만으로는 배포 zip이 동작하지 않는다(
 검증하고, `esbuild`(`esbuild.config.js`)로 `src/handler.ts`와 `openai`를 `dist/handler.js`
 하나로 번들링한다. `@aws-sdk/*`는 런타임이 제공하므로 `external`로 제외해 번들 크기를 줄인다.
 Terraform의 `data "archive_file"`이 이 `dist/`를 그대로 zip으로 묶으므로, **`terraform
-plan`/`apply` 전에 반드시 먼저 빌드해야 한다.**
+plan`/`apply` 전에 반드시 먼저 빌드해야 한다.** 단, 코드(`src/**`)만 바뀐 경우엔 아래
+"코드 배포(CI 자동)"대로 CI가 자동으로 배포하므로 로컬 apply가 필요 없다.
+
+## 코드 배포(CI 자동)
+
+`apps/lambda/incident-analyzer/**`가 바뀐 채로 `main`에 merge되면
+[`deploy-incident-analyzer.yml`](../../../.github/workflows/deploy-incident-analyzer.yml)이 빌드
+후 `aws lambda update-function-code`로 코드만 바로 배포한다. 환경변수/IAM/timeout 등 인프라
+자체를 바꿀 때만 여전히 `terraform apply`(로컬, 수동)가 필요하다(`aws_lambda_function.
+incident_analyzer`의 `lifecycle.ignore_changes`가 이 둘이 서로의 배포를 되돌리지 않도록 막는다).
+IAM Role 등록 절차는 아래 "Deploy workflow가 SSM에 쓸 수 있으려면"과 동일한 맥락으로,
+`CI_DEPLOY_LAMBDA_ROLE_ARN`을 한 번 더 등록해야 한다(alarm-notifier와 이 Lambda가 같은 role을
+공유한다 - `infra/terraform/environments/bootstrap/deploy-lambda.tf` 참고).
+
+새 환경변수/IAM 권한을 요구하는 코드를 추가할 때는 `apps/lambda/CLAUDE.md`의 "코드 배포(CI
+자동)" 규칙을 따른다 - CI가 코드를 먼저 배포해도 `terraform apply` 전까지 이 Lambda의 기존
+기능이 깨지지 않도록, 새 환경변수는 optional로 읽고 새 권한이 필요한 호출은 실패해도 fail-open
+으로 넘어가게 짠다.
 
 ## 테스트
 
@@ -172,7 +189,9 @@ aws ssm put-parameter \
 `aws_iam_role.ci_deploy_metadata`가 정의되어 있다. `terraform apply` 후 출력되는
 `ci_deploy_metadata_role_arn` 값을 GitHub 저장소 Variable `CI_DEPLOY_METADATA_ROLE_ARN`에
 등록해야 `deploy-api.yml`/`deploy-game.yml`의 `Record deployment metadata` 스텝이 동작한다
-(`TF_CI_ROLE_ARN`을 이미 등록한 것과 동일한 절차).
+(`TF_CI_ROLE_ARN`을 이미 등록한 것과 동일한 절차). 이 role은 SSM에 배포 metadata를 쓰는
+용도로만 좁혀져 있고, 위 "코드 배포(CI 자동)"의 `CI_DEPLOY_LAMBDA_ROLE_ARN`(Lambda 코드
+업데이트 전용)과는 별개의 role이다 - 서로 대체할 수 없다.
 
 ## 배포 후 검증 절차
 

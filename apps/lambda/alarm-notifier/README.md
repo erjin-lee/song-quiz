@@ -39,6 +39,29 @@ yarn workspace alarm-notifier build
 `data "archive_file"`이 이 `dist/`를 그대로 zip으로 묶으므로, **`terraform plan`/`apply` 전에
 반드시 먼저 빌드해야 한다.**
 
+## 코드 배포(CI 자동)
+
+`apps/lambda/alarm-notifier/**`가 바뀐 채로 `main`에 merge되면
+[`deploy-alarm-notifier.yml`](../../../.github/workflows/deploy-alarm-notifier.yml)이 빌드 후
+`aws lambda update-function-code`로 코드만 바로 배포한다 - 코드만 바뀐 경우엔 `terraform apply`가
+필요 없다. 환경변수/IAM/timeout 등 인프라 자체를 바꿀 때만 여전히 `terraform apply`(로컬, 수동)가
+필요하다(`aws_lambda_function.alarm_notifier`의 `lifecycle.ignore_changes`가 이 둘이 서로의 배포를
+되돌리지 않도록 막는다).
+
+이 워크플로우가 동작하려면 `infra/terraform/environments/bootstrap`(로컬에서 직접 apply하는
+root, CI 대상 아님)에 정의된 `aws_iam_role.ci_deploy_lambda`가 배포돼 있어야 한다. `terraform
+apply` 후 출력되는 `ci_deploy_lambda_role_arn` 값을 GitHub 저장소 Variable
+`CI_DEPLOY_LAMBDA_ROLE_ARN`에 등록해야 한다(`CI_DEPLOY_METADATA_ROLE_ARN`을 이미 등록한 것과
+동일한 절차).
+
+**새 환경변수/IAM 권한을 요구하는 코드를 추가할 때 지킬 규칙**: CI가 코드를 자동으로, 즉시
+배포하는 반면 그 코드가 필요로 하는 인프라(환경변수/IAM)는 `terraform apply`가 될 때까지는
+아직 없을 수 있다. 그래서 새 환경변수는 optional로 읽고(없으면 그 기능만 건너뜀), 새 권한이
+필요한 AWS SDK 호출은 실패해도 fail-open으로 넘어가도록 짜야 한다(`GAME_METRIC_NAMESPACE`/
+`GetMetricData`가 이미 이 패턴을 따른다, 위 "QuizSnapshotFailure 복구 확인" 참고) - 그렇지 않으면
+CI가 새 코드를 먼저 배포한 순간부터 `terraform apply` 전까지 이 Lambda의 기존 기능까지 전부
+깨질 수 있다.
+
 ## 테스트
 
 ```bash
