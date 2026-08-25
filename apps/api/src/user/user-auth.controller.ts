@@ -25,6 +25,7 @@ import {
   authCookieOptions,
   parseCookie,
 } from '../common/auth-cookie.util';
+import { SameOriginGuard } from '../common/same-origin.guard';
 import { EmailAuthService } from './email-auth.service';
 import { EMAIL_AUTH_CODE_TTL_MINUTES } from './email-auth.constants';
 import { LoginRequestDto } from './dto/login-request.dto';
@@ -51,7 +52,7 @@ export class UserAuthController {
   ) {}
 
   @Post('signup')
-  @UseGuards(ThrottlerGuard)
+  @UseGuards(ThrottlerGuard, SameOriginGuard)
   @Throttle({ 'user-signup': { limit: 5, ttl: 60_000 } })
   @ApiOperation({ summary: '회원가입(가입 즉시 로그인 처리)' })
   @ApiCreatedResponse({ type: LoginResponseDto })
@@ -70,7 +71,7 @@ export class UserAuthController {
   }
 
   @Post('login')
-  @UseGuards(ThrottlerGuard)
+  @UseGuards(ThrottlerGuard, SameOriginGuard)
   @Throttle({ 'user-login': { limit: 5, ttl: 60_000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '로그인(JWT 발급)' })
@@ -92,6 +93,7 @@ export class UserAuthController {
   }
 
   @Post('logout')
+  @UseGuards(SameOriginGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: '로그아웃(세션 쿠키 삭제)' })
   logout(@Res({ passthrough: true }) res: Response): void {

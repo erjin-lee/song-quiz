@@ -269,9 +269,15 @@ export function RoomListPage() {
                   <span className="text-slate-200">·</span>
                   <button
                     type="button"
-                    onClick={() => {
-                      logout();
-                      navigate('/');
+                    onClick={async () => {
+                      try {
+                        await logout();
+                        navigate('/');
+                      } catch {
+                        setListError(
+                          '로그아웃에 실패했습니다. 잠시 후 다시 시도해 주세요.',
+                        );
+                      }
                     }}
                     className="transition hover:text-purple-500"
                   >
