@@ -1,0 +1,62 @@
+name: Deploy Incident Analyzer Lambda
+
+# deploy-alarm-notifier.yml과 동일한 패턴 - terraform apply 없이 코드만 빠르게 배포한다.
+# 인프라(환경변수/IAM/timeout 등)는 이 워크플로우가 건드리지 않는다 - 그건 여전히
+# infra/terraform/environments/prod에서 로컬로 직접 terraform apply해야 한다
+# (infra/terraform/modules/aiops/lambda.tf의 lifecycle.ignore_changes 참고).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/lambda/incident-analyzer/**'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-incident-analyzer-lambda
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # GitHub OIDC로 AWS IAM Role을 assume하기 위해 필요
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build
+        run: |
+          corepack enable
+          YARN_ENABLE_IMMUTABLE_INSTALLS=true yarn workspaces focus incident-analyzer
+          yarn workspace incident-analyzer build
+
+      # esbuild 번들 산출물이 dist/handler.js 하나뿐이다(openai 포함, modules/aiops/lambda.tf
+      # 주석 참고). terraform의 data "archive_file"(source_dir = dist)과 동일하게 dist/ 안의
+      # 내용을 zip 루트에 바로 담는다.
+      - name: Zip build output
+        run: |
+          cd apps/lambda/incident-analyzer/dist
+          zip -r ../deploy.zip .
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.CI_DEPLOY_LAMBDA_ROLE_ARN }}
+          aws-region: ap-northeast-2
+
+      - name: Update Lambda function code
+        run: |
+          aws lambda update-function-code \
+            --function-name song-quiz-prod-incident-analyzer \
+            --zip-file fileb://apps/lambda/incident-analyzer/deploy.zip \
+            --no-cli-pager
+          aws lambda wait function-updated \
+            --function-name song-quiz-prod-incident-analyzer

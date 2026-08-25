@@ -43,6 +43,13 @@ resource "aws_lambda_function" "incident_analyzer" {
   filename         = data.archive_file.incident_analyzer.output_path
   source_code_hash = data.archive_file.incident_analyzer.output_base64sha256
 
+  # alarm-notifier(modules/notification/lambda.tf)와 동일한 이유 - .github/workflows/
+  # deploy-incident-analyzer.yml이 코드를 직접 배포하므로, 로컬 terraform apply가 그 코드를
+  # 예전 dist/ 기준 zip으로 되돌리지 않도록 무시한다.
+  lifecycle {
+    ignore_changes = [filename, source_code_hash]
+  }
+
   # CloudWatch/Logs/X-Ray/SSM/OpenAI/Slack 모두 공인 API라 RDS/Redis/private EC2 접근이
   # 필요 없다 - VPC에 넣지 않아 NAT Gateway 비용/복잡도를 추가하지 않는다(§27).
   environment {
