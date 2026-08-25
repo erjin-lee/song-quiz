@@ -164,8 +164,9 @@ module "monitoring" {
 module "notification" {
   source = "../../modules/notification"
 
-  aws_region       = var.aws_region
-  lambda_dist_path = abspath("${path.root}/../../../../apps/lambda/alarm-notifier/dist")
+  aws_region            = var.aws_region
+  lambda_dist_path      = abspath("${path.root}/../../../../apps/lambda/alarm-notifier/dist")
+  game_metric_namespace = module.logging.game_metric_namespace
 }
 
 # QuizSnapshotFailure/Game Target5xx ALARM 전용 AIOps 흐름(Metrics/Logs/X-Ray 수집 -> OpenAI

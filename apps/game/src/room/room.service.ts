@@ -510,6 +510,10 @@ export class RoomService extends EventEmitter {
       await this.roomRoundService.prepareFirstRound(roomId, room);
 
       await this.roomRepository.saveRoom(room);
+      updateLogContext({ roomId });
+      this.logger.log(`게임 재시작됨(roomId: ${roomId})`, {
+        event: 'game_started',
+      });
       this.emit('room-updated', this.roomRepository.toPublicRoom(room));
       return room;
     });

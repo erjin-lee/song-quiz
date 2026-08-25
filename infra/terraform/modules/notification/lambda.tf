@@ -43,6 +43,15 @@ resource "aws_lambda_function" "alarm_notifier" {
     variables = {
       SLACK_WEBHOOK_PARAMETER_NAME = var.slack_webhook_parameter_name
       ALARM_NAME_PREFIX            = var.alarm_name_prefix
+
+      # QuizSnapshotFailure(recovery_confirm_alarm_signal)의 RECOVERED 알림을 보내기 전,
+      # GameStartSuccess 지표로 실제 게임 시작 성공이 recovery_confirm_min_count회 이상
+      # 쌓였는지 확인하기 위한 설정 (src/get-recent-success-count.ts 참고).
+      GAME_METRIC_NAMESPACE             = var.game_metric_namespace
+      RECOVERY_CONFIRM_ALARM_SIGNAL     = var.recovery_confirm_alarm_signal
+      RECOVERY_CONFIRM_METRIC_NAME      = var.recovery_confirm_metric_name
+      RECOVERY_CONFIRM_MIN_COUNT        = tostring(var.recovery_confirm_min_count)
+      RECOVERY_CONFIRM_LOOKBACK_MINUTES = tostring(var.recovery_confirm_lookback_minutes)
     }
   }
 
