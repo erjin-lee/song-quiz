@@ -9,8 +9,23 @@ CloudWatch Alarm -> EventBridge Rule -> 이 Lambda -> Slack Incoming Webhook
 ```
 
 NestJS/Express 같은 프레임워크 없이 plain Lambda handler(`src/handler.ts`)만 사용한다.
-`@aws-sdk/client-ssm`은 devDependencies로만 선언되어 있다 - Lambda Node.js 20.x 런타임이
-AWS SDK v3를 기본 제공하므로 배포 zip(`dist/`)에는 번들링하지 않는다.
+`@aws-sdk/client-ssm`/`@aws-sdk/client-cloudwatch`는 devDependencies로만 선언되어 있다 -
+Lambda Node.js 20.x 런타임이 AWS SDK v3를 기본 제공하므로 배포 zip(`dist/`)에는 번들링하지 않는다.
+
+## QuizSnapshotFailure 복구 확인
+
+`QuizSnapshotFailure` 알람(`RECOVERY_CONFIRM_ALARM_SIGNAL`, 기본값)이 `ALARM -> OK`로 전환되면,
+곧바로 RECOVERED를 보내지 않고 `GameStartSuccess` Custom Metric
+(`infra/terraform/modules/logging/metric-filters.tf`, `game_started` 이벤트 기반)으로 최근
+`RECOVERY_CONFIRM_LOOKBACK_MINUTES`분(기본 5분) 동안 게임 시작이 `RECOVERY_CONFIRM_MIN_COUNT`회
+(기본 5회) 이상 성공했는지 CloudWatch `GetMetricData`로 확인한다 (`src/get-recent-success-count.ts`).
+기준에 못 미치면 그 전이에서는 Slack 메시지를 보내지 않는다(CloudWatch 콘솔상 알람 상태 자체는
+그대로 OK로 표시된다 - 바뀌는 건 Slack 알림 시점뿐이다). 지표 조회 자체가 실패하면 fail open으로
+그냥 RECOVERED를 보낸다. 다른 알람(예: `Target5xx`)은 이 확인 없이 기존처럼 즉시 알림이 간다.
+
+수동 테스트(아래 "배포 후 수동 테스트")로 `QuizSnapshotFailure`를 OK로 강제 전환해도, 최근 5분간
+실제 게임 시작이 5회 이상 없었다면 RECOVERED가 오지 않을 수 있다 - Lambda 로그의
+`alarm_notification_skipped`(`reason: "recovery_not_confirmed"`)로 확인 가능하다.
 
 ## 빌드
 

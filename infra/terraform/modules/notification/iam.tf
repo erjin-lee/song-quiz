@@ -57,3 +57,27 @@ resource "aws_iam_role_policy" "alarm_notifier_ssm" {
     ]
   })
 }
+
+# QuizSnapshotFailure 복구 확인용 GameStartSuccess 지표 조회 권한. GetMetricData는 CloudWatch
+# Metric 자체가 ARN으로 존재하지 않는 리소스라 Resource를 "*" 밖에 못 쓰지만(AWS IAM 제약),
+# cloudwatch:namespace 조건 키로 이 프로젝트의 game_metric_namespace 하나로만 좁힌다.
+resource "aws_iam_role_policy" "alarm_notifier_cloudwatch_metrics" {
+  name = "${local.function_name}-cloudwatch-metrics"
+  role = aws_iam_role.alarm_notifier.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "cloudwatch:GetMetricData"
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = var.game_metric_namespace
+          }
+        }
+      }
+    ]
+  })
+}

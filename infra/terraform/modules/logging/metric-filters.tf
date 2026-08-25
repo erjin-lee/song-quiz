@@ -34,3 +34,22 @@ resource "aws_cloudwatch_log_metric_filter" "game_failure_event" {
     unit          = "Count"
   }
 }
+
+# QuizSnapshotFailure 알람이 OK로 전환됐을 때, alarm-notifier Lambda가 이 지표로 최근 게임
+# 시작이 실제로 몇 번 성공했는지 확인한 뒤에만 RECOVERED를 Slack에 보낸다(단순히 실패가
+# 한동안 없었다는 것만으로 복구를 단정하지 않기 위함). room.service.ts:483의 game_started
+# 이벤트가 게임 시작 성공 시점이다. 실패 이벤트들과 성격이 달라(성공 카운트) 위 for_each
+# map에는 넣지 않고 별도 리소스로 둔다.
+resource "aws_cloudwatch_log_metric_filter" "game_start_success" {
+  name           = "${var.project_name}-game-game_started"
+  log_group_name = aws_cloudwatch_log_group.game.name
+  pattern        = "{ $.event = \"game_started\" }"
+
+  metric_transformation {
+    name          = "GameStartSuccess"
+    namespace     = var.game_metric_namespace
+    value         = "1"
+    default_value = "0"
+    unit          = "Count"
+  }
+}
