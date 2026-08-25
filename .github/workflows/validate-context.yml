@@ -5,6 +5,8 @@ on:
     paths:
       - 'CLAUDE.md'
       - 'apps/**/CLAUDE.md'
+      - 'packages/**/CLAUDE.md'
+      - 'scripts/CLAUDE.md'
       - '.claude/**'
       - 'scripts/validate-context-paths.mjs'
   push:
@@ -12,6 +14,8 @@ on:
     paths:
       - 'CLAUDE.md'
       - 'apps/**/CLAUDE.md'
+      - 'packages/**/CLAUDE.md'
+      - 'scripts/CLAUDE.md'
       - '.claude/**'
       - 'scripts/validate-context-paths.mjs'
 

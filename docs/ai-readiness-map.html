@@ -1,0 +1,1378 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>song-quiz · AI-Readiness Map</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #fafafa;
+        --surface: #ffffff;
+        --border: #e5e7eb;
+        --border-strong: #d1d5db;
+        --text: #0f172a;
+        --text-2: #475569;
+        --text-3: #94a3b8;
+        --accent: #2563eb;
+        --accent-soft: #eff6ff;
+        --green: #16a34a;
+        --green-soft: #dcfce7;
+        --amber: #d97706;
+        --amber-soft: #fef3c7;
+        --red: #dc2626;
+        --red-soft: #fee2e2;
+        --grid: #f1f5f9;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          "Inter",
+          -apple-system,
+          system-ui,
+          "Segoe UI",
+          sans-serif;
+        font-feature-settings: "cv11", "ss01";
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .page {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 48px 40px 64px;
+      }
+
+      /* ============ HEADER ============ */
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        padding-bottom: 24px;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 32px;
+      }
+
+      .header .eyebrow {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--text-3);
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+
+      .header h1 {
+        font-size: 30px;
+        font-weight: 700;
+        margin: 0;
+        letter-spacing: -0.02em;
+      }
+
+      .header .sub {
+        font-size: 14px;
+        color: var(--text-2);
+        margin-top: 4px;
+      }
+
+      .header-meta {
+        text-align: right;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--text-3);
+        line-height: 1.7;
+      }
+
+      .header-meta strong {
+        color: var(--text);
+        font-weight: 500;
+      }
+
+      /* ============ SCORE STRIP ============ */
+      .score-strip {
+        display: grid;
+        grid-template-columns: 320px 1fr;
+        gap: 24px;
+        margin-bottom: 32px;
+      }
+
+      .score-hero {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 28px 28px 24px;
+      }
+
+      .score-hero .label {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-3);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .score-hero .value {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        margin-top: 8px;
+      }
+
+      .score-hero .num {
+        font-size: 64px;
+        font-weight: 700;
+        letter-spacing: -0.04em;
+        line-height: 1;
+        color: var(--text);
+      }
+
+      .score-hero .denom {
+        font-size: 20px;
+        color: var(--text-3);
+        font-weight: 500;
+      }
+
+      .score-hero .grade-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .grade-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: var(--green-soft);
+        color: var(--green);
+        font-size: 12px;
+        font-weight: 600;
+        font-family: "JetBrains Mono", monospace;
+      }
+
+      .grade-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: var(--green);
+      }
+
+      .score-hero .desc {
+        font-size: 13px;
+        color: var(--text-2);
+        line-height: 1.5;
+        margin-top: 10px;
+      }
+
+      .score-hero hr {
+        border: 0;
+        border-top: 1px solid var(--border);
+        margin: 18px 0 14px;
+      }
+
+      .mini-stats {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+      }
+
+      .mini-stat .k {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--text-3);
+        margin-bottom: 2px;
+      }
+
+      .mini-stat .v {
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--text);
+      }
+
+      /* ============ CATEGORY BAR CHART ============ */
+      .rules {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 20px 24px 24px;
+      }
+
+      .rules .rules-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 16px;
+      }
+
+      .rules h2 {
+        font-size: 14px;
+        font-weight: 600;
+        margin: 0;
+      }
+
+      .legend-inline {
+        display: flex;
+        gap: 14px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--text-2);
+      }
+
+      .legend-inline span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      .legend-inline i {
+        width: 8px;
+        height: 8px;
+        border-radius: 2px;
+      }
+
+      .rule-row {
+        display: grid;
+        grid-template-columns: 28px 1fr 220px 56px;
+        gap: 12px;
+        align-items: center;
+        padding: 7px 0;
+        font-size: 13px;
+      }
+
+      .rule-row + .rule-row {
+        border-top: 1px dashed var(--border);
+      }
+
+      .rule-row .idx {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--text-3);
+        font-weight: 500;
+      }
+
+      .rule-row .title {
+        color: var(--text);
+        font-weight: 500;
+      }
+
+      .rule-row .sub {
+        font-size: 11.5px;
+        color: var(--text-3);
+        margin-top: 1px;
+      }
+
+      .rule-row .sub-detail {
+        font-size: 10.5px;
+        color: var(--text-3);
+        margin-top: 2px;
+        font-family: "JetBrains Mono", monospace;
+      }
+
+      .rule-row .bar {
+        height: 8px;
+        border-radius: 3px;
+        background: var(--grid);
+        overflow: hidden;
+      }
+
+      .rule-row .bar > span {
+        display: block;
+        height: 100%;
+        border-radius: 3px;
+      }
+
+      .bar-good > span {
+        background: var(--green);
+      }
+      .bar-warn > span {
+        background: var(--amber);
+      }
+      .bar-bad > span {
+        background: var(--red);
+      }
+
+      .rule-row .num {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 13px;
+        font-weight: 600;
+        text-align: right;
+        color: var(--text);
+      }
+
+      /* ============ MAP ============ */
+      .map-section {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        margin-bottom: 32px;
+        overflow: hidden;
+      }
+
+      .map-head {
+        padding: 18px 24px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .map-head h2 {
+        font-size: 14px;
+        font-weight: 600;
+        margin: 0;
+      }
+
+      .map-head .sub {
+        font-size: 12px;
+        color: var(--text-2);
+        margin-top: 2px;
+      }
+
+      .map-legend {
+        display: flex;
+        gap: 18px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--text-2);
+        align-items: center;
+      }
+
+      .map-legend > span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .legend-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+      }
+
+      .legend-square {
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+      }
+
+      .legend-line {
+        width: 24px;
+        height: 0;
+        border-top: 1.5px solid;
+      }
+
+      .map-body {
+        padding: 28px 24px 32px;
+      }
+
+      .map-body svg {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      /* ============ FINDINGS ============ */
+      .findings {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+      }
+
+      .panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .panel-head {
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .panel-head h3 {
+        font-size: 13px;
+        font-weight: 600;
+        margin: 0;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .panel-head .count {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--text-3);
+        margin-left: auto;
+      }
+
+      .panel-strength .panel-head {
+        background: var(--green-soft);
+      }
+      .panel-strength .panel-head h3 {
+        color: var(--green);
+      }
+
+      .panel-risk .panel-head {
+        background: var(--red-soft);
+      }
+      .panel-risk .panel-head h3 {
+        color: var(--red);
+      }
+
+      .panel-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+
+      .panel-list li {
+        padding: 14px 20px;
+        border-top: 1px solid var(--border);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .panel-list li:first-child {
+        border-top: 0;
+      }
+
+      .panel-list .head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 500;
+        color: var(--text);
+      }
+
+      .panel-list .tag {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10.5px;
+        padding: 2px 7px;
+        border-radius: 3px;
+        font-weight: 500;
+        letter-spacing: 0.02em;
+      }
+
+      .tag-rule {
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+
+      .panel-list .note {
+        margin-top: 4px;
+        color: var(--text-2);
+        font-size: 12.5px;
+      }
+
+      .panel-list code {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11.5px;
+        background: var(--grid);
+        padding: 1px 5px;
+        border-radius: 3px;
+        color: var(--text);
+      }
+
+      footer {
+        margin-top: 48px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--text-3);
+        text-align: center;
+      }
+
+      /* ============ SVG ============ */
+      .grid-bg {
+        stroke: var(--grid);
+        stroke-width: 1;
+      }
+
+      .node-card {
+        fill: var(--surface);
+        stroke: var(--border-strong);
+        stroke-width: 1.2;
+      }
+
+      .node-card.accent {
+        stroke: var(--accent);
+      }
+
+      .node-card.gap {
+        stroke: var(--red);
+        stroke-dasharray: 3 3;
+      }
+
+      .node-title {
+        font-family: "Inter", sans-serif;
+        font-size: 12px;
+        font-weight: 600;
+        fill: var(--text);
+      }
+
+      .node-meta {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        fill: var(--text-3);
+      }
+
+      .node-kpi {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      .edge {
+        fill: none;
+        stroke: var(--border-strong);
+        stroke-width: 1.3;
+      }
+
+      .edge-dash {
+        stroke-dasharray: 4 3;
+      }
+
+      .claude-dot {
+        fill: var(--accent);
+      }
+      .claude-ring {
+        fill: var(--accent-soft);
+      }
+
+      .hot {
+        fill: var(--red-soft);
+        stroke: var(--red);
+        stroke-width: 1;
+      }
+
+      .warm {
+        fill: var(--amber-soft);
+        stroke: var(--amber);
+        stroke-width: 1;
+      }
+
+      .gap-row {
+        fill: var(--red-soft);
+        stroke: var(--red);
+        stroke-width: 1;
+        stroke-dasharray: 3 2;
+      }
+
+      @media (max-width: 960px) {
+        .score-strip,
+        .findings {
+          grid-template-columns: 1fr;
+        }
+        .rule-row {
+          grid-template-columns: 24px 1fr 140px 40px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <!-- =========== HEADER =========== -->
+      <header class="header">
+        <div>
+          <div class="eyebrow">레포지토리 감사 · AI 준비도 · v2 루브릭</div>
+          <h1>song-quiz — AI 준비도 지도</h1>
+          <div class="sub">7개 카테고리 채점 · 구조 지도 · ROI 우선순위 액션</div>
+        </div>
+        <div class="header-meta">
+          <div>점수 측정 <strong>2026-08-24</strong></div>
+          <div>브랜치 <strong>main</strong></div>
+          <div>모듈 <strong>9</strong> · 컨텍스트 파일 <strong>18</strong></div>
+        </div>
+      </header>
+
+      <!-- =========== SCORE STRIP =========== -->
+      <section class="score-strip">
+        <div class="score-hero">
+          <div class="label">AI 준비도 지수</div>
+          <div class="value">
+            <span class="num">82</span><span class="denom">/ 100</span>
+          </div>
+          <div class="grade-row">
+            <span
+              class="grade-badge"
+              style="background: var(--green-soft); color: var(--green)"
+            >
+              <span class="grade-dot" style="background: var(--green)"></span>
+              AI-Ready
+            </span>
+          </div>
+          <div class="desc">
+            7개 카테고리 · 가중치 차등 (A 15 · B 20 · C 20 · D 15 · E 15
+            · F 10 · G 5). CLAUDE.md 없던 4개 module(<code>scripts</code>,
+            <code>apps/lambda</code>, <code>packages/logger</code>,
+            <code>packages/tracing</code>)에 문서를 신설해
+            <strong>A AI 탐색 & 커버리지 8/15 → 15/15(만점)</strong>,
+            <strong>C 암묵지 외부화 11/20 → 16/20</strong>으로 상승(직전
+            감사 총점 69). 이제 가장 약한 영역은 <strong>D 모듈 간
+            의존성 매핑(10/15)</strong>. 자동 스캐너의 hallucinated path
+            31건은 전수 검증 결과 0건(스캐너 정규식 오탐) — 자동 채점
+            원값 80점에서 E1을 보정해 82점.
+          </div>
+          <hr />
+          <div class="mini-stats">
+            <div class="mini-stat">
+              <div class="k">컨텍스트 보유 모듈</div>
+              <div class="v" style="color: var(--green)">9 / 9</div>
+            </div>
+            <div class="mini-stat">
+              <div class="k">잘못된 경로(검증됨)</div>
+              <div class="v" style="color: var(--green)">0</div>
+            </div>
+            <div class="mini-stat">
+              <div class="k">300줄 초과 파일</div>
+              <div class="v">18</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Categories bar chart -->
+        <div class="rules">
+          <div class="rules-head">
+            <div>
+              <h2>7개 카테고리 — 카테고리별 점수</h2>
+            </div>
+            <div class="legend-inline">
+              <span><i style="background: var(--green)"></i> 75% 이상</span>
+              <span><i style="background: var(--amber)"></i> 50–74%</span>
+              <span><i style="background: var(--red)"></i> 50% 미만</span>
+            </div>
+          </div>
+
+          <div class="rule-row">
+            <div class="idx">A</div>
+            <div>
+              <div class="title">AI 탐색 & 커버리지</div>
+              <div class="sub">
+                <strong style="color: var(--green)">✓ 핵심 module 9/9 전부 context 보유(100%)</strong>
+                · <code>scripts</code>/<code>apps/lambda</code>/<code
+                  >packages/logger</code
+                >/<code>packages/tracing</code>에 CLAUDE.md 신설(직전 4개 미커버)
+              </div>
+            </div>
+            <div class="bar bar-good"><span style="width: 100%"></span></div>
+            <div class="num">15/15</div>
+          </div>
+
+          <div class="rule-row">
+            <div class="idx">B</div>
+            <div>
+              <div class="title">컨텍스트 문서 품질</div>
+              <div class="sub">
+                25-35줄 초과 context 4건(기존 module) · 신규 4개
+                CLAUDE.md는 22-32줄로 conciseness 준수 · Why/Note/Gotcha
+                마커 부족
+              </div>
+              <div class="sub-detail">
+                B1 Conciseness 3/4 · B2 Commands 4/4 · B3 KeyFiles 3/4 ·
+                B4 NonObvious 1/4 · B5 CrossRefs 3/4
+              </div>
+            </div>
+            <div class="bar bar-warn"><span style="width: 70%"></span></div>
+            <div class="num">14/20</div>
+          </div>
+
+          <div class="rule-row">
+            <div class="idx">C</div>
+            <div>
+              <div class="title">암묵지 외부화</div>
+              <div class="sub">
+                신규 4개 CLAUDE.md에 Purpose/Dependencies 섹션 포함 → Q1
+                Owns · Q4 Deps 크게 개선. Common modification patterns
+                섹션은 여전히 다수 module에서 누락
+              </div>
+              <div class="sub-detail">
+                Q1 Owns 4/4 · Q2 Patterns 2/4 · Q3 NonObvious 2/4 · Q4
+                Deps 4/4 · Q5 TribalStore 4/4
+              </div>
+            </div>
+            <div class="bar bar-good"><span style="width: 80%"></span></div>
+            <div class="num">16/20</div>
+          </div>
+
+          <div class="rule-row">
+            <div class="idx">D</div>
+            <div>
+              <div class="title">모듈 간 의존성 매핑</div>
+              <div class="sub">
+                ARCHITECTURE.md · workspace 구조 명확 · mermaid 다이어그램
+                없음
+              </div>
+            </div>
+            <div class="bar bar-warn"><span style="width: 67%"></span></div>
+            <div class="num">10/15</div>
+          </div>
+
+          <div class="rule-row">
+            <div class="idx">E</div>
+            <div>
+              <div class="title">검증 & 품질 게이트</div>
+              <div class="sub">
+                <strong style="color: var(--green)"
+                  >✓ hallucinated path 31건 → 수동 검증 결과 0건(스캐너
+                  오탐)</strong
+                >
+                · CODEOWNERS · PR 템플릿 · CI 존재 · husky 없음
+              </div>
+              <div class="sub-detail">
+                E1 RefAccuracy 5/5(보정) · E2 CriticReview 4/4 · E3
+                TaskValidation 3/4 · E4 PromptTests 2/2
+              </div>
+            </div>
+            <div class="bar bar-good"><span style="width: 93%"></span></div>
+            <div class="num">14/15</div>
+          </div>
+
+          <div class="rule-row">
+            <div class="idx">F</div>
+            <div>
+              <div class="title">신선도 & 자가 유지보수</div>
+              <div class="sub">
+                context drift 0%(측정 가능 9개 module) · GitHub Actions
+                context validation workflow 존재 · pre-commit hook 검증
+                없음
+              </div>
+            </div>
+            <div class="bar bar-good"><span style="width: 80%"></span></div>
+            <div class="num">8/10</div>
+          </div>
+
+          <div class="rule-row">
+            <div class="idx">G</div>
+            <div>
+              <div class="title">에이전트 성과 측정</div>
+              <div class="sub">
+                <code>evals/</code> + <code>agent-results.json</code>으로
+                task별 pass rate 누적 기록 중
+              </div>
+            </div>
+            <div class="bar bar-good"><span style="width: 100%"></span></div>
+            <div class="num">5/5</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =========== MAP =========== -->
+      <section class="map-section">
+        <div class="map-head">
+          <div>
+            <h2>구조 지도</h2>
+            <div class="sub">
+              노드 = 워크스페이스 · 카드 내부 수치는 해당 영역의 AI
+              준비도 지표 (300줄 초과 파일 · context 보유 여부)
+            </div>
+          </div>
+          <div class="map-legend">
+            <span
+              ><span
+                class="legend-dot"
+                style="background: var(--accent)"
+              ></span>
+              CLAUDE.md 보유</span
+            >
+            <span
+              ><span
+                class="legend-square"
+                style="background: var(--red-soft); border: 1px solid var(--red)"
+              ></span>
+              500줄 초과
+            </span>
+            <span
+              ><span
+                class="legend-square"
+                style="background: var(--amber-soft); border: 1px solid var(--amber)"
+              ></span>
+              300줄 초과
+            </span>
+          </div>
+        </div>
+
+        <div class="map-body">
+          <svg viewBox="0 0 1180 730" xmlns="http://www.w3.org/2000/svg">
+            <!-- subtle grid -->
+            <g class="grid-bg">
+              <path d="M0,80 H1180" />
+              <path d="M0,160 H1180" />
+              <path d="M0,240 H1180" />
+              <path d="M0,320 H1180" />
+              <path d="M0,400 H1180" />
+              <path d="M0,480 H1180" />
+              <path d="M0,560 H1180" />
+              <path d="M0,640 H1180" />
+              <path d="M100,0 V730" />
+              <path d="M300,0 V730" />
+              <path d="M500,0 V730" />
+              <path d="M700,0 V730" />
+              <path d="M900,0 V730" />
+              <path d="M1100,0 V730" />
+            </g>
+
+            <!-- Column headers -->
+            <text
+              x="200"
+              y="32"
+              text-anchor="middle"
+              class="node-meta"
+              style="font-size: 11px; fill: var(--text-2); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;"
+            >
+              프런트엔드 · apps/web · apps/admin
+            </text>
+            <text
+              x="590"
+              y="32"
+              text-anchor="middle"
+              class="node-meta"
+              style="font-size: 11px; fill: var(--text-2); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;"
+            >
+              백엔드 · apps/api · apps/game
+            </text>
+            <text
+              x="980"
+              y="32"
+              text-anchor="middle"
+              class="node-meta"
+              style="font-size: 11px; fill: var(--text-2); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;"
+            >
+              공유 · packages · apps/lambda · evals
+            </text>
+
+            <!-- ============ ROOT CLAUDE.md (top center) ============ -->
+            <g transform="translate(440,60)">
+              <rect class="node-card accent" width="300" height="70" rx="8" />
+              <circle cx="22" cy="22" r="14" class="claude-ring" />
+              <circle cx="22" cy="22" r="6" class="claude-dot" />
+              <text x="44" y="26" class="node-title">CLAUDE.md (root)</text>
+              <text x="44" y="42" class="node-meta">
+                프로젝트 개요 · 앱별 규칙 링크 · Git/검증 규칙
+              </text>
+              <text x="44" y="58" class="node-meta" style="fill: var(--text-2)">
+                62 lines
+              </text>
+              <text
+                x="284"
+                y="26"
+                text-anchor="end"
+                class="node-kpi"
+                style="fill: var(--accent)"
+              >
+                루트
+              </text>
+            </g>
+
+            <!-- ============ COLUMN 1: apps/web + apps/admin ============ -->
+            <g transform="translate(60,180)">
+              <rect class="node-card accent" width="280" height="60" rx="8" />
+              <circle cx="22" cy="20" r="12" class="claude-ring" />
+              <circle cx="22" cy="20" r="5" class="claude-dot" />
+              <text x="42" y="24" class="node-title">apps/web/CLAUDE.md</text>
+              <text x="42" y="40" class="node-meta">
+                Vite+React SPA · api/socket 클라이언트 패턴
+              </text>
+              <text x="264" y="24" text-anchor="end" class="node-kpi">
+                63 ln
+              </text>
+            </g>
+
+            <g transform="translate(60,250)">
+              <rect class="node-card" width="280" height="180" rx="8" />
+              <text x="16" y="24" class="node-title">apps/web/src</text>
+              <text x="16" y="40" class="node-meta">
+                pages · components · api · context
+              </text>
+
+              <g transform="translate(16,52)">
+                <rect class="hot" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--red); font-weight:600">
+                  pages/RoomGamePage.tsx
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--red); font-weight:600">
+                  760
+                </text>
+              </g>
+              <g transform="translate(16,74)">
+                <rect class="hot" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--red); font-weight:600">
+                  components/GamePlayer.tsx
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--red); font-weight:600">
+                  627
+                </text>
+              </g>
+              <g transform="translate(16,96)">
+                <rect class="warm" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  pages/RoomListPage.tsx
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  444
+                </text>
+              </g>
+              <g transform="translate(16,118)">
+                <rect class="warm" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  pages/CreateRoomPage.tsx
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  379
+                </text>
+              </g>
+              <g transform="translate(16,140)">
+                <rect class="warm" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  components/EditRoomModal.tsx
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  343
+                </text>
+              </g>
+            </g>
+
+            <g transform="translate(60,450)">
+              <rect class="node-card accent" width="280" height="60" rx="8" />
+              <circle cx="22" cy="20" r="12" class="claude-ring" />
+              <circle cx="22" cy="20" r="5" class="claude-dot" />
+              <text x="42" y="24" class="node-title">apps/admin/CLAUDE.md</text>
+              <text x="42" y="40" class="node-meta">
+                Next.js App Router · shadcn/ui
+              </text>
+              <text x="264" y="24" text-anchor="end" class="node-kpi">
+                57 ln
+              </text>
+            </g>
+
+            <g transform="translate(60,520)">
+              <rect class="node-card" width="280" height="60" rx="8" />
+              <text x="16" y="24" class="node-title">apps/admin/src</text>
+              <text x="16" y="40" class="node-meta">
+                (protected) 라우트 · 문의/방 관리 화면
+              </text>
+              <g transform="translate(16,-6)">
+                <rect x="0" y="46" class="warm" width="248" height="18" rx="3" />
+                <text x="8" y="59" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  (protected)/inquiries/page.tsx
+                </text>
+                <text x="240" y="59" text-anchor="end" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  427
+                </text>
+              </g>
+            </g>
+
+            <!-- ============ COLUMN 2: apps/api + apps/game ============ -->
+            <g transform="translate(450,180)">
+              <rect class="node-card accent" width="280" height="60" rx="8" />
+              <circle cx="22" cy="20" r="12" class="claude-ring" />
+              <circle cx="22" cy="20" r="5" class="claude-dot" />
+              <text x="42" y="24" class="node-title">apps/api/CLAUDE.md</text>
+              <text x="42" y="40" class="node-meta">
+                NestJS REST · 퀴즈/유저/문의/관리자
+              </text>
+              <text x="264" y="24" text-anchor="end" class="node-kpi">
+                72 ln
+              </text>
+            </g>
+
+            <g transform="translate(450,250)">
+              <rect class="node-card" width="280" height="180" rx="8" />
+              <text x="16" y="24" class="node-title">apps/api/src</text>
+              <text x="16" y="40" class="node-meta">
+                admin · inquiry · quiz · scraper
+              </text>
+
+              <g transform="translate(16,52)">
+                <rect class="hot" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--red); font-weight:600">
+                  admin/admin.service.spec.ts
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--red); font-weight:600">
+                  509
+                </text>
+              </g>
+              <g transform="translate(16,74)">
+                <rect class="warm" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  inquiry/inquiry.service.spec.ts
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  388
+                </text>
+              </g>
+              <g transform="translate(16,96)">
+                <rect class="warm" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  inquiry/inquiry.service.ts
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  371
+                </text>
+              </g>
+              <g transform="translate(16,118)">
+                <rect class="warm" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  scraper/melon-scraper.client.ts
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  370
+                </text>
+              </g>
+              <g transform="translate(16,140)">
+                <rect class="warm" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  quiz/gpt-answer.prompt.ts
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  348
+                </text>
+              </g>
+            </g>
+
+            <g transform="translate(450,450)">
+              <rect class="node-card accent" width="280" height="60" rx="8" />
+              <circle cx="22" cy="20" r="12" class="claude-ring" />
+              <circle cx="22" cy="20" r="5" class="claude-dot" />
+              <text x="42" y="24" class="node-title">apps/game/CLAUDE.md</text>
+              <text x="42" y="40" class="node-meta">
+                NestJS room 도메인 · Socket.IO /rooms
+              </text>
+              <text x="264" y="24" text-anchor="end" class="node-kpi">
+                62 ln
+              </text>
+            </g>
+
+            <g transform="translate(450,520)">
+              <rect class="node-card" width="280" height="196" rx="8" />
+              <text x="16" y="24" class="node-title">apps/game/src/room</text>
+              <text x="16" y="40" class="node-meta">
+                이번 세션에 god file 2단계 분리 완료
+              </text>
+
+              <g transform="translate(16,52)">
+                <rect class="hot" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--red); font-weight:600">
+                  room.service.spec.ts
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--red); font-weight:600">
+                  1326
+                </text>
+              </g>
+              <g transform="translate(16,74)">
+                <rect class="hot" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--red); font-weight:600">
+                  room.service.ts
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--red); font-weight:600">
+                  856
+                </text>
+              </g>
+              <g transform="translate(16,96)">
+                <rect class="hot" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--red); font-weight:600">
+                  room.gateway.ts
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--red); font-weight:600">
+                  603
+                </text>
+              </g>
+              <g transform="translate(16,118)">
+                <rect class="warm" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  room.repository.ts
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  386
+                </text>
+              </g>
+              <g transform="translate(16,140)">
+                <rect class="warm" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  room-round.service.ts
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  357
+                </text>
+              </g>
+              <g transform="translate(16,162)">
+                <rect class="warm" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  room-timer.service.ts
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  341
+                </text>
+              </g>
+            </g>
+
+            <!-- ============ COLUMN 3: packages + apps/lambda + evals ============ -->
+            <g transform="translate(840,180)">
+              <rect class="node-card accent" width="280" height="60" rx="8" />
+              <circle cx="22" cy="20" r="12" class="claude-ring" />
+              <circle cx="22" cy="20" r="5" class="claude-dot" />
+              <text x="42" y="24" class="node-title">evals/CLAUDE.md</text>
+              <text x="42" y="40" class="node-meta">
+                AI agent eval task/체크 스크립트
+              </text>
+              <text x="264" y="24" text-anchor="end" class="node-kpi">
+                36 ln
+              </text>
+            </g>
+
+            <g transform="translate(840,250)">
+              <rect class="node-card accent" width="280" height="60" rx="8" />
+              <circle cx="22" cy="20" r="12" class="claude-ring" />
+              <circle cx="22" cy="20" r="5" class="claude-dot" />
+              <text x="42" y="24" class="node-title">packages/logger/CLAUDE.md</text>
+              <text x="42" y="40" class="node-meta">
+                LogContext · StructuredLogger · redactSensitiveFields
+              </text>
+              <text x="264" y="24" text-anchor="end" class="node-kpi">
+                30 ln
+              </text>
+            </g>
+
+            <g transform="translate(840,320)">
+              <rect class="node-card accent" width="280" height="60" rx="8" />
+              <circle cx="22" cy="20" r="12" class="claude-ring" />
+              <circle cx="22" cy="20" r="5" class="claude-dot" />
+              <text x="42" y="24" class="node-title">packages/tracing/CLAUDE.md</text>
+              <text x="42" y="40" class="node-meta">
+                startTracing() · main.ts 첫 import 필수
+              </text>
+              <text x="264" y="24" text-anchor="end" class="node-kpi">
+                29 ln
+              </text>
+            </g>
+
+            <g transform="translate(840,390)">
+              <rect class="node-card accent" width="280" height="76" rx="8" />
+              <circle cx="22" cy="20" r="12" class="claude-ring" />
+              <circle cx="22" cy="20" r="5" class="claude-dot" />
+              <text x="42" y="24" class="node-title">apps/lambda/CLAUDE.md</text>
+              <text x="42" y="40" class="node-meta">
+                alarm-notifier · incident-analyzer (46 files)
+              </text>
+              <text x="264" y="24" text-anchor="end" class="node-kpi">
+                32 ln
+              </text>
+              <g transform="translate(16,50)">
+                <rect class="warm" width="248" height="18" rx="3" />
+                <text x="8" y="13" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  incident-analyzer/collect-metrics.ts
+                </text>
+                <text x="240" y="13" text-anchor="end" class="node-meta" style="fill: var(--amber); font-weight:600">
+                  412
+                </text>
+              </g>
+            </g>
+
+            <g transform="translate(840,480)">
+              <rect class="node-card accent" width="280" height="60" rx="8" />
+              <circle cx="22" cy="20" r="12" class="claude-ring" />
+              <circle cx="22" cy="20" r="5" class="claude-dot" />
+              <text x="42" y="24" class="node-title">scripts/CLAUDE.md</text>
+              <text x="42" y="40" class="node-meta">
+                validate-context-paths.mjs (CI 연동)
+              </text>
+              <text x="264" y="24" text-anchor="end" class="node-kpi">
+                22 ln
+              </text>
+            </g>
+
+            <g transform="translate(840,550)">
+              <rect class="node-card" width="280" height="60" rx="8" />
+              <circle cx="22" cy="20" r="10" fill="var(--green-soft)" />
+              <circle cx="22" cy="20" r="5" fill="var(--green)" />
+              <text x="42" y="24" class="node-title">evals/results</text>
+              <text x="42" y="40" class="node-meta">
+                agent-results.json · task별 pass rate 누적
+              </text>
+              <text x="264" y="24" text-anchor="end" class="node-kpi" style="fill: var(--green)">
+                G 5/5
+              </text>
+            </g>
+
+            <!-- =================== EDGES =================== -->
+            <path class="edge edge-dash" d="M500,130 C 500,155 200,155 200,180" />
+            <path class="edge edge-dash" d="M590,130 C 590,155 590,155 590,180" />
+            <path class="edge edge-dash" d="M680,130 C 680,155 980,155 980,180" />
+          </svg>
+        </div>
+      </section>
+
+      <!-- =========== FINDINGS =========== -->
+      <div class="findings">
+        <section class="panel panel-strength">
+          <div class="panel-head">
+            <h3>강점</h3>
+            <span class="count">유지할 것들</span>
+          </div>
+          <ul class="panel-list">
+            <li>
+              <div class="head">
+                <span class="tag tag-rule">Cat E1</span>
+                hallucinated path 0건 — 전수 수동 검증 완료
+              </div>
+              <div class="note">
+                자동 스캐너가 31건을 flag했지만 전부 false positive였다.
+                script의 확장자 alternation 순서(<code>ts</code>가
+                <code>tsx</code>보다, <code>js</code>가
+                <code>json</code>/<code>jsx</code>보다 먼저 와 접두어에서
+                매칭 중단), leading-dot 디렉터리(<code>.github/...</code>)
+                미인식, <code>../../foo.md</code> 이중 상대경로 오매칭,
+                하이픈 포함 첫 세그먼트(<code>incident-analyzer/</code>)
+                절단이 원인. 실제 31건 모두 정상 참조.
+              </div>
+            </li>
+            <li>
+              <div class="head">
+                <span class="tag tag-rule">Cat G</span>
+                evals/ + agent-results.json로 성과 측정 (5/5 만점)
+              </div>
+              <div class="note">
+                <code>run.sh</code> / <code>record.py</code>로 task별 자동
+                검증 결과를 <code>results/agent-results.json</code>에
+                append. 세션 간 pass rate 회귀를 정량 비교 가능한 몇 안
+                되는 카테고리.
+              </div>
+            </li>
+            <li>
+              <div class="head">
+                <span class="tag tag-rule">Cat F</span>
+                Context drift 0% · CI context validation workflow
+              </div>
+              <div class="note">
+                측정 가능한 9개 module 모두 CLAUDE.md mtime이 코드보다
+                최신. <code>.github/workflows/validate-context.yml</code>이
+                context 최신성을 CI에서 확인 중.
+              </div>
+            </li>
+            <li>
+              <div class="head">
+                <span class="tag tag-rule">Cat D</span>
+                ARCHITECTURE.md + docs/adr/ 4건으로 설계 결정 기록
+              </div>
+              <div class="note">
+                시스템 다이어그램, 모듈별 의존 관계, "왜 이렇게
+                설계했는가"를 ADR로 남김. mermaid 다이어그램만 추가하면
+                만점에 근접.
+              </div>
+            </li>
+            <li>
+              <div class="head">
+                <span class="tag tag-rule">Cat A</span>
+                9개 핵심 module 전부 root→app CLAUDE.md 드릴다운 체계(만점)
+              </div>
+              <div class="note">
+                root <code>CLAUDE.md</code>가 <code>apps/web</code>,
+                <code>apps/admin</code>, <code>apps/api</code>,
+                <code>apps/game</code>, <code>apps/lambda</code>,
+                <code>packages/logger</code>, <code>packages/tracing</code>,
+                <code>scripts</code>, <code>evals</code> 9개 문서로 연결.
+                navigation coverage 56%→100%.
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <section class="panel panel-risk">
+          <div class="panel-head">
+            <h3>최우선 ROI 액션</h3>
+            <span class="count">우선순위 정렬</span>
+          </div>
+          <ul class="panel-list">
+            <li>
+              <div class="head">
+                <span class="tag tag-rule">Cat B · M</span>
+                과도한 context 문서 4건을 25-35줄로 압축
+              </div>
+              <div class="note">
+                <strong>Effort 2.0 hr · Impact 7/10.</strong>
+                <code>infra/terraform/CLAUDE.md</code>(276줄),
+                <code>infra/terraform/AGENTS.md</code>(267줄),
+                <code>apps/lambda/incident-analyzer/README.md</code>(221줄),
+                <code>evals/README.md</code>(106줄). "compass, not
+                encyclopedia" 원칙 위반 — agent context 로드 시간 단축.
+              </div>
+            </li>
+            <li>
+              <div class="head">
+                <span class="tag tag-rule">Cat B · L</span>
+                god file 6개(500줄+) 분할
+              </div>
+              <div class="note">
+                <strong>Effort 15.0 hr · Impact 6/10.</strong>
+                <code>room.service.spec.ts</code>(1326),
+                <code>room.service.ts</code>(856),
+                <code>RoomGamePage.tsx</code>(760) 등. 이미
+                <code>room.service.ts</code>는 1508→856줄로 2단계 분리를
+                진행 중(<code>room.repository.ts</code>,
+                <code>room-round.service.ts</code> 분리 완료) — 나머지
+                파일에도 같은 패턴 적용 시 파일당 ~5K-10K token 절감.
+              </div>
+            </li>
+            <li>
+              <div class="head">
+                <span class="tag tag-rule">Cat D · S</span>
+                ARCHITECTURE.md에 mermaid dependency 다이어그램 추가
+              </div>
+              <div class="note">
+                <strong>Effort 1.0 hr · Impact 7/10.</strong>
+                텍스트로만 서술된 앱 간 의존 관계를 mermaid 그래프로
+                시각화. cross-module ripple 추적 시간 절반.
+              </div>
+            </li>
+            <li>
+              <div class="head">
+                <span class="tag tag-rule">Cat F · S</span>
+                CI에 path validation 강화(hook 확장)
+              </div>
+              <div class="note">
+                <strong>Effort 1.0 hr · Impact 8/10.</strong>
+                <code>validate-context.yml</code>은 있지만 pre-commit /
+                pre-push hook에는 path 검증이 없음. stale reference를
+                머지 이전에 로컬에서부터 차단 — E1 회귀 방지.
+              </div>
+            </li>
+            <li>
+              <div class="head">
+                <span class="tag tag-rule">Cat C · M</span>
+                CLAUDE.md에 "Common modification patterns" 섹션 보강
+              </div>
+              <div class="note">
+                <strong>Effort 2.0 hr · Impact 5/10.</strong>
+                Q4(의존성)는 이번 문서 4건 신설로 4/4 만점 달성했지만
+                Q2(자주 하는 수정 패턴)는 여전히 2/4. "## Patterns" 형태로
+                각 module에 흔한 수정 시나리오를 정리하면 C 16/20 →
+                18/20 기대.
+              </div>
+            </li>
+          </ul>
+        </section>
+      </div>
+
+      <footer>
+        song-quiz · AI-Readiness v2 · scored 2026-08-24
+      </footer>
+    </div>
+  </body>
+</html>

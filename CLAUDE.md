@@ -29,6 +29,10 @@ Yarn 4(Berry) + Turborepo 기반 TypeScript 모노레포다.
 - Game: [`apps/game/CLAUDE.md`](apps/game/CLAUDE.md)
 - Web: [`apps/web/CLAUDE.md`](apps/web/CLAUDE.md)
 - Admin: [`apps/admin/CLAUDE.md`](apps/admin/CLAUDE.md)
+- Lambda: [`apps/lambda/CLAUDE.md`](apps/lambda/CLAUDE.md)
+- 공유 로깅: [`packages/logger/CLAUDE.md`](packages/logger/CLAUDE.md)
+- 공유 트레이싱: [`packages/tracing/CLAUDE.md`](packages/tracing/CLAUDE.md)
+- 유지보수 스크립트: [`scripts/CLAUDE.md`](scripts/CLAUDE.md)
 
 # Working rules
 

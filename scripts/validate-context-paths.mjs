@@ -5,7 +5,11 @@ const contextFiles = [
     'CLAUDE.md',
     'apps/api/CLAUDE.md',
     'apps/web/CLAUDE.md',
-    'apps/admin/CLAUDE.md'
+    'apps/admin/CLAUDE.md',
+    'apps/lambda/CLAUDE.md',
+    'packages/logger/CLAUDE.md',
+    'packages/tracing/CLAUDE.md',
+    'scripts/CLAUDE.md'
 ]
 
 const markdownLinkPattern = /\[[^\]]*]\(([^)]+)\)/g
