@@ -194,13 +194,13 @@ resource "aws_cloudwatch_metric_alarm" "ec2_high_disk" {
 # 초기 threshold(>=1)는 false positive가 많으면 추후 >=2, >=3 등으로 조정한다.
 resource "aws_cloudwatch_metric_alarm" "quiz_snapshot_failure" {
   alarm_name        = "SongQuiz-Prod-High-Game-QuizSnapshotFailure"
-  alarm_description = "Game quiz snapshot failed at least once within 5 minutes. service=game severity=high category=application signal=QuizSnapshotFailure condition=sum>=1/5m"
+  alarm_description = "Game quiz snapshot failed at least once within 1 minute. service=game severity=high category=application signal=QuizSnapshotFailure condition=sum>=1/1m"
 
   namespace   = var.game_metric_namespace
   metric_name = "QuizSnapshotFailure"
   statistic   = "Sum"
 
-  period              = 300
+  period              = 60
   evaluation_periods  = 1
   datapoints_to_alarm = 1
   threshold           = 1
