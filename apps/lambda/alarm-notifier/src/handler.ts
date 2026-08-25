@@ -1,6 +1,6 @@
 import { EventBridgeAlarmStateChangeEvent } from "./types";
 import { parseAlarmName } from "./parse-alarm-name";
-import { buildSlackMessage } from "./build-slack-message";
+import { buildSlackMessage, RecoveryConfirmation } from "./build-slack-message";
 import { getSlackWebhookUrl } from "./get-slack-webhook-url";
 import { sendSlackMessage } from "./send-slack-message";
 import { getRecentSuccessCount } from "./get-recent-success-count";
@@ -67,6 +67,8 @@ export async function handler(
   // 경우에만, GameStartSuccess 지표로 최근 게임 시작이 RECOVERY_CONFIRM_MIN_COUNT회 이상
   // 성공했는지 확인한다. 부족하면 RECOVERED 알림을 이번 전이에서는 보내지 않는다 - 실패가
   // 잠깐 멈춘 것만으로 복구를 단정하지 않고, 실사용 트래픽이 실제로 정상 흐르는지까지 본다.
+  let recoveryConfirmation: RecoveryConfirmation | undefined;
+
   if (
     state === "OK" &&
     detail.previousState.value === "ALARM" &&
@@ -105,9 +107,19 @@ export async function handler(
       );
       return;
     }
+
+    // successCount가 null이면(지표 조회 실패, fail open) 실제로 확인된 값이 없으니 메시지에도
+    // 성공 횟수를 표시하지 않는다 - 확인 안 된 값을 확인된 것처럼 보여주지 않기 위함.
+    if (successCount !== null) {
+      recoveryConfirmation = {
+        successCount,
+        minCount: RECOVERY_CONFIRM_MIN_COUNT,
+        lookbackMinutes: RECOVERY_CONFIRM_LOOKBACK_MINUTES,
+      };
+    }
   }
 
-  const message = buildSlackMessage(detail, parsed);
+  const message = buildSlackMessage(detail, parsed, recoveryConfirmation);
 
   try {
     const webhookUrl = await getSlackWebhookUrl(SLACK_WEBHOOK_PARAMETER_NAME);

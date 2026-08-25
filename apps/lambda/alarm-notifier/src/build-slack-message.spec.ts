@@ -56,13 +56,13 @@ describe("buildSlackMessage", () => {
       parseAlarmName(detail.alarmName, PREFIX),
     );
 
-    expect(message.text).toBe("🚨 [HIGH] Game Alarm");
+    expect(message.text).toBe("🚨 [HIGH] Game 알람 발생");
     const fields = alarmSection(message).fields;
     expect(fields).toEqual([
-      { type: "mrkdwn", text: "*Alarm*\nSongQuiz-Prod-High-Game-Target5xx" },
-      { type: "mrkdwn", text: "*Service*\nGame" },
-      { type: "mrkdwn", text: "*Signal*\nTarget5xx" },
-      { type: "mrkdwn", text: "*State*\nOK → ALARM" },
+      { type: "mrkdwn", text: "*알람*\nSongQuiz-Prod-High-Game-Target5xx" },
+      { type: "mrkdwn", text: "*서비스*\nGame" },
+      { type: "mrkdwn", text: "*시그널*\nTarget5xx" },
+      { type: "mrkdwn", text: "*상태*\nOK → ALARM" },
     ]);
     expect(reasonSection(message).text?.text).toContain("Threshold Crossed");
   });
@@ -87,13 +87,43 @@ describe("buildSlackMessage", () => {
       parseAlarmName(detail.alarmName, PREFIX),
     );
 
-    expect(message.text).toBe("✅ [RECOVERED] Game Alarm");
+    expect(message.text).toBe("✅ [복구됨] Game 알람");
     const fields = alarmSection(message).fields;
     expect(fields).toContainEqual({
       type: "mrkdwn",
-      text: "*State*\nALARM → OK",
+      text: "*상태*\nALARM → OK",
     });
-    expect(fields).toContainEqual({ type: "mrkdwn", text: "*Duration*\n7분" });
+    expect(fields).toContainEqual({
+      type: "mrkdwn",
+      text: "*장애 지속시간*\n7분",
+    });
+  });
+
+  it("recoveryConfirmation이 있으면 최근 성공 횟수 필드를 추가한다", () => {
+    const detail: CloudWatchAlarmStateChangeDetail = {
+      alarmName: "SongQuiz-Prod-High-Game-QuizSnapshotFailure",
+      state: {
+        value: "OK",
+        reason: "Threshold not crossed for 1 datapoint",
+        timestamp: "2026-08-24T02:37:00.000Z",
+      },
+      previousState: {
+        value: "ALARM",
+        reason: "was in alarm",
+        timestamp: "2026-08-24T02:30:00.000Z",
+      },
+    };
+
+    const message = buildSlackMessage(
+      detail,
+      parseAlarmName(detail.alarmName, PREFIX),
+      { successCount: 7, minCount: 5, lookbackMinutes: 5 },
+    );
+
+    expect(alarmSection(message).fields).toContainEqual({
+      type: "mrkdwn",
+      text: "*최근 게임 시작 성공*\n7회 (최근 5분, 기준 5회 이상)",
+    });
   });
 
   it("naming convention을 벗어난 Alarm은 UNKNOWN으로 fallback하되 필수 정보는 유지한다", () => {
@@ -116,10 +146,10 @@ describe("buildSlackMessage", () => {
       parseAlarmName(detail.alarmName, PREFIX),
     );
 
-    expect(message.text).toBe("🚨 [UNKNOWN] Unknown Alarm");
+    expect(message.text).toBe("🚨 [UNKNOWN] Unknown 알람 발생");
     expect(alarmSection(message).fields).toContainEqual({
       type: "mrkdwn",
-      text: "*Alarm*\nSongQuiz-Prod-broken-name",
+      text: "*알람*\nSongQuiz-Prod-broken-name",
     });
   });
 
