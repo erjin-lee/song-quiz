@@ -8,6 +8,7 @@ import * as basicAuth from 'express-basic-auth';
 import { StructuredLogger } from 'logger';
 import { AppModule } from './app/app.module';
 import { CacheService } from './cache/cache.service';
+import { getCorsOrigins } from './common/cors-origins.util';
 import { RedisIoAdapter } from './common/redis-io.adapter';
 
 setDefaultResultOrder('ipv4first');
@@ -34,15 +35,7 @@ async function bootstrap() {
   // 마지막 값을 실제 클라이언트 IP로 신뢰한다. 그렇지 않으면 ThrottlerGuard가
   // 프록시 IP 기준으로만 rate limit을 적용해 모든 사용자가 이를 공유하게 된다.
   app.set('trust proxy', 1);
-  const corsOriginEnv = process.env.CORS_ORIGIN?.trim();
-  const corsOrigins = corsOriginEnv
-    ? corsOriginEnv.split(',').map((origin) => origin.trim())
-    : [
-        'http://localhost:5173',
-        'http://localhost:3000',
-        'https://noraemat.site',
-      ];
-  app.enableCors({ origin: corsOrigins });
+  app.enableCors({ origin: getCorsOrigins(), credentials: true });
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
 
   const redisIoAdapter = new RedisIoAdapter(app, app.get(CacheService));

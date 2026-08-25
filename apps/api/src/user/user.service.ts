@@ -25,6 +25,13 @@ function isDuplicateLoginIdError(error: unknown): boolean {
   return (error as { code?: string })?.code === 'ER_DUP_ENTRY';
 }
 
+/** signup/login이 발급한 JWT는 응답 바디가 아니라 httpOnly 쿠키로만 내려간다
+ * (ADR-0005). 컨트롤러가 쿠키를 셋할 수 있도록 토큰과 응답 바디를 분리해 돌려준다. */
+export interface IssuedSession {
+  accessToken: string;
+  user: LoginResponseDto;
+}
+
 @Injectable()
 export class UserService {
   constructor(
@@ -33,7 +40,7 @@ export class UserService {
     private readonly jwtService: JwtService,
   ) {}
 
-  async signup(dto: SignupRequestDto): Promise<LoginResponseDto> {
+  async signup(dto: SignupRequestDto): Promise<IssuedSession> {
     const existing = await this.userRepository.findOne({
       where: { loginId: dto.loginId },
     });
@@ -70,7 +77,7 @@ export class UserService {
     return this.issueToken(saved);
   }
 
-  async login(dto: LoginRequestDto): Promise<LoginResponseDto> {
+  async login(dto: LoginRequestDto): Promise<IssuedSession> {
     const user = await this.userRepository.findOne({
       where: { loginId: dto.loginId, role: USER_ROLE },
     });
@@ -144,7 +151,7 @@ export class UserService {
     });
   }
 
-  private issueToken(user: User): LoginResponseDto {
+  private issueToken(user: User): IssuedSession {
     const payload: UserJwtPayload = {
       sub: user.userId,
       userId: user.userId,
@@ -158,9 +165,11 @@ export class UserService {
 
     return {
       accessToken,
-      userId: user.userId,
-      loginId: user.loginId,
-      nickNm: user.nickNm,
+      user: {
+        userId: user.userId,
+        loginId: user.loginId,
+        nickNm: user.nickNm,
+      },
     };
   }
 

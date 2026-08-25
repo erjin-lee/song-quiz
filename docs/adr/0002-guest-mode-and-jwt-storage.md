@@ -1,6 +1,6 @@
 # ADR-0002: 게스트 모드 병행과 JWT localStorage 저장
 
-- 상태: Accepted (재검토 필요 — 별도 보안 검토 없이 유지되어 온 결정)
+- 상태: 결정 3(JWT를 `localStorage`에 저장)은 [`ADR-0005`](0005-httponly-cookie-auth.md)로 Superseded. 게스트 모드 병행(결정 1, 2)은 여전히 Accepted.
 - 관련 코드: `apps/web/src/context/SessionContext.tsx`, `apps/web/src/api/client.ts`, `apps/api`의 `/auth/login`, `/auth/signup`
 
 ## 배경
@@ -11,7 +11,7 @@ song-quiz는 친구들끼리 캐주얼하게 즐기는 게임이다. 동시에 �
 
 1. 로그인 없이도 게스트 닉네임만으로 방을 만들고 참여할 수 있다. 게스트 닉네임은 `localStorage`에 저장한다.
 2. `SessionContext`가 게스트 닉네임과 계정 인증 상태를 함께 관리한다. 로그인 상태에서는 게스트 입력값이 아니라 계정 닉네임을 사용한다.
-3. 로그인 시 `apps/api`가 발급한 JWT를 `localStorage`(`song-quiz:token`)에 저장하고, 모든 REST 요청에 `Authorization: Bearer` 헤더로 첨부한다. `httpOnly` 쿠키는 사용하지 않는다.
+3. ~~로그인 시 `apps/api`가 발급한 JWT를 `localStorage`(`song-quiz:token`)에 저장하고, 모든 REST 요청에 `Authorization: Bearer` 헤더로 첨부한다. `httpOnly` 쿠키는 사용하지 않는다.~~ → [`ADR-0005`](0005-httponly-cookie-auth.md)로 대체(`apps/web`/`apps/api`/`apps/game`은 httpOnly 쿠키 방식으로 전환. `apps/admin`은 아직 이 방식 그대로 유지).
 
 ## 근거
 

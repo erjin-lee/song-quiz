@@ -14,8 +14,8 @@ describe('UserAuthGuard', () => {
     guard = new UserAuthGuard(jwtServiceMock as unknown as JwtService);
   });
 
-  function createContext(authorization?: string): ExecutionContext {
-    const request = { headers: { authorization } } as UserAuthenticatedRequest;
+  function createContext(cookie?: string): ExecutionContext {
+    const request = { headers: { cookie } } as UserAuthenticatedRequest;
     return {
       switchToHttp: () => ({
         getRequest: () => request,
@@ -23,17 +23,17 @@ describe('UserAuthGuard', () => {
     } as unknown as ExecutionContext;
   }
 
-  it('Authorization 헤더가 없으면 UnauthorizedException을 던진다', () => {
+  it('세션 쿠키가 없으면 UnauthorizedException을 던진다', () => {
     expect(() => guard.canActivate(createContext(undefined))).toThrow(
       UnauthorizedException,
     );
     expect(jwtServiceMock.verify).not.toHaveBeenCalled();
   });
 
-  it('Bearer 형식이 아니면 UnauthorizedException을 던진다', () => {
-    expect(() => guard.canActivate(createContext('Basic abc123'))).toThrow(
-      UnauthorizedException,
-    );
+  it('세션 쿠키에 다른 이름만 있으면 UnauthorizedException을 던진다', () => {
+    expect(() =>
+      guard.canActivate(createContext('other=value')),
+    ).toThrow(UnauthorizedException);
     expect(jwtServiceMock.verify).not.toHaveBeenCalled();
   });
 
@@ -42,9 +42,9 @@ describe('UserAuthGuard', () => {
       throw new Error('invalid token');
     });
 
-    expect(() => guard.canActivate(createContext('Bearer invalid'))).toThrow(
-      UnauthorizedException,
-    );
+    expect(() =>
+      guard.canActivate(createContext('sq_session=invalid')),
+    ).toThrow(UnauthorizedException);
   });
 
   it('유효한 토큰이면 통과시키고 request.user에 payload를 부착한다', () => {
@@ -55,7 +55,7 @@ describe('UserAuthGuard', () => {
       nickNm: '노래왕',
     };
     jwtServiceMock.verify.mockReturnValue(payload);
-    const context = createContext('Bearer valid-token');
+    const context = createContext('sq_session=valid-token');
 
     const result = guard.canActivate(context);
 

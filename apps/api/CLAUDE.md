@@ -34,10 +34,11 @@
 
 # Dependencies
 
-- 소비자: `apps/web`(일반 REST), `apps/admin`(REST, Admin JWT), `apps/game`(내부 전용 `/internal/*` 엔드포인트로 Quiz/User 데이터 조회). DTO를 변경하면 프런트엔드 `src/types/`를 함께 확인한다.
-- `apps/game`이 호출하는 `/internal/*` 엔드포인트는 `InternalAuthGuard`(`src/common/internal-auth.guard.ts`)로 보호되며, `INTERNAL_SERVICE_SECRET` 헤더(`x-internal-secret`)가 apps/game과 일치해야 통과한다.
+- 소비자: `apps/web`(일반 REST, 로그인 세션은 `sq_session` httpOnly 쿠키), `apps/admin`(REST, Admin JWT는 여전히 `sessionStorage` + `Authorization` 헤더 방식 — [`ADR-0005`](../../docs/adr/0005-httponly-cookie-auth.md) 범위 밖), `apps/game`(내부 전용 `/internal/*` 엔드포인트로 Quiz/User 데이터 조회). DTO를 변경하면 프런트엔드 `src/types/`를 함께 확인한다.
+- 로그인 JWT는 `POST /auth/login`/`/auth/signup` 응답 바디가 아니라 `httpOnly` 쿠키(`sq_session`, `src/common/auth-cookie.util.ts`)로만 내려간다. `UserAuthGuard`는 `Authorization` 헤더가 아니라 이 쿠키를 읽는다. `POST /auth/logout`이 쿠키를 지운다.
+- `apps/game`이 호출하는 `/internal/*` 엔드포인트는 `InternalAuthGuard`(`src/common/internal-auth.guard.ts`)로 보호되며, `INTERNAL_SERVICE_SECRET` 헤더(`x-internal-secret`)가 apps/game과 일치해야 통과한다. 이 내부 호출 자체는 여전히 `Authorization: Bearer` 헤더 계약을 쓴다(apps/game이 자신이 받은 쿠키에서 값을 꺼내 헤더로 재구성해 전달).
 - 외부 연동: OpenAI API(GPT 채점), YouTube(영상 스크래핑), Melon 차트(곡 정보). 전체 그래프는 [`ARCHITECTURE.md`](../../ARCHITECTURE.md) 참고.
-- 설계 배경: room 실시간 상태([`ADR-0001`](../../docs/adr/0001-room-realtime-state-and-reconnect.md)), 게스트 모드/JWT 저장([`ADR-0002`](../../docs/adr/0002-guest-mode-and-jwt-storage.md)), DTO 미러링([`ADR-0003`](../../docs/adr/0003-manual-dto-type-mirroring.md)), Game 서비스 분리([`ADR-0004`](../../docs/adr/0004-game-service-split.md)).
+- 설계 배경: room 실시간 상태([`ADR-0001`](../../docs/adr/0001-room-realtime-state-and-reconnect.md)), 게스트 모드/JWT 저장([`ADR-0002`](../../docs/adr/0002-guest-mode-and-jwt-storage.md)), DTO 미러링([`ADR-0003`](../../docs/adr/0003-manual-dto-type-mirroring.md)), Game 서비스 분리([`ADR-0004`](../../docs/adr/0004-game-service-split.md)), httpOnly 쿠키 전환([`ADR-0005`](../../docs/adr/0005-httponly-cookie-auth.md)).
 
 # Commands
 

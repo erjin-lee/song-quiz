@@ -1,5 +1,4 @@
 export interface LoginResponseDto {
-  accessToken: string;
   userId: string;
   loginId: string;
   nickNm: string;

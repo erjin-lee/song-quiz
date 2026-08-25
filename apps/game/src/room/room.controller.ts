@@ -20,6 +20,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Request } from 'express';
+import { AUTH_COOKIE_NAME, parseCookie } from '../common/auth-cookie.util';
 import { AuthClient } from './clients/auth.client';
 import { CreateRoomRequestDto } from './dto/create-room-request.dto';
 import { GetRoomsQueryDto } from './dto/get-rooms-query.dto';
@@ -41,17 +42,20 @@ export class RoomController {
   ) {}
 
   /**
-   * Authorization 헤더의 유저 JWT를 검증해 로그인 유저의 계정 userId를 반환한다.
+   * 세션 쿠키의 유저 JWT를 검증해 로그인 유저의 계정 userId를 반환한다.
    * 토큰이 없으면 게스트로 취급해 undefined를 반환한다(로그인 없이도 방을 만들고
    * 입장할 수 있어야 한다). 토큰이 있는데 무효하거나 계정이 더 이상 ACTIVE가
    * 아니면 게스트로 조용히 낮추지 않고 401을 던진다. 클라이언트가 임의의 userId를
    * 요청 본문으로 보내 다른 계정을 사칭하는 것을 막기 위해, 방 참가자 ID는 항상
    * 이 방식으로만 서버가 결정한다. 실제 JWT 검증과 계정 상태 조회는 apps/api가
-   * 소유하므로 AuthClient(내부 HTTP)로 위임한다.
+   * 소유하므로 AuthClient(내부 HTTP)로 위임한다 — apps/api의 내부 엔드포인트는
+   * 여전히 `Authorization: Bearer` 헤더 계약을 쓰므로, 쿠키에서 꺼낸 토큰으로
+   * 그 형태를 만들어 전달한다.
    */
   private resolveAccountUserId(req: Request): Promise<string | undefined> {
+    const token = parseCookie(req.headers.cookie, AUTH_COOKIE_NAME);
     return this.authClient.resolveOptionalAccountUserId(
-      req.headers.authorization,
+      token ? `Bearer ${token}` : undefined,
     );
   }
 
