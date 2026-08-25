@@ -42,7 +42,7 @@ async function bootstrap() {
         'http://localhost:3000',
         'https://noraemat.site',
       ];
-  app.enableCors({ origin: corsOrigins });
+  app.enableCors({ origin: corsOrigins, credentials: true });
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
 
   const redisIoAdapter = new RedisIoAdapter(app, app.get(CacheService));

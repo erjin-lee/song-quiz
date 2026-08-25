@@ -82,9 +82,11 @@ describe('UserService', () => {
       );
       expect(result).toEqual({
         accessToken: 'signed-jwt',
-        userId: 'random-user-id',
-        loginId: 'songquiz01',
-        nickNm: '노래왕',
+        user: {
+          userId: 'random-user-id',
+          loginId: 'songquiz01',
+          nickNm: '노래왕',
+        },
       });
     });
 
@@ -189,9 +191,11 @@ describe('UserService', () => {
       );
       expect(result).toEqual({
         accessToken: 'signed-jwt',
-        userId: 'random-user-id',
-        loginId: 'songquiz01',
-        nickNm: '노래왕',
+        user: {
+          userId: 'random-user-id',
+          loginId: 'songquiz01',
+          nickNm: '노래왕',
+        },
       });
     });
   });

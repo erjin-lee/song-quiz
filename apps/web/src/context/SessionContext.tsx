@@ -6,8 +6,12 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { getMe, login as loginApi, signup as signupApi } from '../api/auth';
-import { clearToken, getStoredToken, storeToken } from '../api/client';
+import {
+  getMe,
+  login as loginApi,
+  logout as logoutApi,
+  signup as signupApi,
+} from '../api/auth';
 
 const GUEST_NICKNAME_STORAGE_KEY = 'song-quiz:nickname';
 
@@ -19,7 +23,7 @@ interface SessionContextValue {
   accountUserId: string | null;
   login: (loginId: string, password: string) => Promise<void>;
   signup: (loginId: string, password: string, nickNm: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -36,11 +40,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
 
-    if (!getStoredToken()) {
-      setIsInitialized(true);
-      return;
-    }
-
+    // 세션 쿠키는 httpOnly라 존재 여부를 JS에서 미리 알 수 없다. 항상 /auth/me를
+    // 시도하고, 로그인 상태가 아니면(쿠키 없음/만료) 조용히 게스트로 남는다.
     (async () => {
       try {
         const me = await getMe();
@@ -50,9 +51,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           setIsAuthenticated(true);
         }
       } catch {
-        if (!cancelled) {
-          clearToken();
-        }
+        // 비로그인 상태 — 별도 처리 없이 게스트로 남는다.
       } finally {
         if (!cancelled) {
           setIsInitialized(true);
@@ -72,7 +71,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const login = async (loginId: string, password: string) => {
     const result = await loginApi(loginId, password);
-    storeToken(result.accessToken);
     setAccountNickname(result.nickNm);
     setAccountUserId(result.userId);
     setIsAuthenticated(true);
@@ -80,14 +78,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const signup = async (loginId: string, password: string, nickNm: string) => {
     const result = await signupApi(loginId, password, nickNm);
-    storeToken(result.accessToken);
     setAccountNickname(result.nickNm);
     setAccountUserId(result.userId);
     setIsAuthenticated(true);
   };
 
-  const logout = () => {
-    clearToken();
+  const logout = async () => {
+    await logoutApi();
     setAccountNickname(null);
     setAccountUserId(null);
     setIsAuthenticated(false);

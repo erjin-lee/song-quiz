@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Post,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -18,7 +19,12 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
-import { Request } from 'express';
+import { Request, Response } from 'express';
+import {
+  AUTH_COOKIE_NAME,
+  authCookieOptions,
+  parseCookie,
+} from '../common/auth-cookie.util';
 import { EmailAuthService } from './email-auth.service';
 import { EMAIL_AUTH_CODE_TTL_MINUTES } from './email-auth.constants';
 import { LoginRequestDto } from './dto/login-request.dto';
@@ -33,6 +39,7 @@ import {
   UserAuthenticatedRequest,
   UserAuthGuard,
 } from './guards/user-auth.guard';
+import { AUTH_COOKIE_MAX_AGE_MS } from './user.constants';
 import { UserService } from './user.service';
 
 @ApiTags('auth')
@@ -49,8 +56,17 @@ export class UserAuthController {
   @ApiOperation({ summary: '회원가입(가입 즉시 로그인 처리)' })
   @ApiCreatedResponse({ type: LoginResponseDto })
   @ApiConflictResponse({ description: '이미 사용 중인 로그인 아이디' })
-  signup(@Body() dto: SignupRequestDto): Promise<LoginResponseDto> {
-    return this.userService.signup(dto);
+  async signup(
+    @Body() dto: SignupRequestDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<LoginResponseDto> {
+    const session = await this.userService.signup(dto);
+    res.cookie(
+      AUTH_COOKIE_NAME,
+      session.accessToken,
+      authCookieOptions(AUTH_COOKIE_MAX_AGE_MS),
+    );
+    return session.user;
   }
 
   @Post('login')
@@ -62,8 +78,24 @@ export class UserAuthController {
   @ApiUnauthorizedResponse({
     description: '아이디 또는 비밀번호가 올바르지 않음',
   })
-  login(@Body() dto: LoginRequestDto): Promise<LoginResponseDto> {
-    return this.userService.login(dto);
+  async login(
+    @Body() dto: LoginRequestDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<LoginResponseDto> {
+    const session = await this.userService.login(dto);
+    res.cookie(
+      AUTH_COOKIE_NAME,
+      session.accessToken,
+      authCookieOptions(AUTH_COOKIE_MAX_AGE_MS),
+    );
+    return session.user;
+  }
+
+  @Post('logout')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: '로그아웃(세션 쿠키 삭제)' })
+  logout(@Res({ passthrough: true }) res: Response): void {
+    res.clearCookie(AUTH_COOKIE_NAME, authCookieOptions());
   }
 
   @Get('me')
@@ -91,8 +123,9 @@ export class UserAuthController {
     @Body() dto: SendEmailVerificationCodeRequestDto,
     @Req() req: Request,
   ): Promise<SendEmailVerificationCodeResultDto> {
+    const token = parseCookie(req.headers.cookie, AUTH_COOKIE_NAME);
     const accountUserId = await this.userService.resolveOptionalAccountUserId(
-      req.headers.authorization,
+      token ? `Bearer ${token}` : undefined,
     );
     await this.emailAuthService.sendVerificationCode(dto.email, accountUserId);
     return { expiresInMinutes: EMAIL_AUTH_CODE_TTL_MINUTES };
@@ -110,8 +143,9 @@ export class UserAuthController {
     @Body() dto: VerifyEmailVerificationCodeRequestDto,
     @Req() req: Request,
   ): Promise<VerifyEmailVerificationCodeResultDto> {
+    const token = parseCookie(req.headers.cookie, AUTH_COOKIE_NAME);
     const accountUserId = await this.userService.resolveOptionalAccountUserId(
-      req.headers.authorization,
+      token ? `Bearer ${token}` : undefined,
     );
     await this.emailAuthService.verifyCode(dto.email, dto.code, accountUserId);
     return { verified: true };

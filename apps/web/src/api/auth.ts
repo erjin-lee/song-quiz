@@ -19,3 +19,7 @@ export function login(
 export function getMe(): Promise<MeDto> {
   return apiGet<MeDto>('/auth/me');
 }
+
+export function logout(): Promise<void> {
+  return apiPost<void>('/auth/logout');
+}
