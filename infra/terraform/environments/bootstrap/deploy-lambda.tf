@@ -55,8 +55,10 @@ resource "aws_iam_role" "ci_deploy_lambda" {
 
 # 코드(zip) 업데이트 권한만 정확히 이 두 함수 ARN으로 좁힌다. 함수 생성/삭제나 설정(환경변수,
 # IAM Role, timeout, memory 등) 변경 권한은 주지 않는다 - 그건 terraform apply만 할 수 있다.
-# GetFunction은 update-function-code 이후 배포가 실제로 끝났는지(LastUpdateStatus)
-# `aws lambda wait function-updated`로 확인하는 용도로만 쓴다.
+# GetFunctionConfiguration은 update-function-code 이후 배포가 실제로 끝났는지(LastUpdateStatus)
+# `aws lambda wait function-updated`로 확인하는 용도로만 쓴다 - 이 waiter는 GetFunction이
+# 아니라 GetFunctionConfiguration을 폴링한다(AWS CLI 문서, aws lambda wait function-updated
+# help 참고). GetFunction으로는 이 waiter가 AccessDenied로 실패한다.
 resource "aws_iam_role_policy" "ci_deploy_lambda_update_code" {
   name = "${var.project_name}-ci-deploy-lambda-update-code"
   role = aws_iam_role.ci_deploy_lambda.id
@@ -68,7 +70,7 @@ resource "aws_iam_role_policy" "ci_deploy_lambda_update_code" {
         Effect = "Allow"
         Action = [
           "lambda:UpdateFunctionCode",
-          "lambda:GetFunction",
+          "lambda:GetFunctionConfiguration",
         ]
         Resource = [
           local.alarm_notifier_function_arn,
