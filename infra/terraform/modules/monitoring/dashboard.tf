@@ -63,7 +63,9 @@ locals {
         ]
       }
     },
-    # Game 내부 실패 이벤트 3종(Metric Filter 결과) - 전부 dimension 없는 카운터라 값만 나열
+    # Game 내부 실패 이벤트 6종(Metric Filter 결과) - 전부 dimension 없는 카운터라 값만 나열.
+    # 뒤 3개는 room 분산 락 관련이며, RedisLockRenewFailure만 Alarm이 없다(하트비트 1회 실패는
+    # lease 만료 전에 회복되면 정상이라, 여기 추이로 Redis 연결 품질의 선행 지표로만 본다).
     {
       type   = "metric"
       x      = 12
@@ -80,6 +82,9 @@ locals {
           [var.game_metric_namespace, "QuizSnapshotFailure"],
           [var.game_metric_namespace, "RedisLockFailure"],
           [var.game_metric_namespace, "TimerClaimFailure"],
+          [var.game_metric_namespace, "RedisLockRenewFailure"],
+          [var.game_metric_namespace, "RoomLockLeaseLost"],
+          [var.game_metric_namespace, "StaleFencingWriteRejected"],
         ]
       }
     },

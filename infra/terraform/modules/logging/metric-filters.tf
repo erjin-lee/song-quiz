@@ -11,11 +11,36 @@
 # - "reconnect_failed"는 코드 어디에도 없다 - 재접속 성공만 event: 'reconnect_success'로 로깅되고,
 #   실패 경로(참가자 없음/토큰 불일치)는 room:error만 emit할 뿐 로그 이벤트가 없다. 존재하지 않는
 #   이벤트를 향한 filter는 의미가 없어 만들지 않았다(애플리케이션 로깅 추가는 이번 작업 범위 밖).
+#
+# 2026-08-26: room 분산 락의 Redis 장애 내성 보강(ADR-0001 "Redis 장애 내성 보강")으로 생긴
+# 이벤트 3종을 추가했다. for_each map에 key를 "추가"만 하므로 기존 3개 filter는 그대로 유지된다
+# (map key가 리소스 주소라, 기존 key의 이름이나 순서를 바꾸면 삭제 후 재생성이 된다).
+#
+# redis_lock_failed는 이름을 바꾸지 않았다 - 이 이름으로 만들어지는 RedisLockFailure 지표를
+# monitoring 모듈의 Dashboard가 이미 참조하고 있어서, 이벤트명을 바꾸면 위젯이 조용히 0이 된다.
+# 애플리케이션 쪽은 대신 errorCode(LOCK_BUSY / REDIS_UNAVAILABLE / LOCK_ACQUIRE_TIMEOUT)로
+# 실패 원인을 구분한다.
 locals {
   game_failure_event_metrics = {
     redis_lock_failed    = "RedisLockFailure"
     timer_claim_failed   = "TimerClaimFailure"
     quiz_snapshot_failed = "QuizSnapshotFailure"
+
+    # 하트비트(PEXPIRE) 1회 실패. 이것만으로는 락을 잃은 것이 아니다 - lease 만료 시각
+    # 전에 재시도가 성공하면 정상 회복된다. 그래서 Alarm은 걸지 않고 Dashboard 추이로만
+    # 본다(Redis 연결 품질의 선행 지표). 알람을 걸려면 "몇 분간 몇 회 이상"이 필요한데,
+    # 실제 baseline을 관찰하기 전에 threshold를 찍으면 오탐만 만든다.
+    redis_lock_renew_failed = "RedisLockRenewFailure"
+
+    # lease 만료를 실제로 판정한 시점. 이 시점부터 그 워커는 상호배제를 보장받지 못한다.
+    room_lock_lease_lost = "RoomLockLeaseLost"
+
+    # 더 새로운 fencing token이 이미 발급돼 Redis가 쓰기/삭제를 거부한 시점. 방어가
+    # 작동한 것이지만, 발생했다는 것 자체가 "두 워커가 같은 방을 동시에 잡고 있었다"는
+    # 사실을 의미한다. room_lock_lease_lost 없이도 발생할 수 있다 - 락 key가 사라지고
+    # 다른 워커가 새로 잡은 뒤, 원래 워커의 다음 하트비트(최대 4초)가 오기 전에 쓰기를
+    # 시도하면 그 워커는 아직 자기 lease가 유효하다고 믿는 상태이기 때문이다.
+    stale_fencing_write_rejected = "StaleFencingWriteRejected"
   }
 }
 
