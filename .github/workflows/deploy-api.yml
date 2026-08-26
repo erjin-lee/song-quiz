@@ -96,10 +96,9 @@ jobs:
           reload_api() {
             local commit_sha="$1"
 
-            export COMMIT_SHA="$commit_sha"
-
             cd "$APP_DIR/apps/api"
 
+            COMMIT_SHA="$commit_sha" \
             pm2 startOrReload ecosystem.config.js --update-env
           }
 

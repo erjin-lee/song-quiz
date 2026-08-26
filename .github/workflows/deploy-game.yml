@@ -96,10 +96,9 @@ jobs:
           reload_game() {
             local commit_sha="$1"
 
-            export COMMIT_SHA="$commit_sha"
-
             cd "$APP_DIR/apps/game"
 
+            COMMIT_SHA="$commit_sha" \
             pm2 startOrReload ecosystem.config.js --update-env
           }
 
