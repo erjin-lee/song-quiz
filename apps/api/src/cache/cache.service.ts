@@ -158,6 +158,17 @@ export class CacheService implements OnApplicationShutdown {
     return value;
   }
 
+  /**
+   *  Redis 연결 상태 확인
+   */
+  async ping(): Promise<void> {
+    const result = await this.redis.ping();
+
+    if (result !== 'PONG') {
+      throw new Error('Redis ping failed');
+    }
+  }
+
   private createRedisClient(): Redis | null {
     const host = process.env.REDIS_HOST;
     if (!host) {
