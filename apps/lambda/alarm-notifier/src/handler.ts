@@ -55,6 +55,34 @@ export async function handler(
     return;
   }
 
+  // "복구됨" 알림은 실제로 ALARM에서 벗어난 경우에만 보낸다.
+  //
+  // 새 CloudWatch Alarm은 INSUFFICIENT_DATA 상태로 생성된 뒤 곧바로 평가되는데, 이 프로젝트의
+  // Alarm은 전부 treat_missing_data = notBreaching이라 지표가 한 번도 발행되지 않았어도 그대로
+  // OK로 전이된다. EventBridge Rule은 "새 상태"가 OK인지만 보고 previousState는 보지 않으므로
+  // (modules/notification/eventbridge.tf), 이 전이도 그대로 여기까지 전달된다. 막지 않으면
+  // Alarm을 새로 만들 때마다 장애가 난 적도 없는데 "✅ [복구됨]"이 Slack에 올라가고, 그러면
+  // 복구 알림 자체를 신뢰할 수 없게 된다.
+  //
+  // 이 경로가 지금까지 문제되지 않은 이유는 Alarm 1차 세트(#83)가 이 Lambda(#84)보다 먼저
+  // 만들어졌기 때문이다. 이후 Alarm을 새로 추가하면 곧바로 발생한다.
+  //
+  // 부수적으로 ALARM -> INSUFFICIENT_DATA -> OK 경로의 복구 알림도 함께 막히지만, 위와 같은
+  // 이유로 notBreaching인 Alarm은 데이터가 없을 때 INSUFFICIENT_DATA가 아니라 OK로 가므로
+  // 실제로 이 경로를 타기 어렵다. 반대로 이 검사를 느슨하게 하면 허위 복구 알림이 되살아난다.
+  if (state === "OK" && detail.previousState?.value !== "ALARM") {
+    console.log(
+      JSON.stringify({
+        event: "alarm_notification_skipped",
+        alarmName,
+        state,
+        previousState: detail.previousState?.value ?? null,
+        reason: "not_recovered_from_alarm",
+      }),
+    );
+    return;
+  }
+
   if (!SLACK_WEBHOOK_PARAMETER_NAME) {
     throw new Error(
       "SLACK_WEBHOOK_PARAMETER_NAME environment variable is not set",
