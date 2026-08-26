@@ -1,3 +1,5 @@
+export {};
+
 const sendMock = jest.fn();
 
 jest.mock("@aws-sdk/client-ssm", () => ({
