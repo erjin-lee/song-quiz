@@ -21,9 +21,15 @@
     "web": "turbo run dev --filter=web",
     "web:build": "turbo run build --filter=web",
     "admin": "turbo run dev --filter=admin",
-    "admin:build": "turbo run build --filter=admin"
+    "admin:build": "turbo run build --filter=admin",
+    "load:smoke": "cd load-tests/artillery && cp -n .env.example .env 2>/dev/null; WORKERS=1 LOAD_CONCURRENT_USERS=10 LOAD_USERS_PER_ROOM=5 LOAD_ARRIVAL_SECONDS=5 LOAD_HOLD_SECONDS=30 artillery run --dotenv .env smoke.yml",
+    "load:game": "cd load-tests/artillery && cp -n .env.example .env 2>/dev/null; WORKERS=1 artillery run --dotenv .env game-load.yml",
+    "load:spike": "cd load-tests/artillery && cp -n .env.example .env 2>/dev/null; WORKERS=1 artillery run --dotenv .env game-spike.yml",
+    "load:step": "cd load-tests/artillery && cp -n .env.example .env 2>/dev/null; WORKERS=1 artillery run --dotenv .env game-load.yml"
   },
   "devDependencies": {
+    "artillery": "^2.0.28",
+    "socket.io-client": "^4.8.3",
     "turbo": "^2.10.8",
     "typescript": "^5.5.3"
   }

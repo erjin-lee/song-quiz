@@ -30,3 +30,5 @@ apps/game/logs/
 /logs/
 __pycache__/
 *.tsbuildinfo
+# Artillery가 TS processor를 번들해서 만드는 산출물
+load-tests/artillery/processors/dist/

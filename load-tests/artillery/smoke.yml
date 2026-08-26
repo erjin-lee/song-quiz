@@ -1,0 +1,34 @@
+# Smoke - "테스트 코드와 게임 흐름 자체가 정상인가"만 확인한다. 부하를 주는 것이 목적이 아니다.
+#
+# 기본값이 아주 작아서(2 rooms x 5 users = 동시 접속 10명, 유지 30초) 로컬은 물론
+# 실서버에서도 사실상 부하가 되지 않는다. 부하 수치를 올릴 때는 이 파일이 아니라
+# game-load.yml / game-spike.yml을 쓴다.
+config:
+  target: "{{ $processEnvironment.LOAD_TARGET }}"
+  phases:
+    # smoke는 값을 일부러 고정한다. 여기를 환경변수로 열어두면 "smoke인 줄 알고 실제 부하를
+    # 거는" 실수가 나온다. 부하를 올릴 때는 game-load.yml을 쓴다.
+    - name: smoke
+      duration: 5
+      arrivalCount: 10
+  processor: "./processors/game.ts"
+  # ensure는 config.ensure만 써서는 로드되지 않는다 - config.plugins에 등록해야
+  # 플러그인이 적재되고, 그 다음에야 아래 ensure 블록을 읽는다.
+  plugins:
+    ensure: {}
+  timeout: 300
+
+  # smoke는 "흐름이 깨지지 않았는가"만 본다. 성능 임계값은 걸지 않는다 - 로컬 환경 성능이
+  # 제각각이라 임계값을 걸면 코드가 멀쩡해도 빨간불이 뜬다.
+  ensure:
+    conditions:
+      - expression: "vusers.failed == 0"
+
+before:
+  flow:
+    - function: "createRoomPool"
+
+scenarios:
+  - name: "동시 접속 유지 - room 참가 -> 게임 반복 -> 퇴장"
+    flow:
+      - function: "playGame"
