@@ -115,7 +115,7 @@ variable "db_deletion_protection" {
 variable "alb_health_check_path" {
   description = "ALB 타겟그룹 헬스체크 경로"
   type        = string
-  default     = "/"
+  default     = "/health"
 }
 
 variable "cache_engine_version" {

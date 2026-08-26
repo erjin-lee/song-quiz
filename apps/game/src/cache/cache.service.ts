@@ -97,6 +97,25 @@ export class CacheService implements OnApplicationShutdown {
     return this.redis !== null && this.redisReady;
   }
 
+  /**
+   * Redis에 실제로 PING을 보내 응답을 확인한다(readiness 체크용).
+   *
+   * isRedisReady()는 이벤트로 갱신되는 플래그라 "끊긴 직후 아직 close 이벤트가 오지 않은"
+   * 순간에는 참을 반환할 수 있다. readiness는 그 순간의 진짜 상태를 알아야 하므로 왕복을
+   * 한 번 돌린다. REDIS_HOST가 없으면(단일 인스턴스 모드) 확인할 대상 자체가 없어 던진다 -
+   * 그 경우를 "장애"로 볼지 "해당 없음"으로 볼지는 호출자가 판단한다(AppService 참고).
+   */
+  async ping(): Promise<void> {
+    if (!this.redis) {
+      throw new Error('REDIS_HOST가 설정되지 않아 Redis를 사용하지 않습니다.');
+    }
+
+    const result = await this.redis.ping();
+    if (result !== 'PONG') {
+      throw new Error(`Redis ping failed: ${result}`);
+    }
+  }
+
   async get<T>(key: string): Promise<T | undefined> {
     if (this.redis && this.redisReady) {
       try {

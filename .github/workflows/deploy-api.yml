@@ -18,19 +18,22 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: read # 배포된 commit에 연결된 PR을 조회하기 위해 필요(write-deployment-metadata.sh)
-  id-token: write # GitHub OIDC로 AWS IAM Role을 assume하기 위해 필요
+  pull-requests: read
+  id-token: write
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+
     steps:
-      - name: Set up SSH (bastion 경유로 WAS 접속)
+      - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
+
           echo "${{ secrets.BASTION_SSH_KEY }}" > ~/.ssh/bastion_key
           echo "${{ secrets.WAS_SSH_KEY }}" > ~/.ssh/was_key
+
           chmod 600 ~/.ssh/bastion_key ~/.ssh/was_key
 
           cat >> ~/.ssh/config <<EOF
@@ -49,51 +52,165 @@ jobs:
             StrictHostKeyChecking no
             UserKnownHostsFile /dev/null
           EOF
+
           chmod 600 ~/.ssh/config
 
-      - name: Pull, build, PM2 reload on WAS
+      - name: Deploy API and verify readiness
         run: |
-          ssh was '
-            set -e
-            export NVM_DIR="$HOME/.nvm"
-            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-            cd "${{ secrets.WAS_APP_DIR }}"
-            git fetch --all
-            git checkout main
-            git pull --ff-only
+          ssh was bash -s -- \
+            "${{ secrets.WAS_APP_DIR }}" \
+            "${{ vars.API_LOCAL_READY_URL }}" <<'REMOTE'
+          set -euo pipefail
+
+          APP_DIR="$1"
+          HEALTH_URL="$2"
+
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+
+          cd "$APP_DIR"
+
+          PREVIOUS_SHA="$(git rev-parse HEAD)"
+
+          echo "Previous commit: $PREVIOUS_SHA"
+
+          # 배포 서버에 예상하지 못한 변경이 있다면 배포하지 않는다.
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "WAS working tree is not clean."
+            git status --short
+            exit 1
+          fi
+
+          build_api() {
+            cd "$APP_DIR"
+
             corepack enable
+
             YARN_ENABLE_IMMUTABLE_INSTALLS=true yarn workspaces focus api
+
             yarn workspace logger build
             yarn workspace tracing build
             yarn workspace api build
-            cd apps/api
+          }
+
+          reload_api() {
+            local commit_sha="$1"
+
+            export COMMIT_SHA="$commit_sha"
+
+            cd "$APP_DIR/apps/api"
+
             pm2 startOrReload ecosystem.config.js --update-env
-          '
+          }
 
-      # 이 워크플로우는 SSH로 WAS에 접속해 배포할 뿐 지금까지 러너 자체에 저장소를 checkout할
-      # 필요가 없었다 - write-deployment-metadata.sh(.github/scripts/)를 실행하려면 그 파일이
-      # 러너 파일시스템에 있어야 하므로 여기서 처음으로 checkout한다.
-      - name: Checkout (write-deployment-metadata.sh 실행을 위해 필요)
-        uses: actions/checkout@v4
+          check_readiness() {
+            local expected_sha="$1"
 
-      # git pull은 WAS 서버에서 일어나므로 GITHUB_SHA(이 워크플로우를 트리거한 push의 SHA)와
-      # WAS의 실제 HEAD가 다를 수 있다 - 이 워크플로우가 대기하는 동안 같은 concurrency
-      # group("deploy-was")의 다른 실행이 먼저 더 최신 커밋을 pull했을 수도 있기 때문이다.
-      # 그래서 GITHUB_SHA를 믿지 않고, 방금 실제로 pull된 WAS의 git HEAD를 다시 조회해
-      # source of truth로 쓴다. `deploy-was` concurrency group이 cancel-in-progress: false로
-      # 전체 job(이 스텝 포함)을 완전히 직렬화하므로, 이 스텝이 도는 동안 다른 실행이 끼어들어
-      # HEAD를 또 바꿀 수 없다 - 따라서 이 값이 항상 "지금 실제로 서비스 중인 commit"이다.
+            # 최대 약 60초 동안 readiness 확인
+            for attempt in $(seq 1 12); do
+              echo "Readiness check $attempt/12..."
+
+              if response="$(curl -fsS --max-time 3 "$HEALTH_URL" 2>/dev/null)"; then
+                if parsed="$(
+                  printf '%s' "$response" |
+                  node -e '
+                    let body = "";
+
+                    process.stdin.on("data", chunk => body += chunk);
+
+                    process.stdin.on("end", () => {
+                      try {
+                        const data = JSON.parse(body);
+
+                        process.stdout.write(
+                          `${data.status ?? ""}\t${data.service ?? ""}\t${data.commitSha ?? ""}`
+                        );
+                      } catch {
+                        process.exit(1);
+                      }
+                    });
+                  '
+                )"; then
+                  IFS=$'\t' read -r status service health_sha <<< "$parsed"
+
+                  echo "status=$status service=$service commitSha=$health_sha"
+
+                  # health endpoint가 short SHA를 반환해도 검증할 수 있도록 prefix 비교
+                  if \
+                    [ "$status" = "ok" ] && \
+                    [ "$service" = "api" ] && \
+                    [ -n "$health_sha" ] && \
+                    [[ "$expected_sha" == "$health_sha"* ]]; then
+
+                    echo "API readiness check passed."
+                    return 0
+                  fi
+                fi
+              fi
+
+              sleep 5
+            done
+
+            return 1
+          }
+
+          echo "Pull latest main..."
+
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+
+          DEPLOYED_SHA="$(git rev-parse HEAD)"
+
+          echo "Deploying commit: $DEPLOYED_SHA"
+
+          build_api
+          reload_api "$DEPLOYED_SHA"
+
+          if check_readiness "$DEPLOYED_SHA"; then
+            echo "API deployment succeeded."
+            exit 0
+          fi
+
+          #
+          # Readiness 실패 → 이전 production commit으로 rollback
+          #
+          echo "API readiness check failed."
+          echo "Rolling back to $PREVIOUS_SHA..."
+
+          cd "$APP_DIR"
+
+          git reset --hard "$PREVIOUS_SHA"
+
+          build_api
+          reload_api "$PREVIOUS_SHA"
+
+          if check_readiness "$PREVIOUS_SHA"; then
+            echo "Rollback succeeded."
+          else
+            echo "CRITICAL: rollback readiness check also failed."
+            exit 2
+          fi
+
+          # rollback은 성공했어도 이번 배포 자체는 실패 처리
+          exit 1
+          REMOTE
+
+      # 위 readiness까지 성공한 경우에만 이후 단계 실행
       - name: Get deployed commit SHA from WAS
         id: deployed_sha
         run: |
-          DEPLOYED_SHA="$(ssh was 'cd "${{ secrets.WAS_APP_DIR }}" && git rev-parse HEAD')"
+          DEPLOYED_SHA="$(
+            ssh was 'cd "${{ secrets.WAS_APP_DIR }}" && git rev-parse HEAD'
+          )"
+
           echo "sha=${DEPLOYED_SHA}" >> "$GITHUB_OUTPUT"
 
-      # 위 두 스텝이 모두 성공한 뒤에만 실행된다(Production 배포 성공 후 기록, §17) - 이
-      # 워크플로우에 명시적인 health check가 없어 "가장 마지막 성공 단계 이후"를 기준으로
-      # 삼는다. AIOps incident-analyzer(infra/terraform/modules/aiops)가 이 값을
-      # 읽어 최근 배포와 장애를 연관지어 참고한다(보조 근거일 뿐, 원인 단정에는 쓰지 않는다).
-      - name: Configure AWS credentials (deployment metadata write only)
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # readiness까지 검증된 production commit만 metadata로 기록한다.
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.CI_DEPLOY_METADATA_ROLE_ARN }}
@@ -102,4 +219,8 @@ jobs:
       - name: Record deployment metadata
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: .github/scripts/write-deployment-metadata.sh api /song-quiz/prod/deployment/api "${{ steps.deployed_sha.outputs.sha }}"
+        run: |
+          .github/scripts/write-deployment-metadata.sh \
+            api \
+            /song-quiz/prod/deployment/api \
+            "${{ steps.deployed_sha.outputs.sha }}"
