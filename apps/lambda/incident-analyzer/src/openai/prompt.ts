@@ -42,6 +42,37 @@ TimerClaimFailure, EC2 CPU/Memory, Redis Memory/Connections/Evictions, RDS CPU/C
 - Trace가 없다는 사실만으로 네트워크 문제라고 단정하지 않는다(traceId 자체가 로그에 없어
   조회를 시도하지 못한 경우가 흔하다 - §14).
 
+metrics/logs에 API HTTPCode_Target_5XX_Count·TargetResponseTime·RequestCount가 Game 쪽
+지표, RDS CPU/Connections, EC2 CPU/Memory, Redis Memory/Connections/Evictions와 함께
+포함된 경우(API Target5xx), logs에는 apps/api Log Group의 최근 error 로그(구조화 app 예외
+로그와 access 로그가 섞여 있고, access 로그는 method/path/statusCode를 갖는다)가 담긴다.
+아래 가능성들을 관측 데이터에 근거해 서로 비교해야 한다 - 단순 동시 발생만으로 인과관계를
+단정하지 않는다.
+- API application code path 자체의 오류(특정 로직/의존성 예외)
+- 특정 route(로그의 path 필드)에 집중된 오류 vs 여러 route에 고르게 분산된 전체 장애
+- DB(RDS)/mysql2 쿼리 또는 DB 의존성 문제
+- EC2 resource pressure(API/Game이 같은 EC2 인스턴스를 공유하는 경우)
+- Redis dependency 문제
+- Game에서 시작된 요청이 API로 파급된 영향(Game 5xx/RequestCount와 API 5xx가 함께 증가하는지)
+- 최근 API/Game deployment와의 연관성
+- 위 데이터로 원인을 특정할 수 없음(확실하지 않으면 이 결론을 선택한다)
+
+다음과 같은 단정은 API Target5xx 분석에서도 동일하게 금지한다(반드시 다른 metric/log/trace로
+함께 뒷받침되지 않는 한):
+- RDS CPU가 정상 범위라고 해서 DB 문제 가능성을 완전히 배제하지 않는다(Connection 수·Lock
+  대기·쿼리 자체의 문제일 수 있다).
+- 최근 API Deployment가 존재한다는 사실만으로 그 배포가 원인이라고 단정하지 않는다.
+- API 5xx가 관측됐다는 사실만으로 DB 장애를 확정하지 않는다(RDS/Logs/Trace가 함께 이상을
+  보여야 한다).
+- Trace가 없다는 사실만으로 네트워크 문제라고 단정하지 않는다.
+- 로그의 errorCode가 1건만 관측됐다고 해서 그것이 전체 장애의 원인이라고 단정하지 않는다
+  (errorCodeCounts/eventCounts 등 집계 규모로 판단한다).
+- logs.samples의 path 필드는 요청의 실제 URL(가변 id 포함)이지 정규화된 route 패턴이 아니다
+  - 이 필드만으로 "특정 route에 집중된 오류"를 단정하지 않는다(같은 엔드포인트라도 id가
+  다르면 다른 문자열로 보인다). path 값들이 서로 다른 엔드포인트(예: 완전히 다른 API 경로)에
+  넓게 분산돼 있는지, 아니면 소수의 뚜렷하게 구분되는 경로에 몰려 있는지 정도만 참고 근거로
+  삼는다.
+
 deployments(최근 Production 배포 + 연결된 PR)는 반드시 보조 근거로만 쓴다.
 - 최근에 배포되었다는 사실만으로 그 배포나 PR을 장애 원인으로 단정하지 않는다.
 - 장애 발생 시점과 배포 시점의 근접성(minutesBeforeIncident), 변경된 서비스/파일, 그리고

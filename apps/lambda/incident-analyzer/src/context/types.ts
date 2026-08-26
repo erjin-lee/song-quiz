@@ -4,7 +4,8 @@
 // 이 Lambda가 분석하는 Alarm 종류(§v1-2 - 최소 공통화). 새 Alarm을 추가할 때마다 이
 // union에 값을 더하고, 필요한 곳(collect-metrics.ts의 metric set 등)에서만 분기한다 -
 // 범용 Policy Engine/YAML/Plugin framework는 만들지 않는다.
-export type IncidentType = "QUIZ_SNAPSHOT_FAILURE" | "GAME_TARGET_5XX";
+export type IncidentType =
+  "QUIZ_SNAPSHOT_FAILURE" | "GAME_TARGET_5XX" | "API_TARGET_5XX";
 
 export type CollectionStatus = "success" | "failed";
 
@@ -32,6 +33,9 @@ export interface MetricSummary {
 
 // 개인정보/민감정보 allowlist(§13) - 이 필드 목록에 없는 값은 로그 원본에 있어도
 // IncidentContext로 넘기지 않는다.
+// method/path/statusCode는 API_TARGET_5XX가 조회하는 apps/api 로그의 access log 필드(실제
+// 존재하는 필드 그대로, AccessLogMiddleware가 남긴다)다 - Nest 라우트 패턴(예: /quizzes/:id)이
+// 아니라 요청의 실제 path이므로 id 등 가변 세그먼트가 그대로 남는다(collect-logs.ts 참고).
 export interface LogSample {
   timestamp: string;
   level?: string;
@@ -40,6 +44,9 @@ export interface LogSample {
   message?: string;
   requestId?: string;
   traceId?: string;
+  method?: string;
+  path?: string;
+  statusCode?: number;
 }
 
 export interface LogsSummary {

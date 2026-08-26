@@ -1,0 +1,25 @@
+{
+  "version": "0",
+  "id": "aaaa1111-bbbb-2222-cccc-3333dddd4444",
+  "detail-type": "CloudWatch Alarm State Change",
+  "source": "aws.cloudwatch",
+  "account": "123456789012",
+  "time": "2026-08-24T02:30:12Z",
+  "region": "ap-northeast-2",
+  "resources": [
+    "arn:aws:cloudwatch:ap-northeast-2:123456789012:alarm:SongQuiz-Prod-High-API-Target5xx"
+  ],
+  "detail": {
+    "alarmName": "SongQuiz-Prod-High-API-Target5xx",
+    "state": {
+      "value": "ALARM",
+      "reason": "Threshold Crossed: 1 datapoint [8.0] was greater than or equal to the threshold (5.0).",
+      "timestamp": "2026-08-24T02:30:12.345Z"
+    },
+    "previousState": {
+      "value": "OK",
+      "reason": "Threshold Crossed: no datapoints were breaching the threshold.",
+      "timestamp": "2026-08-24T02:25:00.000Z"
+    }
+  }
+}

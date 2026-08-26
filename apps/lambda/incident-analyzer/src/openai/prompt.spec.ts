@@ -32,6 +32,16 @@ describe("SYSTEM_PROMPT", () => {
     expect(SYSTEM_PROMPT).toContain("Redis 장애를 확정하지 않는다");
   });
 
+  it("API Target5xx 분석 목표(비교해야 할 가능성 후보)를 포함한다", () => {
+    expect(SYSTEM_PROMPT).toContain("API application code path");
+    expect(SYSTEM_PROMPT).toContain("DB(RDS)/mysql2 쿼리 또는 DB 의존성 문제");
+    expect(SYSTEM_PROMPT).toContain("Game에서 시작된 요청이 API로 파급된 영향");
+  });
+
+  it("API 로그의 path가 정규화된 route 패턴이 아니라는 주의사항을 포함한다", () => {
+    expect(SYSTEM_PROMPT).toContain("정규화된 route 패턴이 아니다");
+  });
+
   it("RDS CPU 정상만으로 DB 문제를 배제하지 말라는 규칙을 포함한다", () => {
     expect(SYSTEM_PROMPT).toContain("완전히 배제하지 않는다");
   });

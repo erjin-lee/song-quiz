@@ -56,7 +56,9 @@ resource "aws_lambda_function" "incident_analyzer" {
     variables = {
       QUIZ_SNAPSHOT_FAILURE_ALARM_NAME = var.quiz_snapshot_failure_alarm_name
       GAME_TARGET_5XX_ALARM_NAME       = var.game_target_5xx_alarm_name
+      API_TARGET_5XX_ALARM_NAME        = var.api_target_5xx_alarm_name
       GAME_LOG_GROUP_NAME              = var.game_log_group_name
+      API_LOG_GROUP_NAME               = var.api_log_group_name
       GAME_METRIC_NAMESPACE            = var.game_metric_namespace
       ALB_ARN_SUFFIX                   = var.alb_arn_suffix
       API_TARGET_GROUP_ARN_SUFFIX      = var.api_target_group_arn_suffix

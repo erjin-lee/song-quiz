@@ -1,18 +1,18 @@
 # incident-analyzer
 
-`SongQuiz-Prod-High-Game-QuizSnapshotFailure`/`SongQuiz-Prod-High-Game-Target5xx` 두 Alarm의
-`ALARM` 상태 변화를 EventBridge로 받아 최근 15분의 CloudWatch Metrics/Logs Insights/X-Ray
-Trace를 모아 `IncidentContext`로 정규화하고, OpenAI로 장애 원인 후보를 분석해 Slack으로
-전달하는 Lambda다. Terraform 정의는
+`SongQuiz-Prod-High-Game-QuizSnapshotFailure`/`SongQuiz-Prod-High-Game-Target5xx`/
+`SongQuiz-Prod-High-API-Target5xx` 세 Alarm의 `ALARM` 상태 변화를 EventBridge로 받아 최근
+15분의 CloudWatch Metrics/Logs Insights/X-Ray Trace를 모아 `IncidentContext`로 정규화하고,
+OpenAI로 장애 원인 후보를 분석해 Slack으로 전달하는 Lambda다. Terraform 정의는
 [`infra/terraform/modules/aiops/`](../../../infra/terraform/modules/aiops)에 있다.
 
 ```text
-CloudWatch Alarm(QuizSnapshotFailure | Game Target5xx, ALARM)
+CloudWatch Alarm(QuizSnapshotFailure | Game Target5xx | API Target5xx, ALARM)
   -> EventBridge Rule(aiops 전용)
   -> 이 Lambda
      -> CloudWatch DescribeAlarms(실제 Alarm 평가 조건)
      -> CloudWatch Metrics(GetMetricData, missing/collection-failed 의미 구분)
-     -> CloudWatch Logs Insights(StartQuery/GetQueryResults)
+     -> CloudWatch Logs Insights(StartQuery/GetQueryResults - IncidentType별 game/api Log Group)
      -> X-Ray(BatchGetTraces, 로그의 traceId 기반)
      -> SSM(API/Game Production Deployment Metadata - 보조 근거)
      -> IncidentContext
@@ -26,14 +26,15 @@ CloudWatch Alarm(QuizSnapshotFailure | Game Target5xx, ALARM)
 ## 지원하는 Alarm(IncidentType)
 
 Alarm 이름 -> `IncidentType`(`src/context/types.ts`) 매핑은 `src/handler.ts`의
-`INCIDENT_TYPE_BY_ALARM_NAME`에서 관리한다. 이 맵에 없는 Alarm은 EventBridge Rule에도
-Lambda 방어 로직에도 걸리지 않아 자동으로 분석 대상에서 제외된다(예: API Target5xx는
-아직 범위 밖).
+`INCIDENT_TYPE_BY_ALARM_NAME`에서 관리한다. 이 맵에 없는 Alarm(UnhealthyHost, EC2
+CPU/Memory/Disk 등)은 EventBridge Rule에도 Lambda 방어 로직에도 걸리지 않아 자동으로
+분석 대상에서 제외된다.
 
 | Alarm | IncidentType | 비고 |
 |---|---|---|
 | `SongQuiz-Prod-High-Game-QuizSnapshotFailure` | `QUIZ_SNAPSHOT_FAILURE` | 최초 구현(v1) - Metric 7개 |
 | `SongQuiz-Prod-High-Game-Target5xx` | `GAME_TARGET_5XX` | v1-2 추가 - Metric 16개(아래 참고) |
+| `SongQuiz-Prod-High-API-Target5xx` | `API_TARGET_5XX` | v1-3 추가 - Metric 13개, Log Group만 apps/api로 전환(아래 참고) |
 
 `IncidentType`별로 실제 조회하는 Metric 목록은 `src/context/collect-metrics.ts`의
 `INCIDENT_METRIC_NAMES`에서 관리한다(범용 Policy Engine/YAML/Plugin framework 없이, 이
@@ -67,6 +68,36 @@ Logs/Trace/Deployment 수집 로직(`collect-logs.ts`/`collect-traces.ts`/`colle
 `QUIZ_SNAPSHOT_FAILURE`와 동일하게 재사용한다 - Game 최근 15분 error 로그(`level = "error"`
 기준, quiz_snapshot_failed 이벤트만 대상이 아니다) -> 로그의 traceId로 X-Ray 조회 ->
 API/Game Production Deployment 순으로 그대로 동작한다.
+
+`API_TARGET_5XX`(v1-3)는 `INCIDENT_METRIC_NAMES`에서 아래 13개 metric만 고른다(새 metric
+spec 없이 `GAME_TARGET_5XX`가 이미 쓰는 spec을 그대로 재사용):
+
+| Metric | Namespace | Dimension |
+|---|---|---|
+| API.HTTPCode_Target_5XX_Count | AWS/ApplicationELB | LoadBalancer, TargetGroup(api) |
+| API.TargetResponseTime | AWS/ApplicationELB | LoadBalancer, TargetGroup(api) |
+| API.RequestCount | AWS/ApplicationELB | LoadBalancer, TargetGroup(api) |
+| Game.HTTPCode_Target_5XX_Count | AWS/ApplicationELB | LoadBalancer, TargetGroup(game) |
+| Game.TargetResponseTime | AWS/ApplicationELB | LoadBalancer, TargetGroup(game) |
+| Game.RequestCount | AWS/ApplicationELB | LoadBalancer, TargetGroup(game) |
+| RDS.CPUUtilization | AWS/RDS | DBInstanceIdentifier |
+| RDS.DatabaseConnections | AWS/RDS | DBInstanceIdentifier |
+| EC2.CPUUtilization | AWS/EC2 | InstanceId |
+| EC2.MemoryUsedPercent | `EC2_METRIC_NAMESPACE`(CloudWatch Agent) | InstanceId |
+| Redis.MemoryUsagePercentage | AWS/ElastiCache | CacheClusterId |
+| Redis.CurrConnections | AWS/ElastiCache | CacheClusterId |
+| Redis.Evictions | AWS/ElastiCache | CacheClusterId |
+
+`API_TARGET_5XX`는 Logs만 다른 소스를 본다 - `collect-logs.ts`의
+`LOG_SOURCE_BY_INCIDENT_TYPE` 맵이 IncidentType마다 game/api Log Group과 쿼리를 고른다.
+apps/api Log Group(`API_LOG_GROUP_NAME`)에는 구조화 app 예외 로그(event/errorCode)와
+access 로그(method/path/statusCode, `AccessLogMiddleware`)가 같은 PM2 stdout으로 섞여
+쌓인다(`ecosystem.config.js`가 둘 다 `logs/api.log` 하나로 합침) - 두 로그 모두 5xx/예외
+상황에서 `level="error"`를 남기므로 `filter level = "error"` 하나로 함께 조회한다. 이 로그
+그룹에는 Nest 라우트 패턴이 아니라 요청의 실제 `path`(id 등 가변 세그먼트 포함)만 존재해서,
+route 패턴별 집계(`routeCounts`)는 구현하지 않았다 - 대신 `LogSample.path`/`method`/
+`statusCode`를 그대로 노출해 AI가 개별 샘플 단위로만 참고하게 한다(억지 문자열 파싱으로
+route를 정규화하지 않는다, `apps/lambda/incident-analyzer/src/context/collect-logs.ts` 참고).
 
 NestJS/Express 없이 plain Lambda handler(`src/handler.ts`)만 사용한다. `openai`는 Lambda
 런타임이 제공하지 않는 npm 패키지라 `dependencies`로 선언하고, `@aws-sdk/*`는 alarm-notifier와
@@ -118,7 +149,9 @@ AWS SDK(`@aws-sdk/client-cloudwatch`, `-cloudwatch-logs`, `-xray`, `-ssm`)와 `o
 |---|---|---|---|
 | `QUIZ_SNAPSHOT_FAILURE_ALARM_NAME` | 아니오 | `SongQuiz-Prod-High-Game-QuizSnapshotFailure` | `QUIZ_SNAPSHOT_FAILURE` 분석 대상 Alarm 이름(방어적 재검증용) |
 | `GAME_TARGET_5XX_ALARM_NAME` | 아니오 | `SongQuiz-Prod-High-Game-Target5xx` | `GAME_TARGET_5XX` 분석 대상 Alarm 이름(방어적 재검증용) |
+| `API_TARGET_5XX_ALARM_NAME` | 아니오 | `SongQuiz-Prod-High-API-Target5xx` | `API_TARGET_5XX` 분석 대상 Alarm 이름(방어적 재검증용) |
 | `GAME_LOG_GROUP_NAME` | 예 | - | Logs Insights를 조회할 apps/game Log Group(`modules/logging` 출력) |
+| `API_LOG_GROUP_NAME` | `API_TARGET_5XX`일 때만 | - | Logs Insights를 조회할 apps/api Log Group(`modules/logging` 출력) - 없으면 `API_TARGET_5XX`만 config 실패로 skip되고, 다른 두 IncidentType은 영향받지 않는다(`findMissingEnv`가 IncidentType별로 판단) |
 | `GAME_METRIC_NAMESPACE` | 아니오 | `SongQuiz/Game` | QuizSnapshotFailure/RedisLockFailure/TimerClaimFailure Custom Metric namespace |
 | `ALB_ARN_SUFFIX` | 예 | - | ALB arn_suffix(`modules/load_balancer` 출력) |
 | `API_TARGET_GROUP_ARN_SUFFIX` | 예 | - | apps/api 타겟그룹 arn_suffix |
@@ -199,7 +232,7 @@ aws ssm put-parameter \
 
 `set-alarm-state`로 강제 발생시킨 Alarm에는 실제 장애 로그/Trace가 없을 수 있다. 이
 경우에도 AI가 "데이터 부족, confidence=LOW"로 정상적으로 응답하면 pipeline 자체는
-성공으로 본다. 두 Alarm 모두 같은 방식으로 테스트한다.
+성공으로 본다. 세 Alarm 모두 같은 방식으로 테스트한다.
 
 ```bash
 aws cloudwatch set-alarm-state \
@@ -223,18 +256,33 @@ aws cloudwatch set-alarm-state \
   --alarm-name "SongQuiz-Prod-High-Game-Target5xx" \
   --state-value OK \
   --state-reason "aiops incident analysis test recovery"
+
+# API Target5xx도 동일하게
+aws cloudwatch set-alarm-state \
+  --alarm-name "SongQuiz-Prod-High-API-Target5xx" \
+  --state-value ALARM \
+  --state-reason "aiops incident analysis test"
+
+aws cloudwatch set-alarm-state \
+  --alarm-name "SongQuiz-Prod-High-API-Target5xx" \
+  --state-value OK \
+  --state-reason "aiops incident analysis test recovery"
 ```
 
 CloudWatch Console > Lambda > `song-quiz-prod-incident-analyzer` > Monitor > Logs에서
 `incident_analysis_started` -> `incident_context_collected` -> `incident_analysis_completed`
 (또는 실패 시 `incident_analysis_failed` + `stage`)를 확인한다. `incident_context_collected`
-로그의 `metricCount`가 QuizSnapshotFailure는 7, Game Target5xx는 16인지도 함께 확인한다.
+로그의 `metricCount`가 QuizSnapshotFailure는 7, Game Target5xx는 16, API Target5xx는 13인지도
+함께 확인한다.
 
 ### 2) 실제 장애 기반 end-to-end 테스트
 
 실제로 게임 시작 중 apps/api 응답 지연/장애를 재현해 `quiz_snapshot_failed` 로그가 실제로
-쌓이게 한 뒤 QuizSnapshotFailure Alarm이 자연 발생하는 것을 기다린다(Game Target5xx는
-실제 5xx 트래픽 재현이 필요해 별도로 검증한다). 이 경우에만 Metrics/Logs/Trace가 모두
-실데이터로 채워진 분석 품질을 확인할 수 있다. traceId -> X-Ray 변환(`otelTraceIdToXrayTraceId`,
+쌓이게 한 뒤 QuizSnapshotFailure Alarm이 자연 발생하는 것을 기다린다(Game Target5xx/API
+Target5xx는 실제 5xx 트래픽 재현이 필요해 별도로 검증한다). 이 경우에만 Metrics/Logs/Trace가
+모두 실데이터로 채워진 분석 품질을 확인할 수 있다. traceId -> X-Ray 변환(`otelTraceIdToXrayTraceId`,
 `src/context/collect-traces.ts`)이 실제 CloudWatch Agent의 OTLP->X-Ray 변환과 맞는지는
-이 실제 테스트에서만 확인 가능하다(가짜 Alarm 테스트로는 검증되지 않는다).
+이 실제 테스트에서만 확인 가능하다(가짜 Alarm 테스트로는 검증되지 않는다). API Target5xx는
+추가로 실제 apps/api Log Group에 `path`/`method`/`statusCode`가 기대한 구조로 남는지,
+app 예외 로그(`event`/`errorCode`)와 access 로그가 같은 쿼리로 함께 조회되는지도 확인해야
+한다 - 가짜 Alarm 테스트는 실제 5xx 트래픽이 없으면 로그가 비어 있을 수 있다.

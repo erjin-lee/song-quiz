@@ -241,4 +241,41 @@ describe("collectMetrics", () => {
       }
     });
   });
+
+  describe("API_TARGET_5XX(신규)", () => {
+    it("요청받은 13개 metric을 정확한 이름으로 모두 요청한다(새 metric spec 없이 기존 것만 재사용)", async () => {
+      sendMock.mockResolvedValueOnce({ MetricDataResults: [] });
+
+      const result = await collectMetrics(WINDOW, CONFIG, "API_TARGET_5XX");
+
+      expect(result.status).toBe("success");
+      expect(result.metrics.map((m) => m.name)).toEqual([
+        "API.HTTPCode_Target_5XX_Count",
+        "API.TargetResponseTime",
+        "API.RequestCount",
+        "Game.HTTPCode_Target_5XX_Count",
+        "Game.TargetResponseTime",
+        "Game.RequestCount",
+        "RDS.CPUUtilization",
+        "RDS.DatabaseConnections",
+        "EC2.CPUUtilization",
+        "EC2.MemoryUsedPercent",
+        "Redis.MemoryUsagePercentage",
+        "Redis.CurrConnections",
+        "Redis.Evictions",
+      ]);
+    });
+
+    it("GetMetricData 호출이 실패하면 failed 상태와 함께 13개 metric을 COLLECTION_FAILED로 채운다", async () => {
+      sendMock.mockRejectedValueOnce(new Error("boom"));
+
+      const result = await collectMetrics(WINDOW, CONFIG, "API_TARGET_5XX");
+
+      expect(result.status).toBe("failed");
+      expect(result.metrics).toHaveLength(13);
+      for (const metric of result.metrics) {
+        expect(metric.dataState).toBe("COLLECTION_FAILED");
+      }
+    });
+  });
 });

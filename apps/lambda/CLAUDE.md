@@ -5,7 +5,7 @@
 CloudWatch Alarm 상태 변화에 반응하는 운영 자동화 Lambda 2개를 소유한다. 둘 다 `yarn` workspace(`apps/lambda/*`)이며, 각자 독립된 EventBridge Rule/Terraform 모듈에 연결된다 — 하나가 실패/지연되어도 다른 하나에는 영향이 없다.
 
 - `alarm-notifier`([`README`](alarm-notifier/README.md)): `SongQuiz-Prod-*` 전체 Alarm의 상태 변화(`ALARM`/`OK`)를 그대로 Slack Incoming Webhook으로 전달한다. Terraform: [`infra/terraform/modules/notification/`](../../infra/terraform/modules/notification).
-- `incident-analyzer`([`README`](incident-analyzer/README.md)): `QuizSnapshotFailure`/`Game Target5xx` 두 Alarm만 대상으로, CloudWatch Metrics/Logs Insights/X-Ray Trace를 모아 OpenAI로 장애 원인 후보를 분석해 Slack으로 전달한다. Terraform: [`infra/terraform/modules/aiops/`](../../infra/terraform/modules/aiops).
+- `incident-analyzer`([`README`](incident-analyzer/README.md)): `QuizSnapshotFailure`/`Game Target5xx`/`API Target5xx` 세 Alarm만 대상으로, CloudWatch Metrics/Logs Insights/X-Ray Trace를 모아 OpenAI로 장애 원인 후보를 분석해 Slack으로 전달한다. Terraform: [`infra/terraform/modules/aiops/`](../../infra/terraform/modules/aiops).
 - 둘 다 NestJS 없이 plain Lambda handler(`src/handler.ts`)만 쓴다. `@aws-sdk/*`는 Lambda Node.js 관리형 런타임이 이미 제공하므로 devDependencies로만 선언한다(번들에 포함하지 않음).
 - 빌드 산출물(`dist/`)을 Terraform의 `data "archive_file"`이 그대로 zip으로 묶으므로, **`terraform plan`/`apply` 전에 반드시 먼저 빌드해야 한다.** 단, 코드(`src/**`)만 바뀐 경우엔 아래 "코드 배포" 항목대로 CI가 자동으로 배포하므로 그때는 로컬 apply가 필요 없다 — apply는 환경변수/IAM/새 리소스 등 인프라 자체가 바뀔 때만 필요하다.
 

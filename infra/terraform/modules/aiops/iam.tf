@@ -45,8 +45,8 @@ resource "aws_iam_role_policy" "incident_analyzer_logs" {
 
 # 실제 배포된 Alarm 평가 조건(threshold/period/evaluationPeriods 등, §4~5)을 조회하는
 # 권한. DescribeAlarms는 (GetMetricData/BatchGetTraces와 달리) alarm 리소스 수준 권한을
-# 지원해 이 Lambda가 분석하는 Alarm들(QuizSnapshotFailure, Game Target5xx)로만 Resource를
-# 좁힐 수 있다 - 다른 Alarm(API Target5xx 등)의 DescribeAlarms는 허용하지 않는다.
+# 지원해 이 Lambda가 분석하는 Alarm들(QuizSnapshotFailure, Game Target5xx, API Target5xx)로만
+# Resource를 좁힐 수 있다 - 그 외 Alarm의 DescribeAlarms는 허용하지 않는다.
 resource "aws_iam_role_policy" "incident_analyzer_alarm_definition" {
   name = "${local.function_name}-alarm-definition"
   role = aws_iam_role.incident_analyzer.id
@@ -60,6 +60,7 @@ resource "aws_iam_role_policy" "incident_analyzer_alarm_definition" {
         Resource = [
           "arn:aws:cloudwatch:${var.aws_region}:${data.aws_caller_identity.current.account_id}:alarm:${var.quiz_snapshot_failure_alarm_name}",
           "arn:aws:cloudwatch:${var.aws_region}:${data.aws_caller_identity.current.account_id}:alarm:${var.game_target_5xx_alarm_name}",
+          "arn:aws:cloudwatch:${var.aws_region}:${data.aws_caller_identity.current.account_id}:alarm:${var.api_target_5xx_alarm_name}",
         ]
       }
     ]
@@ -87,8 +88,9 @@ resource "aws_iam_role_policy" "incident_analyzer_cloudwatch_metrics" {
 }
 
 # CloudWatch Logs Insights 조회 권한. logs:StartQuery는 로그 그룹 ARN으로 리소스 수준 제한이
-# 가능해 apps/game Log Group 하나로 좁힌다. logs:GetQueryResults는 쿼리 실행 결과를 queryId로만
-# 식별하는 액션이라(로그 그룹 ARN과 무관) 리소스 수준 권한을 지원하지 않아 Resource가 "*"다.
+# 가능해 apps/game·apps/api Log Group 두 개로만 좁힌다(§AIOps v1-3 - API Target5xx 추가).
+# logs:GetQueryResults는 쿼리 실행 결과를 queryId로만 식별하는 액션이라(로그 그룹 ARN과 무관)
+# 리소스 수준 권한을 지원하지 않아 Resource가 "*"다.
 resource "aws_iam_role_policy" "incident_analyzer_logs_insights" {
   name = "${local.function_name}-logs-insights"
   role = aws_iam_role.incident_analyzer.id
@@ -97,9 +99,12 @@ resource "aws_iam_role_policy" "incident_analyzer_logs_insights" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect   = "Allow"
-        Action   = "logs:StartQuery"
-        Resource = "${var.game_log_group_arn}:*"
+        Effect = "Allow"
+        Action = "logs:StartQuery"
+        Resource = [
+          "${var.game_log_group_arn}:*",
+          "${var.api_log_group_arn}:*",
+        ]
       },
       {
         Effect   = "Allow"
