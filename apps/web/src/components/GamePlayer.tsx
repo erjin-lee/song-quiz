@@ -13,27 +13,11 @@ import type { RoomItemDto } from '../types/room';
 const READY_FALLBACK_TIMEOUT_MS = 8000;
 
 /**
- * 재생 예정 시각(playScheduledAt)보다 이만큼 앞서 음소거 상태로 짧게 재생을
- * 시도해("프리버퍼링") 버퍼링/디코더 초기화를 미리 끝내둔다. 관측 결과 playVideo()
- * 호출부터 실제 PLAYING 전환까지의 지연(수백 ms) 대부분이 최초 버퍼링 비용이라,
- * 예정 시각 이전에 한 번 재생을 태워두면 예정 시각의 재생 재개 지연을 크게 줄일 수 있다.
+ * 시작 대기 신호를 받은 뒤 이 시간 동안 음소거 상태로 영상을 실제 재생해
+ * 버퍼링/디코더 초기화를 미리 끝내둔다. 이후 시작 위치로 되돌려 일시정지한 채
+ * 실제 재생 예정 시각까지 대기한다.
  */
-const PREBUFFER_LEAD_MS = 1200;
-const DEFAULT_PREBUFFER_PLAY_MS = 500;
-
-/**
- * 프리버퍼링 중 실제로 재생 상태를 유지하는 시간(버퍼링을 유도하기 위한 최소 시간).
- * 모바일 환경에서는 네트워크 상태에 따라 300ms 안에 버퍼링이 충분히 끝나지 않는
- * 경우가 있어(그 상태에서 예정 시각에 재생을 재개하면 소리가 잠깐 끊기는 문제로
- * 관측됨) 여유를 두고 기본값을 500ms로 둔다. 환경별로 다시 튜닝할 수 있도록
- * VITE_PREBUFFER_PLAY_MS로 오버라이드할 수 있게 하며, 값이 없거나 잘못되면
- * 기본값을 쓴다.
- */
-const envPrebufferPlayMs = Number(import.meta.env.VITE_PREBUFFER_PLAY_MS);
-const PREBUFFER_PLAY_MS =
-  Number.isFinite(envPrebufferPlayMs) && envPrebufferPlayMs >= 0
-    ? envPrebufferPlayMs
-    : DEFAULT_PREBUFFER_PLAY_MS;
+const VITE_PREBUFFER_PLAY_MS = import.meta.env.VITE_PREBUFFER_PLAY_MS ?? 1400;
 
 export interface PlaybackTriggeredDetails {
   roundIndex: number;
@@ -106,22 +90,22 @@ function useCountdownSeconds(
 }
 
 export function GamePlayer({
-  room,
-  myUserId,
-  serverTimeOffsetMs,
-  onReady,
-  onStartGame,
-  onRestartGame,
-  onNextRound,
-  onSkip,
-  onForceSkip,
-  onOpenInquiry,
-  onEditRoom,
-  shortcutEnabled,
-  onShortcutEnabledChange,
-  onPlaybackTriggered,
-  onPlaybackStarted,
-}: GamePlayerProps) {
+                             room,
+                             myUserId,
+                             serverTimeOffsetMs,
+                             onReady,
+                             onStartGame,
+                             onRestartGame,
+                             onNextRound,
+                             onSkip,
+                             onForceSkip,
+                             onOpenInquiry,
+                             onEditRoom,
+                             shortcutEnabled,
+                             onShortcutEnabledChange,
+                             onPlaybackTriggered,
+                             onPlaybackStarted,
+                           }: GamePlayerProps) {
   const isHost = room.hostUserId === myUserId;
   const round = room.currentRound;
   const playerRef = useRef<YouTube>(null);
@@ -134,11 +118,13 @@ export function GamePlayer({
     atMs: number;
   } | null>(null);
   const playbackStartReportedRoundRef = useRef<number | null>(null);
-  // 프리버퍼링(음소거 재생→일시정지)을 이미 시도한 라운드를 기록해 중복 실행을 막는다.
+  // 프리버퍼링을 현재 진행 중인 라운드. effect가 재실행되더라도 같은 라운드의
+  // 프리버퍼링을 다시 시작하지 않도록 "진행 중" 상태를 별도로 기록한다.
+  const prebufferingRoundRef = useRef<number | null>(null);
+  // 프리버퍼링을 완료한 라운드. 같은 라운드에서 다시 프리버퍼링하지 않도록 막는다.
   const prebufferedRoundRef = useRef<number | null>(null);
-  // 프리버퍼링 중 "일시정지+위치복원+음소거해제"를 실행할 내부 타이머. 라운드 전환/
-  // 언마운트 시 정리해야 하고, 이 타이머가 실제 재생(playedRoundRef)보다 늦게 발동하는
-  // 경쟁 상태를 막기 위해 발동 시점에 playedRoundRef를 다시 확인한다.
+  // 시작 위치로 되돌린 뒤 잠깐 playVideo()를 태우고 다시 pauseVideo()하기 위한 타이머.
+  // 실제 예약 재생이 먼저 시작되면 이 타이머를 취소해 본 재생을 멈추지 않게 한다.
   const prebufferPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -176,64 +162,61 @@ export function GamePlayer({
   const playScheduledAt = round?.playScheduledAt ?? null;
   const startSec = round?.startSec ?? null;
 
-  // 예정 시각보다 PREBUFFER_LEAD_MS만큼 앞서 음소거 상태로 짧게 재생→일시정지해
-  // 버퍼링을 미리 끝내둔다. 재생 재개(unMute 후 실제 재생 타이머의 playVideo())는
-  // 아래의 "실제 재생" effect가 그대로 담당한다 — 이 effect는 그 전 단계 준비만 한다.
+  // 시작 대기 신호(PLAYING)를 받으면 즉시 음소거 상태로 VITE_PREBUFFER_PLAY_MS 동안
+  // 실제 재생해 버퍼/디코더를 데운다. 이후 시작 위치로 되돌린 뒤 잠깐 재생을 태우고
+  // 다시 일시정지해, 실제 예약 재생 시점에는 최대한 빠르게 재개할 수 있게 준비한다.
   useEffect(() => {
     if (
       room.gameStatus !== 'PLAYING' ||
       roundIndex === null ||
-      !playScheduledAt ||
+      prebufferingRoundRef.current === roundIndex ||
       prebufferedRoundRef.current === roundIndex ||
       playedRoundRef.current === roundIndex
     ) {
       return;
     }
 
-    const prebufferDelayMs =
-      new Date(playScheduledAt).getTime() -
-      PREBUFFER_LEAD_MS -
-      (Date.now() + serverTimeOffsetMs);
+    const player = playerRef.current?.getInternalPlayer();
+    if (!player) {
+      return;
+    }
 
-    const startTimer = setTimeout(
-      () => {
-        prebufferedRoundRef.current = roundIndex;
-        const player = playerRef.current?.getInternalPlayer();
-        if (!player) {
-          return;
-        }
+    // 완료 시점이 아니라 시작 시점에 기록해야 effect가 다시 실행돼도 중복 시작되지 않는다.
+    prebufferingRoundRef.current = roundIndex;
+    player.mute();
+    player.playVideo();
 
-        player.mute();
-        player.playVideo();
+    const prebufferEndTimer = setTimeout(() => {
+      prebufferedRoundRef.current = roundIndex;
+      // 프리버퍼링 도중 실제 예약 재생이 이미 시작됐다면 여기서 pause/seek하지 않는다.
+      if (playedRoundRef.current === roundIndex) {
+        prebufferingRoundRef.current = null;
+        return;
+      }
 
-        prebufferPauseTimerRef.current = setTimeout(() => {
-          prebufferPauseTimerRef.current = null;
-          // 이 사이 실제 재생 타이머가 이미 발동해버렸다면(느린 네트워크 등으로
-          // 프리버퍼링 자체가 예정 시각에 바짝 붙어 실행된 경우) 여기서 일시정지시키면
-          // 진행 중인 실제 재생을 멈춰버리게 된다. 그 경우 실제 재생 타이머가 이미
-          // unMute()까지 처리했으므로 아무것도 하지 않는다.
-          if (playedRoundRef.current === roundIndex) {
-            return;
-          }
-          player.pauseVideo();
-          player.seekTo(startSec ?? 0, true);
-          // 음소거 해제는 여기서 하지 않는다. 일시정지 상태로 예정 시각까지 대기하는
-          // 동안 음소거를 미리 풀어두면(모바일 등 일부 환경에서) 재생 재개 순간에
-          // 짧게 소리가 났다 끊기는 문제가 관측되어, 실제 재생 타이머가 playVideo()
-          // 호출 직전에 unMute()하도록 그 시점을 뒤로 미룬다.
-        }, PREBUFFER_PLAY_MS);
-      },
-      Math.max(0, prebufferDelayMs),
-    );
+      player.pauseVideo();
+      player.seekTo(startSec ?? 0, true);
+
+      // 음소거 해제는 여기서 하지 않는다. 실제 예약 재생 직전에만 unMute()한다.
+    }, Math.max(0, VITE_PREBUFFER_PLAY_MS));
 
     return () => {
-      clearTimeout(startTimer);
+      clearTimeout(prebufferEndTimer);
       if (prebufferPauseTimerRef.current) {
         clearTimeout(prebufferPauseTimerRef.current);
         prebufferPauseTimerRef.current = null;
       }
+
+      // 라운드/상태 전환으로 프리버퍼링이 중단되면 muted 재생이 남지 않게 정리한다.
+      if (
+        prebufferingRoundRef.current === roundIndex &&
+        playedRoundRef.current !== roundIndex
+      ) {
+        player.pauseVideo();
+        prebufferingRoundRef.current = null;
+      }
     };
-  }, [room.gameStatus, roundIndex, playScheduledAt, serverTimeOffsetMs, startSec]);
+  }, [room.gameStatus, roundIndex, startSec]);
 
   useEffect(() => {
     if (
@@ -247,21 +230,34 @@ export function GamePlayer({
 
     const delayMs =
       new Date(playScheduledAt).getTime() - (Date.now() + serverTimeOffsetMs);
+
     const timer = setTimeout(
       () => {
-        playedRoundRef.current = roundIndex;
-        setIsPlayScheduleDue(true);
-        const player = playerRef.current?.getInternalPlayer();
-        // 음소거 해제는 실제 재생을 시작하기 바로 직전, 여기서만 한다(프리버퍼링
-        // 단계에서는 일부러 음소거를 풀지 않는다 — 위 프리버퍼링 effect 주석 참고).
-        player?.unMute();
-        player?.playVideo();
-
         const actualServerTimeMs = Date.now() + serverTimeOffsetMs;
+
+        // PLAYING 이벤트가 오기 전에 본 재생 명령 시점을 먼저 기록한다.
         playbackCommandAtMsRef.current = {
           roundIndex,
           atMs: actualServerTimeMs,
         };
+        playedRoundRef.current = roundIndex;
+        setIsPlayScheduleDue(true);
+
+        // 실제 예약 재생이 시작됐으므로 프리버퍼링 상태/마지막 pause 타이머를 정리한다.
+        prebufferingRoundRef.current = null;
+        if (prebufferPauseTimerRef.current) {
+          clearTimeout(prebufferPauseTimerRef.current);
+          prebufferPauseTimerRef.current = null;
+        }
+        const player = playerRef.current?.getInternalPlayer();
+
+        if (player) {
+          // 음소거 해제는 실제 재생을 시작하기 바로 직전, 여기서만 한다.
+          player.seekTo(startSec ?? 0, true);
+          player.unMute();
+
+          player.playVideo();
+        }
 
         if (onPlaybackTriggered) {
           onPlaybackTriggered({
@@ -282,14 +278,11 @@ export function GamePlayer({
     playScheduledAt,
     serverTimeOffsetMs,
     onPlaybackTriggered,
+    startSec,
   ]);
 
-  // ready 보고는 유튜브 플레이어(iframe)가 생성되면(onReady) 바로 한다. 실제 버퍼링
-  // 완료 여부까지 정밀하게 확인하려던 시도(CUED 상태 감지)는 이 컴포넌트의 플레이어
-  // 구성(videoId를 생성자 옵션으로 바로 전달)에서는 안정적으로 감지되지 않는 것으로
-  // 확인되어(관측 결과 CUED가 거의 발생하지 않음, "실패"로 오판하는 원인이었다) 걷어내고,
-  // iframe 로딩 여부만 러프하게 기준으로 삼는다. onReady 자체가 오지 않는 경우에 대비해
-  // 유예 시간 후 강제로 ready 처리하는 안전장치만 유지한다.
+  // ready 보고는 handlePlayerStateChange의 PLAYING 분기에서 한다.
+  // onReady 자체가 오지 않는 경우에 대비해 유예 시간 후 강제로 ready 처리하는 안전장치만 유지한다.
   useEffect(() => {
     if (room.gameStatus !== 'LOADING' || roundIndex === null) {
       return;
@@ -309,9 +302,10 @@ export function GamePlayer({
   }, [room.gameStatus, roundIndex, onReady]);
 
   const handlePlayerReady = () => {
-    if (reportedReadyRoundRef.current !== roundIndex) {
-      reportedReadyRoundRef.current = roundIndex;
-      onReady();
+    const player = playerRef.current?.getInternalPlayer();
+    if (player) {
+      player.mute();
+      player.playVideo();
     }
   };
 
@@ -327,8 +321,22 @@ export function GamePlayer({
   // 시점(isPlayScheduleDue)부터 아직 실제로 재생되지 않았으면 아이콘을 클릭 가능한
   // 재생 버튼으로 보여준다 — 클릭 자체가 유저 제스처라 브라우저가 재생을 허용해준다.
   // 실제로 재생이 시작되면(PLAYING 이벤트) 다시 원래의 음표 아이콘으로 되돌린다.
+  // RoomGamePage의 GameHelpModal("확인" 클릭)이 입장 시 user activation을 미리
+  // 남겨줘서 이 fallback이 필요한 경우(주로 참가자의 첫 라운드)를 줄여준다.
   const handlePlayerStateChange = (event: YouTubeEvent<number>) => {
     if (event.data === YouTube.PlayerState.PLAYING) {
+      if (reportedReadyRoundRef.current !== roundIndex) {
+        reportedReadyRoundRef.current = roundIndex;
+        onReady();
+      }
+
+      // 실제 예약 재생 타이머가 발동하기 전의 PLAYING은 모두 프리버퍼링으로 본다.
+      // prebufferingRoundRef만 보지 않고 playedRoundRef까지 확인해야, 프리버퍼 종료 과정의
+      // 짧은 playVideo()에서 발생한 PLAYING도 본 재생으로 오인하지 않는다.
+      if (roundIndex === null || playedRoundRef.current !== roundIndex) {
+        return;
+      }
+
       setIsPlaying(true);
 
       if (

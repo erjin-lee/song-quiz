@@ -12,6 +12,7 @@ import { GamePlayer } from '../components/GamePlayer';
 import { InquiryModal } from '../components/InquiryModal';
 import { EditRoomModal } from '../components/EditRoomModal';
 import { ChangeNicknameModal } from '../components/ChangeNicknameModal';
+import { GameHelpModal } from '../components/GameHelpModal';
 import {
   ChatPanel,
   type ChatEntry,
@@ -77,6 +78,10 @@ export function RoomGamePage() {
     atstNm: string;
   } | null>(null);
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  // 방 입장 시 자동으로 띄운다 - "확인" 클릭이 브라우저에 남기는 user activation이
+  // 첫 라운드 재생 예정 시각의 자동재생(YouTube unMute+play)을 막히지 않게 해준다
+  // (GamePlayer.tsx 자동재생 관련 주석 참고). 타이머로 자동 닫지 말 것.
+  const [helpModalOpen, setHelpModalOpen] = useState(true);
   const [editRoomOpen, setEditRoomOpen] = useState(false);
   const [nicknameModalOpen, setNicknameModalOpen] = useState(false);
   const [passwordRequired, setPasswordRequired] = useState(false);
@@ -469,6 +474,7 @@ export function RoomGamePage() {
 
   const handleStartGame = useCallback(() => {
     socket?.emit('game:start');
+    chatPanelRef.current?.focus();
   }, [socket]);
 
   const handleRestartGame = useCallback(() => {
@@ -693,6 +699,10 @@ export function RoomGamePage() {
           </main>
         </div>
       </div>
+
+      {helpModalOpen && room?.gameStatus === 'WAITING' && (
+        <GameHelpModal onClose={() => setHelpModalOpen(false)} />
+      )}
 
       {editRoomOpen && (
         <EditRoomModal
