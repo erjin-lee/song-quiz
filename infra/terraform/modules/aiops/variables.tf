@@ -25,6 +25,13 @@ variable "game_target_5xx_alarm_name" {
   default     = "SongQuiz-Prod-High-Game-Target5xx"
 }
 
+# v1-3: API Target5xx ALARM 확장(§AIOps v1-3) - v1-2와 동일한 패턴으로 변수 하나만 추가한다.
+variable "api_target_5xx_alarm_name" {
+  description = "API Target5xx 분석 대상 Alarm 이름(정확히 일치). EventBridge event pattern과 Lambda 쪽 방어적 재검증에 함께 쓴다."
+  type        = string
+  default     = "SongQuiz-Prod-High-API-Target5xx"
+}
+
 variable "lambda_dist_path" {
   description = "incident-analyzer Lambda의 빌드 산출물(dist) 디렉터리 절대경로. terraform plan/apply 전에 `yarn workspace incident-analyzer build`로 먼저 만들어야 한다(archive_file이 이 경로를 그대로 zip으로 묶음)."
   type        = string
@@ -43,6 +50,19 @@ variable "game_log_group_name" {
 
 variable "game_log_group_arn" {
   description = "logs:StartQuery 권한을 제한할 apps/game Log Group ARN(logging 모듈 출력)"
+  type        = string
+}
+
+# API Target5xx(§AIOps v1-3)의 Logs Insights 조회 대상 - apps/api Log Group. 이 값에는
+# 기본값을 두지 않는다(game_log_group_name/arn과 동일하게 logging 모듈 출력을 그대로 전달받는
+# 필수 값이라 잘못된 기본값을 두는 것보다 명시적으로 누락을 드러내는 편이 안전하다).
+variable "api_log_group_name" {
+  description = "CloudWatch Logs Insights로 조회할 apps/api Log Group 이름(logging 모듈 출력)"
+  type        = string
+}
+
+variable "api_log_group_arn" {
+  description = "logs:StartQuery 권한을 제한할 apps/api Log Group ARN(logging 모듈 출력)"
   type        = string
 }
 

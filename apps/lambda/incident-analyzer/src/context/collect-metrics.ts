@@ -72,6 +72,8 @@ export interface CollectMetricsResult {
 // 때마다 이 맵에 목록 하나만 더한다. QuizSnapshotFailure는 기존 7개를 그대로 유지해
 // 기존 분석이 깨지지 않게 한다(regression). Game Target5xx는 요청받은 16개 metric
 // 전체를 dashboard.tf/alarms.tf가 이미 쓰는 namespace/dimension으로만 구성한다.
+// API Target5xx(§AIOps v1-3)도 이미 buildAllQuerySpecs에 존재하는 13개 spec만 골라 쓴다 -
+// 새 metric spec은 추가하지 않는다.
 const INCIDENT_METRIC_NAMES: Record<IncidentType, string[]> = {
   QUIZ_SNAPSHOT_FAILURE: [
     "Game.QuizSnapshotFailure",
@@ -99,6 +101,21 @@ const INCIDENT_METRIC_NAMES: Record<IncidentType, string[]> = {
     "Redis.Evictions",
     "RDS.CPUUtilization",
     "RDS.DatabaseConnections",
+  ],
+  API_TARGET_5XX: [
+    "API.HTTPCode_Target_5XX_Count",
+    "API.TargetResponseTime",
+    "API.RequestCount",
+    "Game.HTTPCode_Target_5XX_Count",
+    "Game.TargetResponseTime",
+    "Game.RequestCount",
+    "RDS.CPUUtilization",
+    "RDS.DatabaseConnections",
+    "EC2.CPUUtilization",
+    "EC2.MemoryUsedPercent",
+    "Redis.MemoryUsagePercentage",
+    "Redis.CurrConnections",
+    "Redis.Evictions",
   ],
 };
 

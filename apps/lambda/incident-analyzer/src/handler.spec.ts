@@ -1,5 +1,6 @@
 import fixture from "../test/fixtures/quiz-snapshot-failure-alarm.json";
 import gameTarget5xxFixture from "../test/fixtures/game-target-5xx-alarm.json";
+import apiTarget5xxFixture from "../test/fixtures/api-target-5xx-alarm.json";
 import { EventBridgeAlarmStateChangeEvent } from "./types";
 
 const mockCollectAlarmDefinition = jest.fn();
@@ -40,9 +41,12 @@ jest.mock("./get-ssm-parameter", () => ({
 const alarmEvent = fixture as unknown as EventBridgeAlarmStateChangeEvent;
 const gameTarget5xxEvent =
   gameTarget5xxFixture as unknown as EventBridgeAlarmStateChangeEvent;
+const apiTarget5xxEvent =
+  apiTarget5xxFixture as unknown as EventBridgeAlarmStateChangeEvent;
 
 const ENV = {
   GAME_LOG_GROUP_NAME: "/deploy-terraform/game",
+  API_LOG_GROUP_NAME: "/deploy-terraform/api",
   ALB_ARN_SUFFIX: "app/deploy-terraform-alb/abc",
   API_TARGET_GROUP_ARN_SUFFIX: "targetgroup/deploy-terraform-api/def",
   GAME_TARGET_GROUP_ARN_SUFFIX: "targetgroup/deploy-terraform-game/ghi",
@@ -160,17 +164,74 @@ describe("handler", () => {
     expect(mockSendSlackMessage).not.toHaveBeenCalled();
   });
 
-  it("QuizSnapshotFailure/Game Target5xx가 아닌 다른 Alarm(API Target5xx)은 아직 분석하지 않는다(§5)", async () => {
+  it("API Target5xx ALARM은 신규 API_TARGET_5XX 분석으로 context를 모아 OpenAI 분석 후 Slack으로 보낸다", async () => {
+    const { handler } = await import("./handler");
+
+    await handler(apiTarget5xxEvent);
+
+    expect(mockCollectMetrics).toHaveBeenCalledTimes(1);
+    expect(mockCollectMetrics).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "API_TARGET_5XX",
+    );
+    expect(mockCollectLogs).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "API_TARGET_5XX",
+    );
+    expect(mockAnalyzeIncident).toHaveBeenCalledTimes(1);
+    expect(mockSendSlackMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("API Target5xx의 OK 상태도 분석하지 않는다(§6)", async () => {
     const event: EventBridgeAlarmStateChangeEvent = {
-      ...alarmEvent,
+      ...apiTarget5xxEvent,
       detail: {
-        ...alarmEvent.detail,
-        alarmName: "SongQuiz-Prod-High-API-Target5xx",
+        ...apiTarget5xxEvent.detail,
+        state: { ...apiTarget5xxEvent.detail.state, value: "OK" },
       },
     };
 
     const { handler } = await import("./handler");
     await handler(event);
+
+    expect(mockCollectMetrics).not.toHaveBeenCalled();
+    expect(mockSendSlackMessage).not.toHaveBeenCalled();
+  });
+
+  it("아직 지원하지 않는 Alarm(EC2 HighCPU)은 분석하지 않는다(§5)", async () => {
+    const event: EventBridgeAlarmStateChangeEvent = {
+      ...alarmEvent,
+      detail: {
+        ...alarmEvent.detail,
+        alarmName: "SongQuiz-Prod-Warning-EC2-HighCPU",
+      },
+    };
+
+    const { handler } = await import("./handler");
+    await handler(event);
+
+    expect(mockCollectMetrics).not.toHaveBeenCalled();
+    expect(mockSendSlackMessage).not.toHaveBeenCalled();
+  });
+
+  it("API_LOG_GROUP_NAME이 없어도 QuizSnapshotFailure/Game Target5xx는 계속 동작한다(§AIOps v1-3 - 배포 순서 분리)", async () => {
+    process.env.API_LOG_GROUP_NAME = "";
+
+    const { handler } = await import("./handler");
+    await handler(alarmEvent);
+    await handler(gameTarget5xxEvent);
+
+    expect(mockCollectMetrics).toHaveBeenCalledTimes(2);
+    expect(mockSendSlackMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("API_LOG_GROUP_NAME이 없으면 API Target5xx만 조용히 종료한다", async () => {
+    process.env.API_LOG_GROUP_NAME = "";
+
+    const { handler } = await import("./handler");
+    await handler(apiTarget5xxEvent);
 
     expect(mockCollectMetrics).not.toHaveBeenCalled();
     expect(mockSendSlackMessage).not.toHaveBeenCalled();

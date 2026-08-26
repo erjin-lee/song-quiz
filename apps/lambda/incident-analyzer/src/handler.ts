@@ -25,15 +25,22 @@ const QUIZ_SNAPSHOT_FAILURE_ALARM_NAME =
   "SongQuiz-Prod-High-Game-QuizSnapshotFailure";
 const GAME_TARGET_5XX_ALARM_NAME =
   process.env.GAME_TARGET_5XX_ALARM_NAME ?? "SongQuiz-Prod-High-Game-Target5xx";
+const API_TARGET_5XX_ALARM_NAME =
+  process.env.API_TARGET_5XX_ALARM_NAME ?? "SongQuiz-Prod-High-API-Target5xx";
 const INCIDENT_TYPE_BY_ALARM_NAME: Record<string, IncidentType> = {
   [QUIZ_SNAPSHOT_FAILURE_ALARM_NAME]: "QUIZ_SNAPSHOT_FAILURE",
   [GAME_TARGET_5XX_ALARM_NAME]: "GAME_TARGET_5XX",
+  [API_TARGET_5XX_ALARM_NAME]: "API_TARGET_5XX",
 };
 const ALARM_NAME_PREFIX = "SongQuiz-Prod-";
 const ANALYSIS_WINDOW_MINUTES = 15;
 const DEFAULT_OPENAI_MODEL = "gpt-5.6-luna";
 
 const GAME_LOG_GROUP_NAME = process.env.GAME_LOG_GROUP_NAME;
+// API_TARGET_5XX(§AIOps v1-3)에서만 쓴다 - apps/lambda/CLAUDE.md 규칙대로 findMissingEnv에서
+// 이 IncidentType일 때만 필수로 취급해, terraform apply 전에 CI가 코드를 먼저 배포해도
+// 기존 두 IncidentType은 계속 동작한다.
+const API_LOG_GROUP_NAME = process.env.API_LOG_GROUP_NAME;
 const GAME_METRIC_NAMESPACE =
   process.env.GAME_METRIC_NAMESPACE ?? "SongQuiz/Game";
 const ALB_ARN_SUFFIX = process.env.ALB_ARN_SUFFIX;
@@ -62,8 +69,12 @@ function buildAnalysisWindow(triggeredAt: Date): AnalysisWindow {
   };
 }
 
-/** 필수 환경변수가 하나라도 비어 있으면 AWS API를 호출하기 전에 즉시 실패시킨다. */
-function findMissingEnv(): string | null {
+/**
+ * 필수 환경변수가 하나라도 비어 있으면 AWS API를 호출하기 전에 즉시 실패시킨다.
+ * API_LOG_GROUP_NAME은 API_TARGET_5XX일 때만 필수로 취급한다(§AIOps v1-3) - 다른 두
+ * IncidentType은 그 값을 쓰지 않으므로, terraform apply 전이라 아직 없어도 영향받지 않는다.
+ */
+function findMissingEnv(incidentType: IncidentType): string | null {
   const required: Record<string, string | undefined> = {
     GAME_LOG_GROUP_NAME,
     ALB_ARN_SUFFIX,
@@ -75,6 +86,7 @@ function findMissingEnv(): string | null {
     CACHE_CLUSTER_ID,
     SLACK_WEBHOOK_PARAMETER_NAME,
     OPENAI_API_KEY_PARAMETER_NAME,
+    ...(incidentType === "API_TARGET_5XX" ? { API_LOG_GROUP_NAME } : {}),
   };
   const missing = Object.entries(required).find(([, value]) => !value);
   return missing ? missing[0] : null;
@@ -109,7 +121,7 @@ export async function handler(
     return;
   }
 
-  const missingEnv = findMissingEnv();
+  const missingEnv = findMissingEnv(incidentType);
   if (missingEnv) {
     console.error(
       JSON.stringify({
@@ -151,7 +163,14 @@ export async function handler(
         },
         incidentType,
       ),
-      collectLogs(window, { gameLogGroupName: GAME_LOG_GROUP_NAME as string }),
+      collectLogs(
+        window,
+        {
+          gameLogGroupName: GAME_LOG_GROUP_NAME as string,
+          apiLogGroupName: API_LOG_GROUP_NAME,
+        },
+        incidentType,
+      ),
       collectDeployments(
         {
           apiDeploymentParameterName: API_DEPLOYMENT_PARAMETER_NAME,

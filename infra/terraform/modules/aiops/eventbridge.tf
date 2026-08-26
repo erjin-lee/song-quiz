@@ -11,12 +11,13 @@
 #   3. 향후 다른 Alarm까지 AI 분석을 확장하더라도 notification 모듈은 전혀 손대지 않고
 #      이 Rule의 alarmName 목록과 Lambda 환경변수만 추가하면 된다.
 #
-# v1-2에서 Game Target5xx ALARM을 추가했다 - 리소스 주소(aws_cloudwatch_event_rule.
-# quiz_snapshot_failure_alarm)는 그대로 두고 event_pattern의 alarmName 목록만 늘렸다
-# (리소스 이름을 바꾸면 Terraform이 삭제 후 재생성으로 계획해 불필요한 replace가 생긴다).
+# v1-2에서 Game Target5xx ALARM을, v1-3에서 API Target5xx ALARM을 추가했다 - 리소스
+# 주소(aws_cloudwatch_event_rule.quiz_snapshot_failure_alarm)는 그대로 두고 event_pattern의
+# alarmName 목록만 늘렸다(리소스 이름을 바꾸면 Terraform이 삭제 후 재생성으로 계획해
+# 불필요한 replace가 생긴다).
 resource "aws_cloudwatch_event_rule" "quiz_snapshot_failure_alarm" {
   name        = "${var.name_prefix}-aiops-quiz-snapshot-failure"
-  description = "${var.quiz_snapshot_failure_alarm_name}/${var.game_target_5xx_alarm_name} Alarm의 ALARM 상태 변화만 incident-analyzer Lambda로 전달한다"
+  description = "${var.quiz_snapshot_failure_alarm_name}/${var.game_target_5xx_alarm_name}/${var.api_target_5xx_alarm_name} Alarm의 ALARM 상태 변화만 incident-analyzer Lambda로 전달한다"
 
   event_pattern = jsonencode({
     source      = ["aws.cloudwatch"]
@@ -25,6 +26,7 @@ resource "aws_cloudwatch_event_rule" "quiz_snapshot_failure_alarm" {
       alarmName = [
         var.quiz_snapshot_failure_alarm_name,
         var.game_target_5xx_alarm_name,
+        var.api_target_5xx_alarm_name,
       ]
       state = {
         value = ["ALARM"]

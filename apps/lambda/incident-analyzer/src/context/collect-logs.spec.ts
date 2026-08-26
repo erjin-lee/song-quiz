@@ -12,7 +12,10 @@ jest.mock("@aws-sdk/client-cloudwatch-logs", () => {
 
 import { collectLogs } from "./collect-logs";
 
-const CONFIG = { gameLogGroupName: "/deploy-terraform/game" };
+const CONFIG = {
+  gameLogGroupName: "/deploy-terraform/game",
+  apiLogGroupName: "/deploy-terraform/api",
+};
 const WINDOW = {
   startTime: new Date("2026-08-24T02:15:00.000Z"),
   endTime: new Date("2026-08-24T02:30:00.000Z"),
@@ -32,8 +35,13 @@ describe("collectLogs", () => {
     jest.useRealTimers();
   });
 
-  async function runCollectLogs() {
-    const promise = collectLogs(WINDOW, CONFIG);
+  async function runCollectLogs(
+    incidentType:
+      | "QUIZ_SNAPSHOT_FAILURE"
+      | "GAME_TARGET_5XX"
+      | "API_TARGET_5XX" = "QUIZ_SNAPSHOT_FAILURE",
+  ) {
+    const promise = collectLogs(WINDOW, CONFIG, incidentType);
     // StartQuery(1회) 이후 poll을 1번만 하도록 GetQueryResults가 즉시 Complete를 준다.
     await jest.advanceTimersByTimeAsync(1000);
     return promise;
@@ -134,5 +142,143 @@ describe("collectLogs", () => {
     expect(result.status).toBe("failed");
     expect(result.logs.errorCount).toBe(0);
     expect(result.logs.samples).toEqual([]);
+  });
+
+  describe("API_TARGET_5XX(신규 - apps/api Log Group 조회)", () => {
+    it("game이 아니라 apiLogGroupName으로 StartQuery를 호출한다", async () => {
+      sendMock.mockResolvedValueOnce({ queryId: "q-1" });
+      sendMock.mockResolvedValueOnce({ status: "Complete", results: [] });
+
+      await runCollectLogs("API_TARGET_5XX");
+
+      const startQueryInput = sendMock.mock.calls[0][0].input;
+      expect(startQueryInput.logGroupNames).toEqual([CONFIG.apiLogGroupName]);
+      expect(startQueryInput.queryString).toContain("method, path, statusCode");
+      expect(startQueryInput.queryString).not.toContain("quiz_snapshot_failed");
+    });
+
+    it("@message(로그 레코드 원문)가 아니라 message 필드만 선택한다(개인정보 유출 방지)", async () => {
+      sendMock.mockResolvedValueOnce({ queryId: "q-1" });
+      sendMock.mockResolvedValueOnce({ status: "Complete", results: [] });
+
+      await runCollectLogs("API_TARGET_5XX");
+
+      const startQueryInput = sendMock.mock.calls[0][0].input;
+      // access 로그 레코드 원문(@message)에는 ip/userId/claimedUserId/query/body/userAgent가
+      // 같은 JSON에 함께 실려 있어(AccessLogMiddleware), 이를 조회하면 allowlist를 우회해
+      // 그 필드들이 그대로 OpenAI로 전달된다 - message(JSON 최상위 필드)만 선택해야 한다.
+      expect(startQueryInput.queryString).not.toMatch(/@message/);
+      expect(startQueryInput.queryString).toMatch(/\bmessage\b/);
+    });
+
+    it("method/path/statusCode를 samples에 담고, message는 @message 원문이 아니라 message 필드 값만 담는다", async () => {
+      sendMock.mockResolvedValueOnce({ queryId: "q-1" });
+      sendMock.mockResolvedValueOnce({
+        status: "Complete",
+        results: [
+          [
+            field("@timestamp", "2026-08-24 02:29:59.000"),
+            // 실제 CloudWatch Logs Insights라면 @message는 조회하지 않았을 값이지만,
+            // 혹시라도 응답에 섞여 와도 samples에 담기지 않는지까지 함께 검증한다.
+            field(
+              "@message",
+              '{"level":"error","message":"GET /internal/quizzes/42/snapshot","ip":"203.0.113.5","userId":"11111111-2222-3333-4444-555555555555","body":{"answer":"secret"}}',
+            ),
+            field("message", "GET /internal/quizzes/42/snapshot"),
+            field("level", "error"),
+            field("method", "GET"),
+            field("path", "/internal/quizzes/42/snapshot"),
+            field("statusCode", "502"),
+          ],
+        ],
+      });
+
+      const result = await runCollectLogs("API_TARGET_5XX");
+
+      const [sample] = result.logs.samples;
+      expect(sample.method).toBe("GET");
+      expect(sample.path).toBe("/internal/quizzes/42/snapshot");
+      expect(sample.statusCode).toBe(502);
+      expect(sample.message).toBe("GET /internal/quizzes/42/snapshot");
+      expect(sample.message).not.toContain("203.0.113.5");
+      expect(sample.message).not.toContain(
+        "11111111-2222-3333-4444-555555555555",
+      );
+      expect(sample.message).not.toContain("secret");
+      expect(JSON.stringify(sample)).not.toContain("203.0.113.5");
+    });
+
+    it("event/errorCode가 없는 access log 행들은 path/statusCode가 다르면 서로 다른 샘플로 남는다", async () => {
+      sendMock.mockResolvedValueOnce({ queryId: "q-1" });
+      sendMock.mockResolvedValueOnce({
+        status: "Complete",
+        results: [
+          [
+            field("@timestamp", "2026-08-24 02:29:59.000"),
+            field("message", "a"),
+            field("level", "error"),
+            field("method", "GET"),
+            field("path", "/quizzes"),
+            field("statusCode", "500"),
+          ],
+          [
+            field("@timestamp", "2026-08-24 02:29:00.000"),
+            field("message", "b"),
+            field("level", "error"),
+            field("method", "POST"),
+            field("path", "/inquiries"),
+            field("statusCode", "503"),
+          ],
+        ],
+      });
+
+      const result = await runCollectLogs("API_TARGET_5XX");
+
+      expect(result.logs.samples).toHaveLength(2);
+    });
+
+    it("같은 path/statusCode라도 method가 다르면 서로 다른 샘플로 남긴다", async () => {
+      sendMock.mockResolvedValueOnce({ queryId: "q-1" });
+      sendMock.mockResolvedValueOnce({
+        status: "Complete",
+        results: [
+          [
+            field("@timestamp", "2026-08-24 02:29:59.000"),
+            field("message", "GET /quizzes/42"),
+            field("level", "error"),
+            field("method", "GET"),
+            field("path", "/quizzes/42"),
+            field("statusCode", "500"),
+          ],
+          [
+            field("@timestamp", "2026-08-24 02:29:00.000"),
+            field("message", "DELETE /quizzes/42"),
+            field("level", "error"),
+            field("method", "DELETE"),
+            field("path", "/quizzes/42"),
+            field("statusCode", "500"),
+          ],
+        ],
+      });
+
+      const result = await runCollectLogs("API_TARGET_5XX");
+
+      expect(result.logs.samples).toHaveLength(2);
+      expect(result.logs.samples.map((s) => s.method)).toEqual(
+        expect.arrayContaining(["GET", "DELETE"]),
+      );
+    });
+
+    it("apiLogGroupName이 없으면 AWS를 호출하지 않고 failed를 반환한다", async () => {
+      const result = await collectLogs(
+        WINDOW,
+        { gameLogGroupName: CONFIG.gameLogGroupName },
+        "API_TARGET_5XX",
+      );
+
+      expect(sendMock).not.toHaveBeenCalled();
+      expect(result.status).toBe("failed");
+      expect(result.logs.samples).toEqual([]);
+    });
   });
 });
