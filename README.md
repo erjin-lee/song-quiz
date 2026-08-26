@@ -567,9 +567,9 @@ Infrastructure
 + Game Error Logs   + 관련 Trace   + Game/API Deployment PR
 ```
 
-이를 통해 향후 `Game 자체 오류` · `API dependency 문제` · `Redis/Lock 문제` · `Resource pressure` · `최근 배포 영향` 등의 가능성을 관측 데이터 기반으로 비교할 수 있도록 확장하고 있습니다.
+이를 통해 `Game 자체 오류` · `API dependency 문제` · `Redis/Lock 문제` · `Resource pressure` · `최근 배포 영향` 등의 가능성을 관측 데이터 기반으로 비교할 수 있도록 확장했습니다.
 
-> 현재 Game Target5xx 코드는 구현 및 Terraform Apply까지 완료했으며, 실제 장애 상황에서의 실데이터 분석 검증은 진행 전입니다.
+> Game Target5xx 코드는 구현 · Terraform Apply · 실제 장애 상황에서의 실데이터 분석 검증까지 모두 완료했습니다.
 
 ---
 
