@@ -6,6 +6,46 @@ interface LocalCacheEntry {
   expiresAt: number | null;
 }
 
+/**
+ * fencing 검사에 필요한 값. 분산 락을 쥔 writer가 발급받은 monotonic token과, 그
+ * key의 최신 token이 들어있는 Redis 키다. 이 인터페이스를 캐시 계층에 두는 이유는
+ * 캐시(하위 계층)가 room 락(상위 계층)을 import하지 않게 하기 위함이다.
+ */
+export interface FenceGuard {
+  /** 최신 fencing token을 담고 있는 Redis 키. */
+  key: string;
+  /** 이 writer가 락 획득 시 발급받은 fencing token. */
+  token: number;
+}
+
+/**
+ * 자기보다 더 새로운 fencing token이 이미 발급됐다면 쓰기를 거부한다. GET과 SET을
+ * 한 번의 Lua 실행으로 묶어야 "검사 직후 다른 워커가 락을 새로 잡는" 틈이 없다.
+ */
+const FENCED_SET_SCRIPT = `
+local latest = redis.call("GET", KEYS[1])
+if latest and tonumber(latest) > tonumber(ARGV[1]) then
+  return 0
+end
+redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
+return 1
+`;
+
+/**
+ * FENCED_SET_SCRIPT의 삭제판. 삭제도 "상태를 바꾸는 쓰기"라 fencing이 필요하다 —
+ * 락 TTL이 만료된 뒤 뒤늦게 정리(deleteRoom 등)에 들어간 워커가, 그 사이 새 락을 잡은
+ * 워커가 기록해둔 상태를 지워버릴 수 있기 때문이다. 키가 원래 없었어도 1을 반환한다
+ * (삭제는 멱등이고, 우리가 구분해야 하는 것은 "거부됐는가"뿐이다).
+ */
+const FENCED_DEL_SCRIPT = `
+local latest = redis.call("GET", KEYS[1])
+if latest and tonumber(latest) > tonumber(ARGV[1]) then
+  return 0
+end
+redis.call("DEL", KEYS[2])
+return 1
+`;
+
 @Injectable()
 export class CacheService implements OnApplicationShutdown {
   private readonly logger = new Logger(CacheService.name);
@@ -129,6 +169,69 @@ export class CacheService implements OnApplicationShutdown {
       return;
     }
     await this.redis.set(key, serialized, 'EX', ttlSeconds);
+  }
+
+  /**
+   * setStrict에 fencing 검사를 더한 버전. guard가 있으면 "내 token보다 새로운 token이
+   * 이미 발급됐는지"를 Redis 안에서 원자적으로 확인하고, 그렇다면 쓰지 않고 false를
+   * 반환한다(락 TTL이 만료된 뒤 뒤늦게 깨어난 stale worker의 덮어쓰기 차단).
+   * guard가 null이면(로컬 폴백 모드이거나 락 밖의 쓰기) 기존 setStrict와 동일하다.
+   */
+  async setStrictFenced<T>(
+    key: string,
+    value: T,
+    ttlSeconds: number,
+    guard: FenceGuard | null,
+  ): Promise<boolean> {
+    if (!this.redis || !guard) {
+      await this.setStrict(key, value, ttlSeconds);
+      return true;
+    }
+
+    const accepted = await this.redis.eval(
+      FENCED_SET_SCRIPT,
+      2,
+      guard.key,
+      key,
+      guard.token,
+      JSON.stringify(value),
+      ttlSeconds,
+    );
+    return accepted === 1;
+  }
+
+  /**
+   * del에 fencing 검사를 더한 버전. del()과 달리 Redis 오류를 삼키지 않고 그대로
+   * 던지며, 더 새로운 fencing token이 이미 발급됐다면 지우지 않고 false를 반환한다.
+   * 락으로 보호되는 상태를 정리하는 경로(방 삭제, 게임 종료 시 라운드 데이터 정리)에
+   * 쓴다 — 조용히 실패하면 "지웠다고 믿었는데 남아있는" 상태가 되고, 조용히 성공하면
+   * 다른 워커가 방금 쓴 상태를 지워버린다.
+   */
+  async delStrictFenced(
+    key: string,
+    guard: FenceGuard | null,
+  ): Promise<boolean> {
+    if (!this.redis) {
+      this.localCache.delete(key);
+      return true;
+    }
+    if (!guard) {
+      await this.redis.del(key);
+      this.localCache.delete(key);
+      return true;
+    }
+
+    const accepted = await this.redis.eval(
+      FENCED_DEL_SCRIPT,
+      2,
+      guard.key,
+      key,
+      guard.token,
+    );
+    if (accepted === 1) {
+      this.localCache.delete(key);
+    }
+    return accepted === 1;
   }
 
   async del(key: string): Promise<void> {
