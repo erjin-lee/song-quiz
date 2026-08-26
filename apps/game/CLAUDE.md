@@ -17,14 +17,16 @@
 - `src/main.ts`: 부트스트랩, 포트 설정(`PORT`, 기본 `8002`), Socket.IO Redis 어댑터 연결.
 - `src/app/`: 스캐폴드(`app.module.ts` 등).
 - `src/room/`: 유일한 도메인 모듈. `room.controller.ts`(REST), `room.gateway.ts`(Socket.IO `/rooms`), `room.service.ts`, `room-lock.service.ts`(분산 락), `room-timer.service.ts`(지연 실행), `internal-room.controller.ts`(apps/api 전용), `clients/`(QuizClient, AuthClient), `dto/`.
-- `src/cache/`, `src/common/`: apps/api와 같은 이름의 동일한 목적 모듈이지만 별도 프로세스라 파일을 그대로 복제해서 갖고 있다(ADR-0003과 동일한 이유).
+- `src/cache/`, `src/common/`: apps/api와 같은 이름의 동일한 목적 모듈이지만 별도 프로세스라 각자 갖고 있다(ADR-0003과 동일한 이유). 원래는 동일한 파일의 복제였으나 지금은 갈라져 있다 — `src/cache/cache.service.ts`에는 room 분산 락이 쓰는 fencing 연산(`setStrictFenced`/`delStrictFenced`)이 있고 apps/api에는 없다. 이쪽을 고칠 때 apps/api 파일에 그대로 옮기지 않는다.
 - `src/logging/`: `AccessLogMiddleware`(정책이 api와 다를 수 있어 그대로 복제)와 winston access logger만 남아있고, 구조화 로거·requestId/traceId 전파·redaction·formatter 등 서비스 독립적인 부분은 `packages/logger`(apps/api와 공유하는 워크스페이스)로 옮겨졌다.
 - 새 도메인을 이 서비스에 추가하지 않는다 — room 이외의 기능은 apps/api에 속한다.
 
 # Redis/Socket.IO 동작
 
 - room 메타데이터·참가자·라운드 진행 상태(`songOrder`/`roundsSnapshot`/`currentAnswers`/`currentReveal`/`chatHistory`)는 `CacheService`(Redis, `REDIS_HOST` 미설정 시 로컬 메모리 폴백)에 저장한다.
-- roomId별 동시 요청 직렬화는 `RoomLockService`(REDIS_HOST 설정 시 분산 락, 아니면 프로세스 내 Promise 체이닝), 라운드/스피드모드/재접속 유예 타이머는 `RoomTimerService`가 담당한다. 동작 원리는 [`ADR-0001`](../../docs/adr/0001-room-realtime-state-and-reconnect.md) 참고 — apps/api에 있던 것과 완전히 동일한 코드를 그대로 옮겼다.
+- roomId별 동시 요청 직렬화는 `RoomLockService`(REDIS_HOST 설정 시 분산 락, 아니면 프로세스 내 Promise 체이닝), 라운드/스피드모드/재접속 유예 타이머는 `RoomTimerService`가 담당한다. 동작 원리는 [`ADR-0001`](../../docs/adr/0001-room-realtime-state-and-reconnect.md) 참고. `RoomTimerService`는 apps/api에 있던 코드를 그대로 옮긴 것이지만, `RoomLockService`는 이후 Redis 장애 내성(lease/write boundary/fencing token)이 추가돼 더 이상 같지 않다.
+- **room 상태를 바꾸는 코드는 반드시 `withRoomLock` 안에서 `RoomRepository`를 통해야 한다.** 상태 쓰기/삭제는 전부 `RoomRepository`의 `writeSharedState`/`deleteSharedState` 한 통로를 지나고, 거기서 lease 유효성과 fencing token을 검사한다. `cacheService.set`/`del`을 직접 불러 room 상태를 건드리면 이 방어를 전부 우회한다. 새 상태 종류를 추가할 때도 이 통로를 쓰고, "이 키를 보호하는 락"을 함께 넘긴다 — 중첩 락에서 엉뚱한 fencing 카운터를 검사하는 것을 막기 위한 것이라 생략하면 안 된다.
+- Redis 장애 중 room 상태를 **바꾸는** 경로는 로컬 메모리로 폴백하지 않고 실패한다(fail-closed). 새 코드를 넣을 때 "Redis가 죽어도 일단 진행"으로 되돌리지 않는다. 반면 **읽는** 경로는 종류에 따라 갈린다 — 라운드 진행 데이터(`songOrder`/`roundsSnapshot`/`currentAnswers`/`currentReveal`)와 인덱스 read-modify-write는 `getStrict`로 실패시키고, 방 레코드 조회(`getRoomRecord`)·방 목록(`getRoomIndex`)·채팅 히스토리는 여전히 로컬로 폴백한다(오래된 값을 읽어도 뒤따르는 쓰기가 차단되므로 정합성이 깨지지 않는다).
 - 여러 인스턴스로 확장할 때는 Socket.IO Redis 어댑터(`src/common/redis-io.adapter.ts`)가 필요하다 — `main.ts`에서 `app.listen()` 전에 연결하고, 실패하면 부팅 자체를 실패시킨다(로컬 폴백으로 조용히 넘어가지 않음).
 
 # Commands

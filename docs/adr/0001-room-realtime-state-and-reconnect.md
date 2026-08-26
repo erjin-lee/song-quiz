@@ -1,7 +1,7 @@
 # ADR-0001: Room 실시간 상태 관리와 재접속 처리
 
 - 상태: Accepted (멀티 인스턴스 대응 완료 — 아래 "멀티 인스턴스 마이그레이션" 참고)
-- 관련 코드: `apps/game/src/room/room.service.ts`, `apps/game/src/room/room-lock.service.ts`, `apps/game/src/room/room-timer.service.ts`, `apps/game/src/room/room.gateway.ts`, `apps/game/src/common/redis-io.adapter.ts`, `apps/web/src/utils/roomSession.ts`, `apps/web/src/pages/RoomGamePage.tsx`
+- 관련 코드: `apps/game/src/room/room.service.ts`, `apps/game/src/room/room-lock.service.ts`, `apps/game/src/room/room.repository.ts`, `apps/game/src/room/room-timer.service.ts`, `apps/game/src/room/room.gateway.ts`, `apps/game/src/cache/cache.service.ts`, `apps/game/src/common/redis-io.adapter.ts`, `apps/web/src/utils/roomSession.ts`, `apps/web/src/pages/RoomGamePage.tsx`
 - 2026-08-23: `apps/api/src/room/**`에 있던 코드가 `apps/game`으로 이동했다(내용은 그대로, 위치만 이동). 서비스 분리 배경은 [`ADR-0004`](0004-game-service-split.md) 참고.
 
 ## 배경
@@ -46,6 +46,7 @@
 ### 새 트레이드오프
 
 - 분산 락은 TTL(8초) 안에 임계구역이 끝나지 못하면 하트비트로 연장하지만, 그마저도 실패하면 다른 인스턴스가 락을 가로챌 수 있다 — 임계구역이 DB 쿼리 몇 개 수준인 현재 코드에서는 사실상 도달하지 않는 경로다.
+  - **(2026-08-26 정정)** 이 판단은 틀렸다. 하트비트가 실패하는 조건을 "임계구역이 느린 경우"로만 봤는데, 실제로는 **임계구역 길이와 무관하게 Redis에 닿지 못하기만 해도** 하트비트가 실패한다. 아래 "Redis 장애 내성 보강" 참고.
 - 타이머 재수거는 최소 1회(at-least-once) 보장이라 크래시 시 최대 `RESERVATION_MS`(24초)만큼 늦게 처리될 수 있다. 핸들러가 이미 상태 가드를 갖고 있어 중복 실행 자체는 안전하다.
 - `fetchSockets()`는 응답이 느린 인스턴스의 소켓을 조용히 누락할 수 있다 — disconnect 시점과 유예 만료 직전 두 번 확인해 완화하지만 완전히 제거되지는 않는 잔여 리스크다.
 - REDIS_HOST가 설정되지 않은 환경(로컬 개발, 단위 테스트)은 기존과 100% 동일하게 단일 인스턴스로 동작한다 — 이 마이그레이션은 로컬 개발 경험을 바꾸지 않는다.
@@ -70,7 +71,68 @@
 - 소켓 재연결과 REST 입장은 서로 다른 신호다. "이 유저가 실제로 새로 들어왔는가"는 REST `joinRoom`이 참가자 레코드를 새로 만들었는가로 결정하는 것이 가장 정확하고, 소켓 disconnect/reconnect 타이밍(타이머 예약 성공 여부 포함)에 영향받지 않는다.
 - REST 입장 시점에는 아직 새 참가자의 소켓이 연결되지 않았으므로, 기존처럼 "본인 제외 브로드캐스트"(`excludeClient`)를 할 수 없다 — 새 참가자는 곧이어 `room:enter`가 내려주는 `chat:history`로 자신의 입장 메시지를 뒤늦게 확인한다. 실시간 노출 타이밍이 수백 ms 늦어질 뿐 기존 UX와 체감 차이는 없다.
 
+## Redis 장애 내성 보강 (2026-08-26)
+
+### 문제
+
+멀티 인스턴스 마이그레이션은 **"락을 쥔 프로세스가 죽는 경우"** 를 방어했다. TTL이 락을 자동으로 풀고, 토큰 기반 CAS 해제가 "내 락이 이미 만료된 뒤 남의 락을 실수로 푸는" 것을 막는다. 여기까지는 의도대로 동작한다.
+
+방어되지 않은 것은 **"프로세스는 살아있는데 락을 잃는 경우"** 다. Redis가 락 TTL(8초)보다 길게 끊기면 Redis 서버 쪽에서 락 key가 그냥 사라지는데, 당시 코드에서 하트비트 실패 처리는 `.catch(warn 로그)` 한 줄이 전부였다. 즉 **임계구역은 자기가 락을 잃었다는 사실을 알 방법이 없었다.**
+
+```text
+t=0    A: SET NX 성공
+t=1    Redis 단절
+t=4    A: PEXPIRE 실패 → warn 로그만 남음
+t=8    Redis: TTL 만료로 락 key 삭제        ← A는 모른다
+t=8+   B: SET NX 성공                       ← 둘 다 자기가 락을 쥐었다고 믿는다
+t=12   A: saveRoom() → B가 쓴 상태를 덮어씀
+```
+
+위 "새 트레이드오프"에서 이 경로를 "임계구역이 DB 쿼리 몇 개 수준이라 사실상 도달하지 않는다"고 적었던 것이 이 결함의 원인이다. **하트비트 실패는 임계구역의 길이와 무관하다** — Redis에 닿지 못하기만 하면 실패한다. 임계구역이 아무리 짧아도, 그 짧은 구간 중에 Redis가 8초 끊기면 그대로 발생한다.
+
+같은 뿌리에서 나온 문제가 두 개 더 있었다.
+
+- 락으로 보호하는 `room:index` read-modify-write가 lenient `get`/`set`을 써서, Redis 장애 중 **로컬 메모리에서 읽고 로컬 메모리에 쓴 뒤 성공을 반환**했다. 락으로 직렬화한 의미가 사라진다.
+- 락 획득 루프가 `isRedisReady()`가 false면 즉시 포기해, 수백 ms짜리 재연결에도 503이 나갔다.
+
+### 결정
+
+임계구역이 "락을 잃었다"를 **알 수 있게** 만들고, 알기 전에 쓰더라도 **저장소가 거부하게** 만든다. 세 층을 쌓되, 각 층은 앞 층이 원리적으로 막을 수 없는 것을 막는다.
+
+| 층 | 막는 것 | 이 층이 못 막는 것 |
+|---|---|---|
+| lease | 만료를 감지하고 abort | 이미 시작된 `await` |
+| write boundary | 쓰기/삭제 직전 차단 | 검사~실행 사이의 틈(GC pause 등) |
+| fencing token | Redis가 원자적으로 거부 | — (판단 주체가 Redis) |
+
+1. **lease** — 락을 boolean이 아니라 만료 시각을 가진 `LockLease`로 다룬다. 유효성은 `lastSuccessfulRenewalAt + TTL`로만 판단하고, 만료되면 `AbortController.abort()`와 함께 `room_lock_lease_lost`를 error로 남긴다.
+2. **write boundary** — 상태 쓰기/삭제 직전에 lease를 다시 확인한다. 모든 상태 변경이 `RoomRepository`의 단일 통로를 지나므로 방어도 한 곳에만 건다.
+3. **fencing token** — 락 획득 시 monotonic token을 발급하고, 쓰기/삭제를 Lua로 원자 검사해 더 새로운 token이 이미 발급됐으면 거부한다. **삭제도 상태를 바꾸는 쓰기로 취급한다** — 뒤늦게 정리에 들어간 워커가 다른 워커가 방금 기록한 상태를 지우는 경로가 있었다.
+
+그 외: `room:index`의 read-modify-write를 strict path로 바꿔 fail-closed 하고(목록 조회용 읽기는 게임 정합성과 무관해 lenient 유지), 락 획득 재시도 예산을 경합용과 Redis 장애용으로 분리했다.
+
+### 근거
+
+- **유효성 판단을 "연속 N회 실패"가 아니라 시각 기준으로 한 이유**: 하트비트 실패 횟수는 Redis가 key를 언제 지우는지와 아무 관계가 없다. 실제 만료 시각을 결정하는 것은 마지막으로 `PEXPIRE`가 실행된 시점뿐이다. 같은 이유로 갱신 성공 시각은 응답받은 시각이 아니라 **커맨드를 보낸 시각**으로 잡는다 — 서버의 실제 처리 시점은 항상 그 이후이므로, 우리 계산이 서버보다 낙관적일 수 없다.
+- **갱신 주기를 마지막 "시도"가 아니라 마지막 "성공" 기준으로 잡은 이유**: 시도 기준이면 t=4s 연장이 실패했을 때 다음 시도가 t=8s(이미 만료된 뒤)라, 1~2초짜리 blip조차 넘기지 못한다.
+- **AbortSignal만으로 끝내지 않은 이유**: `abort()`는 신호일 뿐 이미 시작된 `await`를 되돌리지 못한다. 실제 쓰기 직전의 재확인이 없으면 신호는 무시된 채 쓰기가 진행된다.
+- **write boundary만으로 끝내지 않고 fencing까지 간 이유**: 로컬 시계로 하는 검사는 검사~실행 사이의 틈(TOCTOU)을 원리적으로 없앨 수 없다. 판단 주체를 Redis로 옮기면 그 틈이 사라진다.
+- **lease를 인자가 아니라 `AsyncLocalStorage`로 전달한 이유**: 인자로 넘기려면 `withRoomLock` 호출부 14곳 + `RoomRepository` 전체 + 중간 경유지 `RoomRoundService`까지 시그니처가 줄줄이 바뀐다. `packages/logger`의 `LogContext`가 이미 같은 방식이라 새 기법을 들여오는 것이 아니다. 암묵 전달의 위험(엉뚱한 락 아래에서 쓰기)은 "이 키를 보호하는 락"을 명시적 인자로 받아 대조하는 것으로 상쇄했다 — 중첩 락(room 락 안의 room-index 락)에서 ambient lease가 안쪽 것이 되기 때문에, 이 대조가 없으면 fencing이 엉뚱한 카운터를 검사하면서 **통과한다**. 방어가 있다는 착각만 남는 것이 아무 방어도 없는 것보다 나쁘다.
+- **락 획득 재시도 예산을 둘로 나눈 이유**: 락을 쥔 워커를 기다리는 것은 언젠가 끝나는 생산적인 대기지만, Redis가 죽은 동안의 대기는 아무것도 진행시키지 못한 채 요청만 쌓는다. 장애 예산 1초는 ioredis `retryStrategy`(200/400/600ms)의 재연결 시도 2~3회를 덮으면서, 실시간 게임에서 사용자가 소켓 액션 정지를 체감하지 않는 상한이다. 경합 예산 12초는 `RoomTimerService.RESERVATION_MS`가 파생되므로 그대로 뒀다 — 줄이면 타이머 재수거 의미론까지 함께 바뀐다.
+- **fail-closed를 택한 이유**: lease를 잃은 채 임계구역이 완주하면 값을 반환했더라도 예외를 던진다. "B와 나란히 덮어썼는데 성공으로 보고"하는 것보다 드러나는 실패가 낫다. 타이머 핸들러 경로에서는 `RoomTimerService`가 예약을 유지해 자동 재시도하므로 오히려 이쪽이 맞는 동작이다.
+
+### 새 트레이드오프
+
+- **가용성을 정합성과 맞바꿨다.** Redis 장애 중 room 상태를 바꾸는 요청은 이제 로컬로 폴백해 "성공한 것처럼" 보이는 대신 503을 반환한다. 방 목록 조회처럼 정합성과 무관한 읽기만 기존대로 폴백한다.
+- **`deleteRoom`이 Redis 장애 중 실패한다.** 기존에는 `del`이 오류를 삼켜 절반만 지워진 채 `roomDeleted: true`를 반환했다. 이제 `leaveRoom`이 503을 반환한다.
+- **lease 상실 이전에 쓰기를 끝낸 작업도 거부된다.** 클라이언트는 503을 받고 재시도하는데 실제로는 첫 시도가 반영돼 있을 수 있다. 임계구역 중 어느 지점에서 lease를 잃었는지를 정확히 추적하지 않고 "한 번이라도 잃었으면 실패"로 단순화한 결과다.
+- **`deleteRoom`은 여전히 원자적이지 않다.** 방 레코드 삭제 후 인덱스 제거가 실패하면 인덱스에 유령 항목이 남는다(`getRooms`가 걸러내고 6시간 TTL로 정리된다). 이 부분은 이번 변경에서 다루지 않았다.
+- **`createRoom`의 최초 `saveRoom`은 락 밖이라 fencing이 없다.** 아직 아무도 모르는 새 roomId라 실제 경합은 없지만 구조적으로는 열려 있다.
+- **`apps/game`과 `apps/api`의 `cache` 모듈이 갈라졌다.** fencing이 필요한 쪽은 room 락이 있는 `apps/game`뿐이라 그쪽에만 추가했다. 지금까지 "파일을 그대로 복제"였던 관계가 깨졌으므로, 이후 캐시 계층을 고칠 때 두 파일이 동일하다고 가정하면 안 된다.
+
 ## 고려했지만 선택하지 않은 대안
 
 - 방/라운드 상태를 전부 Redis에 두는 방법(최초 검토 시점): 매 상태 변경마다 직렬화/역직렬화 비용과 네트워크 latency가 붙는다는 우려가 있었으나, 실제 멀티 인스턴스 마이그레이션 시점에 측정해보니 현재 트래픽 규모에서는 무시할 수준이라 채택했다.
+- 락 TTL을 늘려(예: 60초) Redis 장애를 견디는 방법: 장애를 견디는 시간은 늘어나지만, 그만큼 **실제로 죽은 인스턴스의 락이 풀리는 시간도 늘어난다.** 배포 중 SIGKILL 한 번에 그 방이 60초간 잠기는 쪽이 더 나쁘다. TTL은 "죽은 프로세스 회수 속도"와 "네트워크 장애 내성"의 트레이드오프이고, 후자는 TTL이 아니라 lease/fencing으로 푸는 것이 맞다.
+- Redlock(여러 Redis 노드 과반 획득) 도입: 현재 Redis는 단일 ElastiCache 인스턴스라 애초에 과반을 구성할 노드가 없고, 노드를 늘려도 이번에 발생한 문제(클라이언트가 자기 lease 만료를 모르는 것)는 해결되지 않는다. Redlock 역시 fencing token을 별도로 요구한다.
 - `roundTimers`/`speedModeTimers`를 Redis 키 만료 이벤트(`notify-keyspace-events` + `expired` 키스페이스 알림)로 구현하는 방법: 관리형 Redis(AWS ElastiCache 등)에서 이 설정이 기본 비활성화돼 있고, 인프라 파라미터 그룹을 바꿔야 하며, pub/sub 특성상 전달 실패 시 알림이 그냥 유실될 수 있어 채택하지 않았다. 대신 각 인스턴스가 직접 폴링하는 ZSET 방식을 택해 별도 Redis 설정 변경 없이 동작하게 했다.

@@ -118,7 +118,8 @@ graph TD
   room -. "QuizClient/AuthClient(HTTP)" .-> apiService(["apps/api"])
 ```
 
-- `cache`/`common`은 `apps/api`의 동일 이름 모듈과 목적이 같지만, 공유 패키지 없이 파일을 그대로 복제해 각자 유지한다(ADR-0003과 동일한 이유).
+- `cache`/`common`은 `apps/api`의 동일 이름 모듈과 목적이 같지만, 공유 패키지 없이 각자 유지한다(ADR-0003과 동일한 이유). **더 이상 동일한 파일이 아니다** — `apps/game`의 `cache`에는 room 분산 락이 쓰는 fencing 연산(`setStrictFenced`/`delStrictFenced`)이 추가되어 있고 `apps/api`에는 없다(락이 없으므로 필요하지 않다). 캐시 계층을 고칠 때 두 파일이 같다고 가정하지 않는다.
+- `room`의 상태 쓰기는 전부 `RoomRepository` 한 통로를 지난다. `RoomLockService`의 분산 락은 Redis 장애가 락 TTL보다 길어질 수 있다는 전제 위에 lease·write boundary·fencing token 3중 방어를 두고, 정합성이 필요한 경로는 로컬 메모리로 폴백하지 않고 실패시킨다(fail-closed). 배경은 [`ADR-0001`](docs/adr/0001-room-realtime-state-and-reconnect.md)의 "Redis 장애 내성 보강" 참고.
 - `logging`은 위 둘과 달리 일부가 `packages/logger`(신규 워크스페이스)로 공유된다 — `LogContext`/`StructuredLogger`/requestId·traceId 전파/exception filter/redaction/formatter 등 서비스 독립적인 부분은 `packages/logger`에 있고, `AccessLogMiddleware`(무엇을 얼마나 남길지가 api/game마다 다를 수 있는 정책)와 `access-logger.factory.ts`의 winston 인스턴스(파일 경로 등)는 여전히 각 앱에 복제되어 있다. `apps/api`도 동일하게 `packages/logger`를 사용한다.
 - `tracing`은 `packages/tracing`(신규 워크스페이스)을 그대로 사용한다 — api/game 모두 `src/main.ts`의 첫 import에서 `startTracing({ service: 'api' | 'game', ... })`을 호출한다. `packages/logger`의 requestId/traceId 전파 로직이 OTel 활성 span에서 실제 traceId/spanId를 읽어오므로, 두 패키지는 함께 동작한다(상세는 위 `apps/api` 섹션의 `tracing` 설명 참고).
 - `room`이 `apps/api`를 호출하는 유일한 경로는 `room/clients/quiz.client.ts`, `room/clients/auth.client.ts`다. TypeORM Repository나 `apps/api`의 도메인 클래스를 직접 참조하지 않는다.
