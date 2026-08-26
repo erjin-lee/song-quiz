@@ -8,7 +8,7 @@ import {
 import { CacheService } from '../cache/cache.service';
 import { QuizRoundData } from './clients/quiz.client';
 import { RoomItemDto } from './dto/room-item.dto';
-import { RoomLockService } from './room-lock.service';
+import { RoomLockService, StaleFencingWriteError } from './room-lock.service';
 
 /**
  * 비밀방 비밀번호 대입 시도 제한. 공개방 입장이나 성공한 입장까지 함께 제한되지
@@ -33,6 +33,15 @@ export const ROOM_TTL_SECONDS = 6 * 60 * 60;
 const CHAT_HISTORY_MAX_ENTRIES = Number(
   process.env.CHAT_HISTORY_MAX_ENTRIES ?? 100,
 );
+
+/**
+ * roomId별 상태를 보호하는 락 키. RoomService.withRoomLock이 잡는 키와 저장소가
+ * fencing 범위를 대조할 때 쓰는 키가 반드시 같아야 해서, 양쪽이 각자 문자열을
+ * 조립하지 않고 이 함수 하나만 쓴다.
+ */
+export function roomLockKey(roomId: string): string {
+  return `room:${roomId}`;
+}
 
 export interface ChatHistoryEntry {
   type: 'message' | 'system';
@@ -179,15 +188,80 @@ export class RoomRepository {
    * 실패를 알아채고 이후 정리(cleanupStaleRoundTimers 등)를 건너뛸 수 있다.
    */
   async saveRoom(room: RoomItemDto): Promise<void> {
-    await this.cacheService.setStrict(
+    await this.writeSharedState(
       this.roomKey(room.roomId),
       room,
       ROOM_TTL_SECONDS,
+      roomLockKey(room.roomId),
     );
   }
 
+  /**
+   * 여러 인스턴스가 공유하는 room 상태 쓰기의 단일 통로. 모든 상태 쓰기가 여기를
+   * 지나므로, 락 lease 검사와 fencing 검사를 이 한 곳에만 걸면 된다.
+   *
+   * 1. assertLeaseHeld: Redis 장애가 락 TTL보다 길어져 lease가 만료됐다면 여기서
+   *    막는다. AbortSignal은 이미 진행 중인 await를 되돌리지 못하므로, 실제 쓰기
+   *    직전에 다시 확인하는 이 경계가 마지막 방어선이다.
+   * 2. fencing: 우리 인스턴스가 lease 만료를 아직 감지하지 못한 상태에서 뒤늦게
+   *    쓰기를 시도해도, 이미 더 새로운 token이 발급됐다면 Redis가 원자적으로 거부한다.
+   *
+   * lockKey에는 "이 key를 보호하는 락"을 넘긴다. 중첩 락에서 ambient lease가 가장
+   * 안쪽 락의 것이 되므로, 이 값이 있어야 엉뚱한 fencing 카운터를 검사하는 일을
+   * RoomLockService가 잡아낼 수 있다.
+   */
+  private async writeSharedState<T>(
+    key: string,
+    value: T,
+    ttlSeconds: number,
+    lockKey: string,
+  ): Promise<void> {
+    this.roomLockService.assertLeaseHeld();
+
+    const accepted = await this.cacheService.setStrictFenced(
+      key,
+      value,
+      ttlSeconds,
+      this.roomLockService.getFenceGuard(lockKey),
+    );
+    this.assertFencedOperationAccepted(accepted, key, '상태 쓰기');
+  }
+
+  /**
+   * writeSharedState의 삭제판. 삭제도 상태를 바꾸는 쓰기이므로 같은 방어를 받는다 —
+   * 이게 없으면 lease를 잃은 워커가 뒤늦게 정리(deleteRoom, 게임 종료 시 라운드 데이터
+   * 정리)에 들어가, 그 사이 새 락을 잡은 워커가 기록한 상태를 지워버릴 수 있다.
+   */
+  private async deleteSharedState(key: string, lockKey: string): Promise<void> {
+    this.roomLockService.assertLeaseHeld();
+
+    const accepted = await this.cacheService.delStrictFenced(
+      key,
+      this.roomLockService.getFenceGuard(lockKey),
+    );
+    this.assertFencedOperationAccepted(accepted, key, '상태 삭제');
+  }
+
+  private assertFencedOperationAccepted(
+    accepted: boolean,
+    key: string,
+    operation: string,
+  ): void {
+    if (accepted) {
+      return;
+    }
+    this.logger.error(
+      `더 새로운 fencing token이 이미 발급되어 ${operation}를 거부했습니다(${key}).`,
+      {
+        event: 'stale_fencing_write_rejected',
+        errorCode: 'STALE_FENCING_WRITE',
+      },
+    );
+    throw new StaleFencingWriteError(key);
+  }
+
   async deleteRoomRecord(roomId: string): Promise<void> {
-    await this.cacheService.del(this.roomKey(roomId));
+    await this.deleteSharedState(this.roomKey(roomId), roomLockKey(roomId));
   }
 
   private roomKey(roomId: string): string {
@@ -212,15 +286,19 @@ export class RoomRepository {
   }
 
   async setSongOrder(roomId: string, songOrder: string[]): Promise<void> {
-    await this.cacheService.setStrict(
+    await this.writeSharedState(
       this.songOrderKey(roomId),
       songOrder,
       ROOM_TTL_SECONDS,
+      roomLockKey(roomId),
     );
   }
 
   async deleteSongOrder(roomId: string): Promise<void> {
-    await this.cacheService.del(this.songOrderKey(roomId));
+    await this.deleteSharedState(
+      this.songOrderKey(roomId),
+      roomLockKey(roomId),
+    );
   }
 
   private songOrderKey(roomId: string): string {
@@ -241,15 +319,19 @@ export class RoomRepository {
     roomId: string,
     snapshot: Record<string, QuizRoundData>,
   ): Promise<void> {
-    await this.cacheService.setStrict(
+    await this.writeSharedState(
       this.roundsSnapshotKey(roomId),
       snapshot,
       ROOM_TTL_SECONDS,
+      roomLockKey(roomId),
     );
   }
 
   async deleteRoundsSnapshot(roomId: string): Promise<void> {
-    await this.cacheService.del(this.roundsSnapshotKey(roomId));
+    await this.deleteSharedState(
+      this.roundsSnapshotKey(roomId),
+      roomLockKey(roomId),
+    );
   }
 
   private roundsSnapshotKey(roomId: string): string {
@@ -265,15 +347,19 @@ export class RoomRepository {
   }
 
   async setCurrentAnswers(roomId: string, answers: string[]): Promise<void> {
-    await this.cacheService.setStrict(
+    await this.writeSharedState(
       this.currentAnswersKey(roomId),
       answers,
       ROOM_TTL_SECONDS,
+      roomLockKey(roomId),
     );
   }
 
   async deleteCurrentAnswers(roomId: string): Promise<void> {
-    await this.cacheService.del(this.currentAnswersKey(roomId));
+    await this.deleteSharedState(
+      this.currentAnswersKey(roomId),
+      roomLockKey(roomId),
+    );
   }
 
   private currentAnswersKey(roomId: string): string {
@@ -298,15 +384,19 @@ export class RoomRepository {
       albmNm: string;
     },
   ): Promise<void> {
-    await this.cacheService.setStrict(
+    await this.writeSharedState(
       this.currentRevealKey(roomId),
       reveal,
       ROOM_TTL_SECONDS,
+      roomLockKey(roomId),
     );
   }
 
   async deleteCurrentReveal(roomId: string): Promise<void> {
-    await this.cacheService.del(this.currentRevealKey(roomId));
+    await this.deleteSharedState(
+      this.currentRevealKey(roomId),
+      roomLockKey(roomId),
+    );
   }
 
   private currentRevealKey(roomId: string): string {
@@ -352,34 +442,54 @@ export class RoomRepository {
     await this.cacheService.del(this.passwordAttemptKey(roomId, clientIp));
   }
 
+  /**
+   * 방 목록 조회(getRooms)용. 목록 표시가 잠깐 비거나 오래된 것은 게임 진행 정합성에
+   * 영향이 없으므로 여기서는 로컬 폴백을 허용하는 get을 그대로 쓴다. 인덱스를 고치는
+   * read-modify-write는 아래 getRoomIndexStrict를 쓴다.
+   */
   async getRoomIndex(): Promise<string[]> {
     return (await this.cacheService.get<string[]>(ROOM_INDEX_CACHE_KEY)) ?? [];
+  }
+
+  /**
+   * addToIndex/removeFromIndex 전용 읽기. 일반 get의 로컬 폴백을 쓰면 Redis 장애 중에
+   * "이 인스턴스의 로컬 캐시에만 있는 인덱스"를 읽어 수정한 뒤 그대로 써버리게 되는데,
+   * 그건 락으로 직렬화한 의미를 지운다. 읽기 자체를 실패시켜 fail-closed 한다.
+   */
+  private async getRoomIndexStrict(): Promise<string[]> {
+    return (
+      (await this.cacheService.getStrict<string[]>(ROOM_INDEX_CACHE_KEY)) ?? []
+    );
   }
 
   /**
    * room:index는 여러 인스턴스가 동시에 건드릴 수 있는 read-modify-write라, roomId별
    * 락(RoomService.withRoomLock)과 별개로 인덱스 전용 락으로 직렬화해야 두 인스턴스가
    * 동시에 방을 만들거나 지워도 마지막 쓰기가 상대방의 변경을 덮어쓰지 않는다.
+   * 락으로 보호하는 correctness-critical 경로이므로 읽기/쓰기 모두 strict path를 쓴다.
    */
   async addToIndex(roomId: string): Promise<void> {
     await this.roomLockService.withLock(ROOM_INDEX_LOCK_KEY, async () => {
-      const index = await this.getRoomIndex();
+      const index = await this.getRoomIndexStrict();
       index.push(roomId);
-      await this.cacheService.set(
+      // 이 안에서는 ambient lease가 room 락이 아니라 room-index 락의 것이다.
+      await this.writeSharedState(
         ROOM_INDEX_CACHE_KEY,
         index,
         ROOM_TTL_SECONDS,
+        ROOM_INDEX_LOCK_KEY,
       );
     });
   }
 
   async removeFromIndex(roomId: string): Promise<void> {
     await this.roomLockService.withLock(ROOM_INDEX_LOCK_KEY, async () => {
-      const index = await this.getRoomIndex();
-      await this.cacheService.set(
+      const index = await this.getRoomIndexStrict();
+      await this.writeSharedState(
         ROOM_INDEX_CACHE_KEY,
         index.filter((id) => id !== roomId),
         ROOM_TTL_SECONDS,
+        ROOM_INDEX_LOCK_KEY,
       );
     });
   }

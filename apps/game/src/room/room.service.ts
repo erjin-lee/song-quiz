@@ -21,6 +21,7 @@ import { UpdateRoomRequestDto } from './dto/update-room-request.dto';
 import { normalizeAnswer, pointsForRank } from './game-scoring.util';
 import {
   ChatHistoryEntry,
+  roomLockKey,
   RoomRecord,
   RoomRepository,
 } from './room.repository';
@@ -855,6 +856,6 @@ export class RoomService extends EventEmitter {
     roomId: string,
     task: () => Promise<T>,
   ): Promise<T> {
-    return this.roomLockService.withLock(`room:${roomId}`, task);
+    return this.roomLockService.withLock(roomLockKey(roomId), task);
   }
 }
