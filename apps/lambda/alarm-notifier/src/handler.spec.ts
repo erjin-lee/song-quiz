@@ -75,6 +75,66 @@ describe("handler", () => {
     expect(message.text).toBe("✅ [복구됨] Game 알람");
   });
 
+  // 아래 두 케이스는 "새 상태가 INSUFFICIENT_DATA"인 케이스와 다르다. Alarm을 새로 만들면
+  // INSUFFICIENT_DATA -> OK 전이가 발생하는데(treat_missing_data = notBreaching), 이걸 막지
+  // 않으면 장애가 난 적도 없는데 "복구됨" 알림이 Slack에 올라간다.
+  it("INSUFFICIENT_DATA -> OK 전이(신규 Alarm 생성 직후)는 복구 알림을 보내지 않는다", async () => {
+    const newAlarmEvent: EventBridgeAlarmStateChangeEvent = {
+      ...alarmEvent,
+      detail: {
+        ...alarmEvent.detail,
+        state: { ...alarmEvent.detail.state, value: "OK" },
+        previousState: {
+          ...alarmEvent.detail.previousState,
+          value: "INSUFFICIENT_DATA",
+        },
+      },
+    };
+
+    const { handler } = await import("./handler");
+    await handler(newAlarmEvent);
+
+    expect(mockGetSlackWebhookUrl).not.toHaveBeenCalled();
+    expect(mockSendSlackMessage).not.toHaveBeenCalled();
+  });
+
+  it("previousState가 없는 이벤트의 OK도 복구 알림을 보내지 않는다", async () => {
+    const eventWithoutPreviousState = {
+      ...alarmEvent,
+      detail: {
+        ...alarmEvent.detail,
+        state: { ...alarmEvent.detail.state, value: "OK" },
+        previousState: undefined,
+      },
+    } as unknown as EventBridgeAlarmStateChangeEvent;
+
+    const { handler } = await import("./handler");
+    await handler(eventWithoutPreviousState);
+
+    expect(mockSendSlackMessage).not.toHaveBeenCalled();
+  });
+
+  it("INSUFFICIENT_DATA -> ALARM 전이는 정상적으로 알람을 보낸다", async () => {
+    const event: EventBridgeAlarmStateChangeEvent = {
+      ...alarmEvent,
+      detail: {
+        ...alarmEvent.detail,
+        state: { ...alarmEvent.detail.state, value: "ALARM" },
+        previousState: {
+          ...alarmEvent.detail.previousState,
+          value: "INSUFFICIENT_DATA",
+        },
+      },
+    };
+
+    const { handler } = await import("./handler");
+    await handler(event);
+
+    expect(mockSendSlackMessage).toHaveBeenCalledTimes(1);
+    const [, message] = mockSendSlackMessage.mock.calls[0];
+    expect(message.text).toBe("🚨 [HIGH] Game 알람 발생");
+  });
+
   it("INSUFFICIENT_DATA 상태는 무시하고 Slack을 호출하지 않는다", async () => {
     const event: EventBridgeAlarmStateChangeEvent = {
       ...alarmEvent,
