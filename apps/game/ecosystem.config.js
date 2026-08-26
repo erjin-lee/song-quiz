@@ -13,7 +13,7 @@ module.exports = {
       kill_timeout: 5_000,
       error_file: "../../logs/game.log",
       out_file: "../../logs/game.log",
-      env: { NODE_ENV: 'production' },
+      env: { NODE_ENV: 'production', COMMIT_SHA: process.env.COMMIT_SHA },
       autorestart: true,
       max_restarts: 10,
     },
