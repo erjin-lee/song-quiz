@@ -157,14 +157,34 @@ describe("collectLogs", () => {
       expect(startQueryInput.queryString).not.toContain("quiz_snapshot_failed");
     });
 
-    it("method/path/statusCode를 samples에 담는다", async () => {
+    it("@message(로그 레코드 원문)가 아니라 message 필드만 선택한다(개인정보 유출 방지)", async () => {
+      sendMock.mockResolvedValueOnce({ queryId: "q-1" });
+      sendMock.mockResolvedValueOnce({ status: "Complete", results: [] });
+
+      await runCollectLogs("API_TARGET_5XX");
+
+      const startQueryInput = sendMock.mock.calls[0][0].input;
+      // access 로그 레코드 원문(@message)에는 ip/userId/claimedUserId/query/body/userAgent가
+      // 같은 JSON에 함께 실려 있어(AccessLogMiddleware), 이를 조회하면 allowlist를 우회해
+      // 그 필드들이 그대로 OpenAI로 전달된다 - message(JSON 최상위 필드)만 선택해야 한다.
+      expect(startQueryInput.queryString).not.toMatch(/@message/);
+      expect(startQueryInput.queryString).toMatch(/\bmessage\b/);
+    });
+
+    it("method/path/statusCode를 samples에 담고, message는 @message 원문이 아니라 message 필드 값만 담는다", async () => {
       sendMock.mockResolvedValueOnce({ queryId: "q-1" });
       sendMock.mockResolvedValueOnce({
         status: "Complete",
         results: [
           [
             field("@timestamp", "2026-08-24 02:29:59.000"),
-            field("@message", '{"level":"error"}'),
+            // 실제 CloudWatch Logs Insights라면 @message는 조회하지 않았을 값이지만,
+            // 혹시라도 응답에 섞여 와도 samples에 담기지 않는지까지 함께 검증한다.
+            field(
+              "@message",
+              '{"level":"error","message":"GET /internal/quizzes/42/snapshot","ip":"203.0.113.5","userId":"11111111-2222-3333-4444-555555555555","body":{"answer":"secret"}}',
+            ),
+            field("message", "GET /internal/quizzes/42/snapshot"),
             field("level", "error"),
             field("method", "GET"),
             field("path", "/internal/quizzes/42/snapshot"),
@@ -179,6 +199,13 @@ describe("collectLogs", () => {
       expect(sample.method).toBe("GET");
       expect(sample.path).toBe("/internal/quizzes/42/snapshot");
       expect(sample.statusCode).toBe(502);
+      expect(sample.message).toBe("GET /internal/quizzes/42/snapshot");
+      expect(sample.message).not.toContain("203.0.113.5");
+      expect(sample.message).not.toContain(
+        "11111111-2222-3333-4444-555555555555",
+      );
+      expect(sample.message).not.toContain("secret");
+      expect(JSON.stringify(sample)).not.toContain("203.0.113.5");
     });
 
     it("event/errorCode가 없는 access log 행들은 path/statusCode가 다르면 서로 다른 샘플로 남는다", async () => {
@@ -188,7 +215,7 @@ describe("collectLogs", () => {
         results: [
           [
             field("@timestamp", "2026-08-24 02:29:59.000"),
-            field("@message", "a"),
+            field("message", "a"),
             field("level", "error"),
             field("method", "GET"),
             field("path", "/quizzes"),
@@ -196,7 +223,7 @@ describe("collectLogs", () => {
           ],
           [
             field("@timestamp", "2026-08-24 02:29:00.000"),
-            field("@message", "b"),
+            field("message", "b"),
             field("level", "error"),
             field("method", "POST"),
             field("path", "/inquiries"),
@@ -208,6 +235,38 @@ describe("collectLogs", () => {
       const result = await runCollectLogs("API_TARGET_5XX");
 
       expect(result.logs.samples).toHaveLength(2);
+    });
+
+    it("같은 path/statusCode라도 method가 다르면 서로 다른 샘플로 남긴다", async () => {
+      sendMock.mockResolvedValueOnce({ queryId: "q-1" });
+      sendMock.mockResolvedValueOnce({
+        status: "Complete",
+        results: [
+          [
+            field("@timestamp", "2026-08-24 02:29:59.000"),
+            field("message", "GET /quizzes/42"),
+            field("level", "error"),
+            field("method", "GET"),
+            field("path", "/quizzes/42"),
+            field("statusCode", "500"),
+          ],
+          [
+            field("@timestamp", "2026-08-24 02:29:00.000"),
+            field("message", "DELETE /quizzes/42"),
+            field("level", "error"),
+            field("method", "DELETE"),
+            field("path", "/quizzes/42"),
+            field("statusCode", "500"),
+          ],
+        ],
+      });
+
+      const result = await runCollectLogs("API_TARGET_5XX");
+
+      expect(result.logs.samples).toHaveLength(2);
+      expect(result.logs.samples.map((s) => s.method)).toEqual(
+        expect.arrayContaining(["GET", "DELETE"]),
+      );
     });
 
     it("apiLogGroupName이 없으면 AWS를 호출하지 않고 failed를 반환한다", async () => {

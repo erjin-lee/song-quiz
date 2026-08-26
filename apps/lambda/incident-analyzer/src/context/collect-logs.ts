@@ -49,8 +49,15 @@ fields @timestamp, @message, event, level, errorCode, requestId, traceId
 // 상황에서 level="error"를 남기므로(AccessLogMiddleware는 statusCode>=500일 때, app 로그는
 // LoggingExceptionFilter가 5xx HttpException 또는 처리되지 않은 예외에서) 이 필터 하나로
 // 두 종류를 함께 잡는다. game과 달리 우선시할 단일 target event가 없다.
+//
+// game과 달리 @message(로그 레코드 원문 전체)를 조회하지 않는다 - AccessLogMiddleware가
+// 같은 JSON 레코드에 ip/userId/claimedUserId/query/body/userAgent까지 함께 남기므로(§13
+// 개인정보 allowlist), @message를 그대로 가져오면 그 필드들이 문자열 안에 그대로 실려
+// allowlist를 우회해 OpenAI로 전달된다. 대신 message(JSON 최상위 필드, event/level 등과
+// 동일한 방식)만 선택한다 - access 로그는 `${method} ${path}`, app 예외 로그는
+// exception.message만 담겨 있어 다른 필드가 섞여 들어올 수 없다.
 const API_QUERY = `
-fields @timestamp, @message, event, level, errorCode, requestId, traceId, method, path, statusCode
+fields @timestamp, message, event, level, errorCode, requestId, traceId, method, path, statusCode
 | filter level = "error"
 | sort @timestamp desc
 | limit ${QUERY_ROW_LIMIT}
@@ -135,7 +142,11 @@ function redactMessage(message: string): string {
   );
 }
 
-function toLogSample(row: InsightsRow): LogSample {
+// game은 기존 동작(회귀 테스트 포함)을 그대로 유지하기 위해 @message(로그 레코드 원문)를
+// 계속 쓰고, api는 message(JSON 최상위 필드)만 쓴다 - API_QUERY 위 주석 참고.
+type MessageField = "@message" | "message";
+
+function toLogSample(row: InsightsRow, messageField: MessageField): LogSample {
   const sample: LogSample = { timestamp: row["@timestamp"] ?? "" };
   if (row.level) sample.level = row.level;
   if (row.event) sample.event = row.event;
@@ -149,7 +160,7 @@ function toLogSample(row: InsightsRow): LogSample {
     if (!Number.isNaN(statusCode)) sample.statusCode = statusCode;
   }
 
-  const rawMessage = row["@message"];
+  const rawMessage = row[messageField];
   if (rawMessage) {
     sample.message = redactMessage(rawMessage).slice(0, 500);
   }
@@ -174,7 +185,11 @@ function countBy(
  * targetEvent가 있으면(game) 그 이벤트를 우선 노출하도록 앞으로 정렬한다 - api는 우선시할
  * 단일 이벤트가 없어 정렬 없이 원본 순서(최신순)를 그대로 쓴다.
  */
-function pickSamples(rows: InsightsRow[], targetEvent?: string): LogSample[] {
+function pickSamples(
+  rows: InsightsRow[],
+  targetEvent: string | undefined,
+  messageField: MessageField,
+): LogSample[] {
   const orderedRows = targetEvent
     ? [...rows].sort((a, b) => {
         const aTarget = a.event === targetEvent ? 0 : 1;
@@ -189,12 +204,13 @@ function pickSamples(rows: InsightsRow[], targetEvent?: string): LogSample[] {
   for (const row of orderedRows) {
     if (samples.length >= MAX_SAMPLE_COUNT) break;
     // api access log 행은 event/errorCode가 거의 항상 비어 있어(app 레벨 예외 로그만 채움)
-    // 그 둘만으로 dedupe하면 서로 다른 route/statusCode 오류가 한 건으로 뭉개진다 - path/
-    // statusCode도 key에 포함한다(game 행은 이 두 필드가 항상 없어 기존 동작 그대로다).
-    const dedupeKey = `${row.event ?? ""}::${row.errorCode ?? ""}::${row.path ?? ""}::${row.statusCode ?? ""}`;
+    // 그 둘만으로 dedupe하면 서로 다른 method/route/statusCode 오류가 한 건으로 뭉개진다 -
+    // method/path/statusCode도 key에 포함한다(같은 path라도 GET/POST/DELETE는 서로 다른
+    // 핸들러·실패 원인일 수 있다). game 행은 이 세 필드가 항상 없어 기존 동작 그대로다.
+    const dedupeKey = `${row.event ?? ""}::${row.errorCode ?? ""}::${row.method ?? ""}::${row.path ?? ""}::${row.statusCode ?? ""}`;
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
-    samples.push(toLogSample(row));
+    samples.push(toLogSample(row, messageField));
   }
 
   return samples;
@@ -233,6 +249,7 @@ export async function collectLogs(
 
   const query = source === "api" ? API_QUERY : GAME_QUERY;
   const targetEvent = source === "game" ? TARGET_EVENT : undefined;
+  const messageField: MessageField = source === "api" ? "message" : "@message";
 
   try {
     const rows = await runInsightsQuery(logGroupName, window, query);
@@ -247,7 +264,7 @@ export async function collectLogs(
         errorCode: key,
         count,
       })),
-      samples: pickSamples(rows, targetEvent),
+      samples: pickSamples(rows, targetEvent, messageField),
     };
 
     return { status: "success", logs };

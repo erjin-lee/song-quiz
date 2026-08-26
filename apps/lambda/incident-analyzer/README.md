@@ -99,6 +99,14 @@ route 패턴별 집계(`routeCounts`)는 구현하지 않았다 - 대신 `LogSam
 `statusCode`를 그대로 노출해 AI가 개별 샘플 단위로만 참고하게 한다(억지 문자열 파싱으로
 route를 정규화하지 않는다, `apps/lambda/incident-analyzer/src/context/collect-logs.ts` 참고).
 
+game과 달리 로그 레코드 원문(`@message`)은 조회하지 않고 `message`(JSON 최상위 필드)만
+선택한다 - `AccessLogMiddleware`가 같은 JSON 레코드에 `ip`/`userId`/`claimedUserId`/`query`/
+`body`/`userAgent`까지 함께 남기므로, `@message`를 그대로 가져오면 `LogSample` allowlist를
+우회해 그 개인정보/요청 본문이 원본 그대로 OpenAI로 전달된다. `message` 필드는 access 로그는
+`${method} ${path}`, app 예외 로그는 `exception.message`만 담고 있어 다른 필드가 섞여 들어올
+수 없다. 대표 샘플 dedupe key에도 `method`를 포함해, 같은 path/statusCode라도 서로 다른
+HTTP method(예: 같은 리소스의 GET과 DELETE)가 한 건으로 뭉개지지 않게 한다.
+
 NestJS/Express 없이 plain Lambda handler(`src/handler.ts`)만 사용한다. `openai`는 Lambda
 런타임이 제공하지 않는 npm 패키지라 `dependencies`로 선언하고, `@aws-sdk/*`는 alarm-notifier와
 동일하게 Lambda Node.js 관리형 런타임이 이미 포함하고 있어 `devDependencies`로만 선언한다
