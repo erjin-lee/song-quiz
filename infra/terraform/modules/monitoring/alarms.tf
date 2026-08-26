@@ -1,7 +1,14 @@
-# CloudWatch Alarm 1차 세트(총 8개) - "지금 서비스 장애 또는 장애 직전 상태인가"를 빠르게
-# 감지하기 위한 최소 알람만 구성한다. 새 Metric/Metric Filter는 만들지 않고 dashboard.tf와
-# 동일한 기존 지표만 사용한다. 이번 단계에서는 감지까지만 하고 SNS/EventBridge/Lambda 등
-# alarm_actions는 연결하지 않는다(다음 Observability 단계에서 별도로 작업).
+# CloudWatch Alarm - "지금 서비스 장애 또는 장애 직전 상태인가"를 빠르게 감지하기 위한
+# 최소 알람만 구성한다.
+#
+# 1차 세트(총 8개, 2026-08-24): 새 Metric/Metric Filter는 만들지 않고 dashboard.tf와 동일한
+# 기존 지표만 사용했다. 이 단계에서는 감지까지만 하고 alarm_actions는 연결하지 않았다.
+# 2026-08-26 추가(총 10개): Room 분산 락 붕괴 감지 2개(맨 아래). 이 둘은 같은 PR에서 함께
+# 추가한 Metric Filter(modules/logging/metric-filters.tf)의 지표를 쓴다.
+#
+# alarm_actions는 여전히 어느 Alarm에도 붙이지 않는다 - 이후 추가된 notification 모듈이
+# SNS 대신 EventBridge Rule에서 "SongQuiz-Prod-" prefix로 매칭해 alarm-notifier Lambda(Slack)로
+# 보내기 때문이다. 즉 아래 naming convention을 지키는 것만으로 Slack 알림까지 연결된다.
 #
 # Naming convention: SongQuiz-Prod-{Severity}-{Service}-{Signal}
 #   Severity: Critical(가용성 직접 영향) / High(핵심 기능 실패·실제 오류) / Warning(장애 가능성 높은 자원 상태)
@@ -198,6 +205,72 @@ resource "aws_cloudwatch_metric_alarm" "quiz_snapshot_failure" {
 
   namespace   = var.game_metric_namespace
   metric_name = "QuizSnapshotFailure"
+  statistic   = "Sum"
+
+  period              = 60
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+
+  tags = {
+    Environment = "prod"
+    Service     = "game"
+    Severity    = "high"
+    Category    = "application"
+  }
+}
+
+# --- Application: Room 분산 락 붕괴 감지 (High) ---
+# 아래 두 Alarm은 "room 분산 락의 상호배제가 실제로 깨졌다"는 신호다. 배경은
+# docs/adr/0001-room-realtime-state-and-reconnect.md의 "Redis 장애 내성 보강" 참고.
+#
+# 두 지표를 하나로 합치지 않고 각각 Alarm을 두는 이유: 서로 다른 시점을 가리키고, 한쪽 없이
+# 다른 쪽만 발생할 수 있다. lease 상실은 "내가 락을 잃었다고 스스로 판정한" 시점이고, fencing
+# 거부는 "실제로 다른 워커와 충돌해 쓰기가 막힌" 시점이다. 락 key가 사라지고 다른 워커가 새로
+# 잡은 뒤 원래 워커의 다음 하트비트(최대 4초)가 오기 전에 쓰기를 시도하면, 그 워커는 아직 자기
+# lease가 유효하다고 믿으므로 lease 상실 없이 fencing 거부만 발생한다. 합쳐두면 Slack 알림에서
+# 이 둘을 구분할 수 없어 원인 파악이 느려진다.
+#
+# Severity를 high로 두는 이유: 가용성이 직접 죽은 것은 아니라 critical은 아니지만, 두 경우 모두
+# 실제 오류이고(요청이 503으로 실패한다) 근본 원인(Redis 장애 또는 락 로직 결함)은 즉시 조사가
+# 필요하다. threshold >= 1은 QuizSnapshotFailure와 같은 기준이다 - 정상 운영에서는 datapoint
+# 자체가 없어야 하는 이벤트라, 1건이라도 나오면 봐야 한다.
+#
+# 이 Alarm들은 alarm_actions를 붙이지 않는다. notification 모듈의 EventBridge Rule이
+# "SongQuiz-Prod-" prefix로 매칭하므로 이름만 규칙에 맞으면 자동으로 Slack까지 전달된다.
+# aiops 모듈(incident-analyzer)의 Rule은 alarmName을 명시적으로 나열하므로, 이 두 Alarm은
+# AI 분석 대상이 아니다(OpenAI 호출 비용이 늘지 않는다).
+resource "aws_cloudwatch_metric_alarm" "room_lock_lease_lost" {
+  alarm_name        = "SongQuiz-Prod-High-Game-RoomLockLeaseLost"
+  alarm_description = "Game room distributed lock lease was lost at least once within 1 minute, meaning mutual exclusion was no longer guaranteed for that critical section. service=game severity=high category=application signal=RoomLockLeaseLost condition=sum>=1/1m"
+
+  namespace   = var.game_metric_namespace
+  metric_name = "RoomLockLeaseLost"
+  statistic   = "Sum"
+
+  period              = 60
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+
+  tags = {
+    Environment = "prod"
+    Service     = "game"
+    Severity    = "high"
+    Category    = "application"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "stale_fencing_write_rejected" {
+  alarm_name        = "SongQuiz-Prod-High-Game-StaleFencingWriteRejected"
+  alarm_description = "Game room state write/delete was rejected at least once within 1 minute because a newer fencing token had already been issued, meaning two workers held the same room lock concurrently. service=game severity=high category=application signal=StaleFencingWriteRejected condition=sum>=1/1m"
+
+  namespace   = var.game_metric_namespace
+  metric_name = "StaleFencingWriteRejected"
   statistic   = "Sum"
 
   period              = 60
