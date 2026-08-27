@@ -27,10 +27,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # jsdom 30(devDependency)의 engines 요구사항(^22.22.2 || ^24.15.0 || >=26.0.0)
+      # 때문에 테스트 단계가 추가된 뒤로는 Node 20을 쓸 수 없다.
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Enable Corepack (Yarn 4)
         run: corepack enable
