@@ -8,6 +8,9 @@
     "apps/lambda/*",
     "packages/*"
   ],
+  "resolutions": {
+    "vite": "^5.4.10"
+  },
   "scripts": {
     "build": "turbo run build",
     "test": "turbo run test",

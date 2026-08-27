@@ -1,0 +1,45 @@
+name: Test Web
+
+# apps/web 변경이 있는 PR에서 타입 체크·테스트를 실행해 검증한다.
+on:
+  pull_request:
+    paths:
+      - "apps/web/**"
+      - "package.json"
+      - "yarn.lock"
+      - "turbo.json"
+
+concurrency:
+  group: test-web-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # jsdom 30(devDependency)의 engines 요구사항(^22.22.2 || ^24.15.0 || >=26.0.0)
+      # 때문에 다른 워크플로우와 달리 Node 20을 쓸 수 없다.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack (Yarn 4)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Lint web
+        run: yarn workspace web lint
+
+      - name: Test web
+        run: yarn workspace web test
+
+      - name: Build web
+        run: yarn web:build

@@ -25,7 +25,7 @@
 - `src/api/`: REST 및 Socket.IO 백엔드 연동.
 - `src/types/`: `apps/api`의 DTO를 미러링한 타입.
 - `/rooms/new` 라우트는 `/rooms/:roomId`보다 먼저 선언해야 한다.
-- 아직 테스트 러너는 설정되어 있지 않다. 도입 시 이 문서에 명시한다.
+- 테스트 러너는 Vitest + React Testing Library다. 테스트 파일은 대상 파일 옆에 `*.test.ts`/`*.test.tsx`로 둔다(예: `src/utils/roomSession.ts` → `src/utils/roomSession.test.ts`). 공통 설정은 `vite.config.ts`의 `test` 필드와 `src/test/setup.ts`(jest-dom 매처, RTL `cleanup`)에 있다.
 
 # Patterns
 
@@ -54,6 +54,9 @@ yarn web
 yarn workspace web dev
 yarn workspace web build
 yarn workspace web lint
+yarn workspace web test
+yarn workspace web test:watch
+yarn workspace web test:cov
 ```
 
 # Verification
