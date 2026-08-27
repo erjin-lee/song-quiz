@@ -1,0 +1,60 @@
+name: Test API
+
+# apps/api 변경이 있는 PR에서 lint·테스트를 실행해 검증한다. apps/api는
+# packages/logger, packages/tracing를 workspace:*로 참조하므로(dist를 보고
+# import) 그 경로 변경도 트리거·빌드 대상에 포함한다 — deploy-api.yml의
+# build_api와 동일한 스코프·순서다.
+on:
+  pull_request:
+    paths:
+      - "apps/api/**"
+      - "packages/logger/**"
+      - "packages/tracing/**"
+      - "package.json"
+      - "yarn.lock"
+      - "turbo.json"
+
+concurrency:
+  group: test-api-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable Corepack (Yarn 4)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: YARN_ENABLE_IMMUTABLE_INSTALLS=true yarn workspaces focus api
+
+      - name: Build logger
+        run: yarn workspace logger build
+
+      - name: Build tracing
+        run: yarn workspace tracing build
+
+      - name: Lint logger
+        run: yarn workspace logger lint
+
+      - name: Lint tracing
+        run: yarn workspace tracing lint
+
+      - name: Test logger
+        run: yarn workspace logger test
+
+      - name: Lint api
+        run: yarn workspace api lint
+
+      - name: Test api
+        run: yarn workspace api test
