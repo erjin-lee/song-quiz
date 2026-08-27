@@ -13,6 +13,9 @@ on:
       - "package.json"
       - "yarn.lock"
       - "turbo.json"
+      # 이 워크플로 자체가 바뀌는 PR도 검증 대상에 포함한다(자기 자신을 빼면
+      # 명령어·Node 설정이 잘못돼도 이 PR에서는 드러나지 않는다).
+      - ".github/workflows/test-game.yml"
   workflow_dispatch:
 
 concurrency:
