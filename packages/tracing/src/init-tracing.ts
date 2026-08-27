@@ -28,7 +28,9 @@ export interface TracingOptions {
  * span을 만들고 버리는 건 그냥 오버헤드이고, ConsoleSpanExporter로 실서버 로그를
  * span JSON으로 채우는 것도 원치 않는다.
  */
-function resolveTraceExporter(options: TracingOptions): SpanExporter | undefined {
+function resolveTraceExporter(
+  options: TracingOptions,
+): SpanExporter | undefined {
   if (process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
     return new OTLPTraceExporter();
   }

@@ -52,7 +52,11 @@ describe('SameOriginGuard', () => {
   it('CORS 허용 목록에 없어도 API 자신의 origin(Swagger UI 등)이면 통과시킨다', () => {
     expect(
       guard.canActivate(
-        createContext('https://api.noraemat.site', 'api.noraemat.site', 'https'),
+        createContext(
+          'https://api.noraemat.site',
+          'api.noraemat.site',
+          'https',
+        ),
       ),
     ).toBe(true);
   });
