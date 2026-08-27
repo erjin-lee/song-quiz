@@ -13,8 +13,6 @@ on:
       - "package.json"
       - "yarn.lock"
       - "turbo.json"
-      - ".github/workflows/test-api.yml"
-      - ".github/workflows/test-game.yml"
   workflow_dispatch:
 
 concurrency:
