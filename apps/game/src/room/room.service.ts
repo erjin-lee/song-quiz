@@ -113,6 +113,11 @@ export class RoomService extends EventEmitter {
       roomIds.map((roomId) => this.roomRepository.getRoomRecord(roomId)),
     );
 
+    const staleRoomIds = roomIds.filter((_, i) => records[i] === undefined);
+    if (staleRoomIds.length > 0) {
+      this.pruneStaleIndexEntries(staleRoomIds);
+    }
+
     const publicRooms = records
       .filter(
         (room): room is RoomRecord => room !== undefined && !room.isUnlisted,
@@ -127,6 +132,22 @@ export class RoomService extends EventEmitter {
     return publicRooms.slice(start, start + pageSize);
   }
 
+  /**
+   * room:index는 이제 만료시키지 않으므로(ROOM_INDEX_TTL_SECONDS), 방이 TTL로
+   * 자연 만료돼 removeFromIndex를 못 탄 stale entry는 여기서만 정리된다. 목록
+   * 조회 응답을 늦추지 않도록 기다리지 않고(fire-and-forget) 백그라운드에서
+   * 지운다 — 실패해도 다음 조회에서 다시 시도되므로 결국 정리된다.
+   */
+  private pruneStaleIndexEntries(roomIds: string[]): void {
+    for (const roomId of roomIds) {
+      this.roomRepository.removeFromIndex(roomId).catch((err) => {
+        this.logger.warn(
+          `만료된 방을 room:index에서 정리하지 못했습니다(roomId: ${roomId}): ${(err as Error).message}`,
+        );
+      });
+    }
+  }
+
   async getRoom(roomId: string): Promise<RoomItemDto | undefined> {
     const record = await this.roomRepository.getRoomRecord(roomId);
     return record ? this.roomRepository.toPublicRoom(record) : undefined;
@@ -135,7 +156,10 @@ export class RoomService extends EventEmitter {
   async createRoom(
     dto: CreateRoomRequestDto,
     accountUserId?: string,
+    clientIp?: string,
   ): Promise<RoomJoinResultDto> {
+    await this.roomRepository.assertRoomCreationAllowed(clientIp);
+
     const summary = await this.quizClient.getSummary(dto.quizId);
 
     const songLimit = dto.songLimit ?? summary.songCount;
@@ -189,7 +213,18 @@ export class RoomService extends EventEmitter {
     };
 
     await this.roomRepository.saveRoom(room);
-    await this.roomRepository.addToIndex(room.roomId);
+    try {
+      await this.roomRepository.addToIndex(room.roomId);
+    } catch (err) {
+      // index 등록에 실패한 채로 두면 아무도 모르는(응답도 못 받은) orphan room이
+      // Redis에 남는다. 방 본체를 되돌려 orphan을 남기지 않는다.
+      await this.roomRepository.deleteRoomRecord(room.roomId).catch(() => {
+        this.logger.error(
+          `방 생성 롤백 실패(roomId: ${room.roomId}): index 등록 실패 후 방 레코드 정리도 실패했습니다.`,
+        );
+      });
+      throw err;
+    }
 
     updateLogContext({ roomId: room.roomId });
     this.logger.log(
@@ -801,7 +836,14 @@ export class RoomService extends EventEmitter {
 
   private async deleteRoom(roomId: string): Promise<void> {
     await this.roomRepository.deleteRoomRecord(roomId);
-    await this.roomRepository.removeFromIndex(roomId);
+    // index 정리 실패로 "방은 이미 지워졌는데 삭제 요청 자체가 실패한 것처럼" 보이면
+    // 안 되므로 best-effort로만 처리한다. 남는 stale entry는 getRooms 조회 시점에
+    // pruneStaleIndexEntries가 정리한다.
+    await this.roomRepository.removeFromIndex(roomId).catch((err) => {
+      this.logger.warn(
+        `방 삭제 후 room:index 정리 실패(roomId: ${roomId}), 다음 목록 조회 시 정리됩니다: ${(err as Error).message}`,
+      );
+    });
     this.roomRoundService.clearRoundTimer(roomId);
     this.roomRoundService.clearSpeedModeTimer(roomId);
     await Promise.all([

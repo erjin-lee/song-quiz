@@ -17,9 +17,27 @@ import { RoomLockService, StaleFencingWriteError } from './room-lock.service';
 const PASSWORD_ATTEMPT_LIMIT = 5;
 const PASSWORD_ATTEMPT_WINDOW_SECONDS = 60;
 
+/**
+ * 공개 POST /rooms는 비로그인 게스트도 호출할 수 있고, isPrivate방은 생성마다
+ * bcrypt.hash까지 돈다. IP당 방 생성 빈도를 제한해 반복 호출로 CPU(bcrypt)와
+ * Redis(room 레코드 + index) 소비를 무한히 늘리는 것을 막는다.
+ */
+const ROOM_CREATION_LIMIT = 10;
+const ROOM_CREATION_WINDOW_SECONDS = 60;
+const ROOM_CREATION_CACHE_KEY_PREFIX = 'room:create-attempts:';
+
 const ROOM_INDEX_CACHE_KEY = 'room:index';
 /** room:index read-modify-write를 인스턴스 간에 직렬화하기 위한 락 키. */
 const ROOM_INDEX_LOCK_KEY = 'room-index';
+/**
+ * room 본체는 활동마다 TTL이 갱신되는 sliding TTL이지만, room:index는 room 하나하나의
+ * 활동을 알 방법이 없다. 예전처럼 index에도 ROOM_TTL_SECONDS를 걸면, 방 생성/삭제 없이
+ * 활동만 오래 이어질 때 index가 먼저 만료되어 살아있는 방이 전부 목록에서 사라지는
+ * 문제가 생긴다. 그래서 index는 만료시키지 않고(0 = 영구), addToIndex/removeFromIndex로
+ * 항목 단위로만 정합성을 맞춘다. 방이 TTL로 자연 만료돼 removeFromIndex 경로를 타지
+ * 못한 stale entry는 RoomService.getRooms가 조회 시점에 걸러내며 정리한다.
+ */
+const ROOM_INDEX_TTL_SECONDS = 0;
 const ROOM_CACHE_KEY_PREFIX = 'room:';
 const PASSWORD_ATTEMPT_CACHE_KEY_PREFIX = 'room:pwd-attempts:';
 const SONG_ORDER_CACHE_KEY_PREFIX = 'room:song-order:';
@@ -471,12 +489,15 @@ export class RoomRepository {
   async addToIndex(roomId: string): Promise<void> {
     await this.roomLockService.withLock(ROOM_INDEX_LOCK_KEY, async () => {
       const index = await this.getRoomIndexStrict();
+      if (index.includes(roomId)) {
+        return;
+      }
       index.push(roomId);
       // 이 안에서는 ambient lease가 room 락이 아니라 room-index 락의 것이다.
       await this.writeSharedState(
         ROOM_INDEX_CACHE_KEY,
         index,
-        ROOM_TTL_SECONDS,
+        ROOM_INDEX_TTL_SECONDS,
         ROOM_INDEX_LOCK_KEY,
       );
     });
@@ -485,12 +506,35 @@ export class RoomRepository {
   async removeFromIndex(roomId: string): Promise<void> {
     await this.roomLockService.withLock(ROOM_INDEX_LOCK_KEY, async () => {
       const index = await this.getRoomIndexStrict();
+      if (!index.includes(roomId)) {
+        return;
+      }
       await this.writeSharedState(
         ROOM_INDEX_CACHE_KEY,
         index.filter((id) => id !== roomId),
-        ROOM_TTL_SECONDS,
+        ROOM_INDEX_TTL_SECONDS,
         ROOM_INDEX_LOCK_KEY,
       );
     });
+  }
+
+  private roomCreationKey(clientIp: string | undefined): string {
+    return `${ROOM_CREATION_CACHE_KEY_PREFIX}${clientIp ?? 'unknown'}`;
+  }
+
+  /**
+   * IP당 방 생성 속도를 제한한다. bcrypt.hash나 Redis 쓰기를 하기 전, 요청 처리
+   * 맨 앞에서 불러야 한도 초과 요청의 비용을 최소화할 수 있다.
+   */
+  async assertRoomCreationAllowed(clientIp: string | undefined): Promise<void> {
+    const key = this.roomCreationKey(clientIp);
+    const attempts = ((await this.cacheService.get<number>(key)) ?? 0) + 1;
+    if (attempts > ROOM_CREATION_LIMIT) {
+      throw new HttpException(
+        '방 생성 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    await this.cacheService.set(key, attempts, ROOM_CREATION_WINDOW_SECONDS);
   }
 }

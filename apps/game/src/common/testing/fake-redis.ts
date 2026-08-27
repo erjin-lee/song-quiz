@@ -138,7 +138,10 @@ export class FakeRedis {
     return 1;
   }
 
-  /** FENCED_SET_SCRIPT: 더 새로운 fence가 이미 발급됐으면 쓰지 않는다. */
+  /**
+   * FENCED_SET_SCRIPT: 더 새로운 fence가 이미 발급됐으면 쓰지 않는다.
+   * ttlSeconds가 0 이하면(room:index 등) EX 없이 SET한 것처럼 영구 저장한다.
+   */
   private fencedSet(keys: string[], argv: string[]): number {
     const [fenceKey, targetKey] = keys;
     const [token, serialized, ttlSeconds] = argv;
@@ -147,7 +150,11 @@ export class FakeRedis {
       return 0;
     }
     this.values.set(targetKey, serialized);
-    this.expiresAt.set(targetKey, Date.now() + Number(ttlSeconds) * 1000);
+    if (Number(ttlSeconds) > 0) {
+      this.expiresAt.set(targetKey, Date.now() + Number(ttlSeconds) * 1000);
+    } else {
+      this.expiresAt.delete(targetKey);
+    }
     return 1;
   }
 
