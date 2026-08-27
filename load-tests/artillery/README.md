@@ -191,7 +191,7 @@ ok/fail이 출력되고, 하나라도 fail이면 종료 코드가 1이 된다. *
 | 검사 | 임계 | 근거 |
 |---|---|---|
 | `game.socket.ack_ms.p95` | < 500ms | `time:sync` 왕복. 실시간 게임에서 이 이상은 체감된다 |
-| `game.round.start_ms.p95` | < 3000ms | `game:ready` → 라운드 시작. 방 락 경합이 가장 먼저 드러나는 지표 |
+| `game.round.start_ms.p95` | < 3000ms | `game:ready` → 라운드 시작. 방 락 경합이 가장 먼저 드러나는 지표 (신뢰도 한계는 아래 "측정 지표" 절의 주의사항 참고) |
 | `vusers.failed` | < 전체의 1% | VU 완주 실패 |
 | `game.socket.concurrent.max` | ≥ 목표의 90% | 목표 부하에 실제로 도달했는가 |
 
@@ -217,7 +217,7 @@ Artillery 결과와 무관하게, CloudWatch에서 아래가 보이면 **그 단
 
 | 신호 | 판단 |
 |---|---|
-| `game.round.start_ms.p95`가 직전 단계의 2배 초과 | 락 경합이 비선형으로 늘기 시작한 지점 |
+| `game.round.start_ms.p95`가 직전 단계의 2배 초과 | 락 경합이 비선형으로 늘기 시작한 지점일 수 있다 — 단, `USERS_PER_ROOM`도 함께 늘렸다면 아래 주의사항부터 배제하고 판단한다 |
 | `game.socket.concurrent.max`가 목표의 90% 미만 | 부하 생성기 또는 서버가 이미 한계. 그 단계 수치는 해석하면 안 된다 |
 | `RedisLockFailure` 발생 | 락 획득 자체가 실패하기 시작 |
 | `vusers.failed` > 0 (여유 있는 단계에서) | 아직 여유가 있어야 할 구간에서 실패가 나오면 원인을 먼저 찾는다 |
@@ -243,13 +243,35 @@ Artillery 기본:
 | `game.socket.enter_ms` / `enter_ok` | `room:enter` → 첫 `room:state`까지 |
 | `game.socket.ack_ms` / `ack_ok` | **`time:sync` ACK 왕복** — 순수 소켓 지연을 볼 수 있는 유일한 지점 |
 | `game.rest.join_ms` / `join_ok` | REST 입장 지연 |
-| `game.round.start_ms` | `game:ready` → 라운드 실제 시작(PLAYING). 락·타이머 경합이 드러난다 |
+| `game.round.start_ms` | `game:ready` → 라운드 실제 시작(PLAYING). 락·타이머 경합이 드러난다 (신뢰도 한계는 아래 참고) |
 | `game.round.started` / `completed` | 라운드 진행량 |
 | `game.session.game_completed` | 세션 중 완주한 게임 판 수 |
 | `game.host.start_emitted` / `restart_emitted` | 게임 시작/재시작 횟수 |
 | `game.answer.submitted` | 정답 시도 수 |
 | `game.vu.completed` / `failed` | VU 게임 완주 여부 |
 | `game.room.created` / `create_failed` | 방 생성 결과 |
+
+> **⚠️ `game.round.start_ms`의 신뢰도 한계**
+>
+> 이 지표는 `game:ready`를 emit한 VU 자신의 시각부터 그 VU가 `room:state`로 `PLAYING`을
+> 관측한 시각까지를 잰다(`processors/game.ts`의 LOADING 케이스). 그런데 서버는
+> `recomputeReadyStatus`에서 **방 참가자 전원**이 ready여야 `PLAYING`으로 전환한다
+> (`apps/game/src/room/room-round.service.ts`) — 즉 이 값은 "이 VU가 얼마나 빨리 준비했나"가
+> 아니라 "같은 방에서 가장 늦게 준비한 참가자가 얼마나 걸렸나"로 결정된다.
+>
+> 각 VU의 "영상 로딩" 대기는 `THINK.videoLoadMs`(400~1200ms) 랜덤값이므로, `USERS_PER_ROOM`을
+> 늘리면 N개 랜덤값의 최댓값이 커져 **Redis 락 상태와 무관하게** 이 지표가 함께 올라간다.
+> 방 크기를 바꿔가며 여러 단계를 비교하거나(`game-load.yml`처럼 단계별로 인원을 늘리는 시나리오),
+> `USERS_PER_ROOM`이 큰 설정에서 이 지표의 절댓값만으로 락 경합을 단정하지 않는다 — 같은
+> `USERS_PER_ROOM`끼리만, 그리고 가능하면 CloudWatch의 `RedisLockFailure`/`RoomLockLeaseLost`와
+> 함께 봐서 실제 락 문제인지 확인한다. `game-spike.yml`이 이 지표에 `ensure` 임계값을 걸지 않는
+> 이유도 같은 근본 원인(참가자별 랜덤 대기가 인원수에 따라 흔들림) 때문이다.
+>
+> 더 정확히 보려면(추후 과제): 서버가 `beginRound()`에서 세팅하는
+> `currentRound.playScheduledAt`(= 전환 완료 시각 + `PLAY_SCHEDULE_DELAY_SECONDS`, 기본 1.8초)을
+> 역산해 "서버가 락 안에서 전환을 완료한 시각"을 구하고, 그 방에서 마지막으로 emit된
+> `game:ready` 시각과의 차이로 다시 정의하면 다른 참가자의 영상 로딩 대기를 완전히 배제할 수
+> 있다(로드 제너레이터-서버 간 시계 오차는 `time:sync` ACK로 offset을 구해 보정).
 
 ---
 

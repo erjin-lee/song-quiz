@@ -444,6 +444,11 @@ export async function playGame(
               'leave-loading',
               waitBudget(),
             );
+            // PLAYING 전환은 방 참가자 전원의 ready가 모여야 일어나므로(recomputeReadyStatus),
+            // 이 값은 "이 VU가 준비한 시각"이 아니라 "같은 방에서 가장 늦게 준비한 참가자"에
+            // 좌우된다. THINK.videoLoadMs가 참가자마다 랜덤이라, USERS_PER_ROOM이 커질수록
+            // Redis 락 상태와 무관하게 값이 함께 커진다 — README "game.round.start_ms 신뢰도
+            // 한계" 참고.
             if (next.gameStatus === 'PLAYING') {
               events.emit(
                 'histogram',
