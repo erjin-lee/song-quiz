@@ -6,5 +6,9 @@ export function getCorsOrigins(): string[] {
   const corsOriginEnv = process.env.CORS_ORIGIN?.trim();
   return corsOriginEnv
     ? corsOriginEnv.split(',').map((origin) => origin.trim())
-    : ['http://localhost:5173', 'http://localhost:3000', 'https://noraemat.site'];
+    : [
+        'http://localhost:5173',
+        'http://localhost:3000',
+        'https://noraemat.site',
+      ];
 }

@@ -31,9 +31,9 @@ describe('UserAuthGuard', () => {
   });
 
   it('세션 쿠키에 다른 이름만 있으면 UnauthorizedException을 던진다', () => {
-    expect(() =>
-      guard.canActivate(createContext('other=value')),
-    ).toThrow(UnauthorizedException);
+    expect(() => guard.canActivate(createContext('other=value'))).toThrow(
+      UnauthorizedException,
+    );
     expect(jwtServiceMock.verify).not.toHaveBeenCalled();
   });
 

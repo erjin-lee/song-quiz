@@ -1,0 +1,76 @@
+name: Test Game
+
+# apps/game 변경이 있는 PR에서 lint·테스트를 실행해 검증한다. apps/game은
+# packages/logger, packages/tracing를 workspace:*로 참조하므로(dist를 보고
+# import) 그 경로 변경도 트리거·빌드 대상에 포함한다 — deploy-game.yml의
+# build_game과 동일한 스코프·순서다.
+on:
+  pull_request:
+    paths:
+      - "apps/game/**"
+      - "packages/logger/**"
+      - "packages/tracing/**"
+      - "package.json"
+      - "yarn.lock"
+      - "turbo.json"
+      # 이 워크플로 자체가 바뀌는 PR도 검증 대상에 포함한다(자기 자신을 빼면
+      # 명령어·Node 설정이 잘못돼도 이 PR에서는 드러나지 않는다).
+      - ".github/workflows/test-game.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: test-game-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable Corepack (Yarn 4)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: YARN_ENABLE_IMMUTABLE_INSTALLS=true yarn workspaces focus game
+
+      - name: Build logger
+        run: yarn workspace logger build
+
+      - name: Build tracing
+        run: yarn workspace tracing build
+
+      # game이 workspace:*로 참조하는 logger/tracing는 dist를 보고 import하므로
+      # 반드시 이 둘을 먼저 빌드한 뒤에 game을 빌드해야 한다(순서를 바꾸면 "Cannot
+      # find module 'logger'" 타입 에러로 실패한다).
+      - name: Build game
+        run: yarn workspace game build
+
+      - name: Lint logger
+        run: yarn workspace logger lint
+
+      - name: Lint tracing
+        run: yarn workspace tracing lint
+
+      - name: Test logger
+        run: yarn workspace logger test
+
+      - name: Lint game
+        run: yarn workspace game lint
+
+      # logger/tracing/game의 lint 스크립트는 전부 --fix라 위 단계들이 lint 위반을
+      # 조용히 고쳐버리고 성공 처리될 수 있다. 자동 수정으로 diff가 생겼다면(=커밋된
+      # 코드가 lint를 통과하지 못했다는 뜻) 게이트가 통과하지 않도록 여기서 실패시킨다.
+      - name: Fail if lint --fix modified files
+        run: git diff --exit-code
+
+      - name: Test game
+        run: yarn workspace game test

@@ -1,10 +1,6 @@
 import { AsyncResource } from 'node:async_hooks';
 import { CallHandler, ExecutionContext } from '@nestjs/common';
-import {
-  context as otelContext,
-  trace,
-  TraceFlags,
-} from '@opentelemetry/api';
+import { context as otelContext, trace, TraceFlags } from '@opentelemetry/api';
 import { AsyncHooksContextManager } from '@opentelemetry/context-async-hooks';
 import { defer, firstValueFrom, Observable } from 'rxjs';
 import { getLogContext } from './log-context';
@@ -64,7 +60,10 @@ describe('SocketRequestContextInterceptor', () => {
 
   it('OTel 활성 span이 없으면 x-trace-id 핸드셰이크 헤더가 있어도 traceId를 채우지 않는다', () => {
     const interceptor = new SocketRequestContextInterceptor();
-    const client = { handshake: { headers: { 'x-trace-id': 'legacy-header' } }, data: {} };
+    const client = {
+      handshake: { headers: { 'x-trace-id': 'legacy-header' } },
+      data: {},
+    };
 
     let contextSeenInsideHandler: ReturnType<typeof getLogContext> | undefined;
     const nestNext: CallHandler = {
@@ -101,17 +100,17 @@ describe('SocketRequestContextInterceptor', () => {
     // 같은 소켓(client)에서 이벤트 2개가 서로 다른 receive span(=다른 trace) 아래
     // 들어오는 상황을 흉내낸다 — 연결 시점 캐싱이 남아있다면 두 값이 같아야 한다.
     otelContext.with(
-      trace.setSpan(otelContext.active(), wrapSpanContext(
-        '0af7651916cd43dd8448eb211c80319c',
-        'b7ad6b7169203331',
-      )),
+      trace.setSpan(
+        otelContext.active(),
+        wrapSpanContext('0af7651916cd43dd8448eb211c80319c', 'b7ad6b7169203331'),
+      ),
       handle,
     );
     otelContext.with(
-      trace.setSpan(otelContext.active(), wrapSpanContext(
-        '1bf7651916cd43dd8448eb211c80319d',
-        'c8ad6b7169203331',
-      )),
+      trace.setSpan(
+        otelContext.active(),
+        wrapSpanContext('1bf7651916cd43dd8448eb211c80319d', 'c8ad6b7169203331'),
+      ),
       handle,
     );
 
