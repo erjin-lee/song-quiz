@@ -45,6 +45,12 @@ jobs:
       - name: Build tracing
         run: yarn workspace tracing build
 
+      # api가 workspace:*로 참조하는 logger/tracing는 dist를 보고 import하므로
+      # 반드시 이 둘을 먼저 빌드한 뒤에 api를 빌드해야 한다(순서를 바꾸면 "Cannot
+      # find module 'logger'" 타입 에러로 실패한다).
+      - name: Build api
+        run: yarn workspace api build
+
       - name: Lint logger
         run: yarn workspace logger lint
 
