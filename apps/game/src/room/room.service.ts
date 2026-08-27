@@ -140,12 +140,27 @@ export class RoomService extends EventEmitter {
    */
   private pruneStaleIndexEntries(roomIds: string[]): void {
     for (const roomId of roomIds) {
-      this.roomRepository.removeFromIndex(roomId).catch((err) => {
+      this.reconcileStaleIndexEntry(roomId).catch((err) => {
         this.logger.warn(
           `만료된 방을 room:index에서 정리하지 못했습니다(roomId: ${roomId}): ${(err as Error).message}`,
         );
       });
     }
+  }
+
+  /**
+   * getRooms()가 쓰는 getRoomRecord()는 Redis 오류 시 로컬 폴백으로 undefined를 반환할
+   * 수 있다(목록 표시용으로는 안전하지만, 그 결과만으로 index에서 지우면 일시적인 Redis
+   * 오류를 "방 만료"로 오인해 살아있는 방을 영구히 목록에서 지울 수 있다). 그래서 지우기
+   * 전에 폴백 없는 roomExistsStrict로 한 번 더 확인한다 — 이 확인 자체가 실패하면(Redis
+   * 오류) 판단을 유보하고 지우지 않는다(다음 조회에서 다시 시도).
+   */
+  private async reconcileStaleIndexEntry(roomId: string): Promise<void> {
+    const stillExists = await this.roomRepository.roomExistsStrict(roomId);
+    if (stillExists) {
+      return;
+    }
+    await this.roomRepository.removeFromIndex(roomId);
   }
 
   async getRoom(roomId: string): Promise<RoomItemDto | undefined> {

@@ -1,3 +1,4 @@
+import { HttpException } from '@nestjs/common';
 import { CacheService } from '../cache/cache.service';
 import { FakeRedis } from '../common/testing/fake-redis';
 import { RoomItemDto } from './dto/room-item.dto';
@@ -272,5 +273,81 @@ describe('RoomRepository (Redis 장애 대응)', () => {
       'song-1',
       'song-2',
     ]);
+  });
+
+  describe('roomExistsStrict (room:index 정리 전용 존재 확인)', () => {
+    it('room 레코드가 있으면 true, 없으면 false를 반환한다', async () => {
+      await roomRepository.saveRoom(buildRoom('room-5', '존재하는 방'));
+
+      expect(await roomRepository.roomExistsStrict('room-5')).toBe(true);
+      expect(await roomRepository.roomExistsStrict('room-6')).toBe(false);
+    });
+
+    it('Redis 상태 읽기가 실패하면 "없음"으로 오인하지 않고 그대로 던진다', async () => {
+      // getRoomRecord()(로컬 폴백 허용)와 달리, index 정리 판단에 쓰는 이 메서드는
+      // 일시 오류를 "방이 없음"으로 잘못 해석해 살아있는 방을 index에서 지우면 안 된다.
+      redis.dataCommandsDown = true;
+
+      await expect(roomRepository.roomExistsStrict('room-5')).rejects.toThrow();
+    });
+  });
+
+  describe('assertRoomCreationAllowed (방 생성 rate limit 원자성)', () => {
+    it('같은 IP로 몰린 동시 요청도 카운터가 원자적으로 증가해 한도(10회/60초)를 정확히 지킨다', async () => {
+      const clientIp = '203.0.113.1';
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 15 }, () =>
+          roomRepository.assertRoomCreationAllowed(clientIp),
+        ),
+      );
+
+      const allowed = results.filter((r) => r.status === 'fulfilled').length;
+      const blocked = results.filter((r) => r.status === 'rejected').length;
+      expect(allowed).toBe(10);
+      expect(blocked).toBe(5);
+      results
+        .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+        .forEach((r) => expect(r.reason).toBeInstanceOf(HttpException));
+    });
+
+    it('한도를 넘긴 IP가 있어도 다른 IP의 카운터에는 영향을 주지 않는다', async () => {
+      for (let i = 0; i < 10; i += 1) {
+        await roomRepository.assertRoomCreationAllowed('203.0.113.1');
+      }
+      await expect(
+        roomRepository.assertRoomCreationAllowed('203.0.113.1'),
+      ).rejects.toThrow(HttpException);
+
+      await expect(
+        roomRepository.assertRoomCreationAllowed('203.0.113.2'),
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('room:index PERSIST 마이그레이션(onModuleInit)', () => {
+    it('배포 전 코드가 남긴 room:index TTL을 제거해 다시 만료되지 않게 한다', async () => {
+      // 옛 코드처럼 TTL이 걸린 채로 만들어진 index를 흉내낸다.
+      await redis.set('room:index', JSON.stringify(['room-1']), 'EX', 1);
+
+      roomRepository.onModuleInit();
+      // fire-and-forget이므로 내부 PERSIST 호출이 끝날 마이크로태스크 시간을 준다.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // TTL이 그대로 남아있었다면 이 시점에 sweep으로 지워졌어야 한다.
+      jest.advanceTimersByTime(2_000);
+      expect(redis.peek('room:index')).toBeDefined();
+    });
+
+    it('REDIS_HOST가 없는(로컬 폴백) 환경에서는 아무 것도 하지 않는다', async () => {
+      Object.defineProperty(cacheService, 'redis', {
+        value: null,
+        writable: true,
+      });
+
+      expect(() => roomRepository.onModuleInit()).not.toThrow();
+    });
   });
 });
