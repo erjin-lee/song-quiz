@@ -32,6 +32,16 @@ describe("SYSTEM_PROMPT", () => {
     expect(SYSTEM_PROMPT).toContain("Redis 장애를 확정하지 않는다");
   });
 
+  it("room 분산 락 metric 3종의 의미를 과대해석하지 말라는 규칙을 포함한다", () => {
+    expect(SYSTEM_PROMPT).toContain("갱신 1회 실패일 뿐이다");
+    expect(SYSTEM_PROMPT).toContain("같은 락을 획득했다는 사실까지 증명하지는 않는다");
+    expect(SYSTEM_PROMPT).toContain("방어 로직이 정상 작동해");
+  });
+
+  it("Game lock metric은 API Target5xx에서 cross-service 보조 근거일 뿐이라는 규칙을 포함한다", () => {
+    expect(SYSTEM_PROMPT).toContain("cross-service 보조 근거로만 사용한다");
+  });
+
   it("API Target5xx 분석 목표(비교해야 할 가능성 후보)를 포함한다", () => {
     expect(SYSTEM_PROMPT).toContain("API application code path");
     expect(SYSTEM_PROMPT).toContain("DB(RDS)/mysql2 쿼리 또는 DB 의존성 문제");

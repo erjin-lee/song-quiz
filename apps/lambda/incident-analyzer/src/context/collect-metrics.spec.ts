@@ -29,7 +29,7 @@ describe("collectMetrics", () => {
     sendMock.mockReset();
   });
 
-  describe("QUIZ_SNAPSHOT_FAILURE(regression - 기존 동작 유지)", () => {
+  describe("QUIZ_SNAPSHOT_FAILURE", () => {
     it("datapoint를 current(최신값)/average15m/max15m/trend로 요약한다", async () => {
       sendMock.mockResolvedValueOnce({
         MetricDataResults: [
@@ -100,7 +100,7 @@ describe("collectMetrics", () => {
       expect(gaugeMetric?.semanticValue).toBeUndefined();
     });
 
-    it("§9의 7개 metric을 모두 요청한다(QuizSnapshotFailure/API·Game 5xx·Latency/RDS CPU·Connections)", async () => {
+    it("§9의 7개 metric + room 분산 락 3종을 모두 요청한다(QuizSnapshotFailure/lock 3종/API·Game 5xx·Latency/RDS CPU·Connections)", async () => {
       sendMock.mockResolvedValueOnce({ MetricDataResults: [] });
 
       const result = await collectMetrics(
@@ -111,6 +111,9 @@ describe("collectMetrics", () => {
 
       expect(result.metrics.map((m) => m.name)).toEqual([
         "Game.QuizSnapshotFailure",
+        "Game.RedisLockRenewFailure",
+        "Game.RoomLockLeaseLost",
+        "Game.StaleFencingWriteRejected",
         "API.HTTPCode_Target_5XX_Count",
         "API.TargetResponseTime",
         "Game.HTTPCode_Target_5XX_Count",
@@ -130,7 +133,7 @@ describe("collectMetrics", () => {
       );
 
       expect(result.status).toBe("failed");
-      expect(result.metrics).toHaveLength(7);
+      expect(result.metrics).toHaveLength(10);
       for (const metric of result.metrics) {
         expect(metric.dataState).toBe("COLLECTION_FAILED");
         expect(metric.current).toBeNull();
@@ -140,7 +143,7 @@ describe("collectMetrics", () => {
   });
 
   describe("GAME_TARGET_5XX(신규)", () => {
-    it("요청받은 16개 metric을 정확한 이름으로 모두 요청한다", async () => {
+    it("요청받은 19개 metric을 정확한 이름으로 모두 요청한다", async () => {
       sendMock.mockResolvedValueOnce({ MetricDataResults: [] });
 
       const result = await collectMetrics(WINDOW, CONFIG, "GAME_TARGET_5XX");
@@ -156,6 +159,9 @@ describe("collectMetrics", () => {
         "Game.QuizSnapshotFailure",
         "Game.RedisLockFailure",
         "Game.TimerClaimFailure",
+        "Game.RedisLockRenewFailure",
+        "Game.RoomLockLeaseLost",
+        "Game.StaleFencingWriteRejected",
         "EC2.CPUUtilization",
         "EC2.MemoryUsedPercent",
         "Redis.MemoryUsagePercentage",
@@ -198,6 +204,27 @@ describe("collectMetrics", () => {
         MetricName: "RedisLockFailure",
         Dimensions: undefined,
       });
+      expect(
+        queryByName.get("gameRedisLockRenewFailure")?.MetricStat?.Metric,
+      ).toEqual({
+        Namespace: CONFIG.gameMetricNamespace,
+        MetricName: "RedisLockRenewFailure",
+        Dimensions: undefined,
+      });
+      expect(
+        queryByName.get("gameRoomLockLeaseLost")?.MetricStat?.Metric,
+      ).toEqual({
+        Namespace: CONFIG.gameMetricNamespace,
+        MetricName: "RoomLockLeaseLost",
+        Dimensions: undefined,
+      });
+      expect(
+        queryByName.get("gameStaleFencingWriteRejected")?.MetricStat?.Metric,
+      ).toEqual({
+        Namespace: CONFIG.gameMetricNamespace,
+        MetricName: "StaleFencingWriteRejected",
+        Dimensions: undefined,
+      });
     });
 
     it("datapoint가 없으면 RequestCount/RedisLockFailure/TimerClaimFailure/Evictions도 0건 관측으로, gauge는 알 수 없음으로 취급한다", async () => {
@@ -210,6 +237,9 @@ describe("collectMetrics", () => {
         "API.RequestCount",
         "Game.RedisLockFailure",
         "Game.TimerClaimFailure",
+        "Game.RedisLockRenewFailure",
+        "Game.RoomLockLeaseLost",
+        "Game.StaleFencingWriteRejected",
         "Redis.Evictions",
       ];
       for (const name of sparse) {
@@ -229,13 +259,13 @@ describe("collectMetrics", () => {
       }
     });
 
-    it("GetMetricData 호출이 실패하면 failed 상태와 함께 16개 metric을 COLLECTION_FAILED로 채운다", async () => {
+    it("GetMetricData 호출이 실패하면 failed 상태와 함께 19개 metric을 COLLECTION_FAILED로 채운다", async () => {
       sendMock.mockRejectedValueOnce(new Error("boom"));
 
       const result = await collectMetrics(WINDOW, CONFIG, "GAME_TARGET_5XX");
 
       expect(result.status).toBe("failed");
-      expect(result.metrics).toHaveLength(16);
+      expect(result.metrics).toHaveLength(19);
       for (const metric of result.metrics) {
         expect(metric.dataState).toBe("COLLECTION_FAILED");
       }
@@ -243,7 +273,7 @@ describe("collectMetrics", () => {
   });
 
   describe("API_TARGET_5XX(신규)", () => {
-    it("요청받은 13개 metric을 정확한 이름으로 모두 요청한다(새 metric spec 없이 기존 것만 재사용)", async () => {
+    it("요청받은 13개 metric + room 분산 락 3종을 정확한 이름으로 모두 요청한다(새 metric spec 없이 기존 것만 재사용)", async () => {
       sendMock.mockResolvedValueOnce({ MetricDataResults: [] });
 
       const result = await collectMetrics(WINDOW, CONFIG, "API_TARGET_5XX");
@@ -256,6 +286,9 @@ describe("collectMetrics", () => {
         "Game.HTTPCode_Target_5XX_Count",
         "Game.TargetResponseTime",
         "Game.RequestCount",
+        "Game.RedisLockRenewFailure",
+        "Game.RoomLockLeaseLost",
+        "Game.StaleFencingWriteRejected",
         "RDS.CPUUtilization",
         "RDS.DatabaseConnections",
         "EC2.CPUUtilization",
@@ -266,13 +299,13 @@ describe("collectMetrics", () => {
       ]);
     });
 
-    it("GetMetricData 호출이 실패하면 failed 상태와 함께 13개 metric을 COLLECTION_FAILED로 채운다", async () => {
+    it("GetMetricData 호출이 실패하면 failed 상태와 함께 16개 metric을 COLLECTION_FAILED로 채운다", async () => {
       sendMock.mockRejectedValueOnce(new Error("boom"));
 
       const result = await collectMetrics(WINDOW, CONFIG, "API_TARGET_5XX");
 
       expect(result.status).toBe("failed");
-      expect(result.metrics).toHaveLength(13);
+      expect(result.metrics).toHaveLength(16);
       for (const metric of result.metrics) {
         expect(metric.dataState).toBe("COLLECTION_FAILED");
       }
