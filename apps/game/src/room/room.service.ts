@@ -154,13 +154,21 @@ export class RoomService extends EventEmitter {
    * 오류를 "방 만료"로 오인해 살아있는 방을 영구히 목록에서 지울 수 있다). 그래서 지우기
    * 전에 폴백 없는 roomExistsStrict로 한 번 더 확인한다 — 이 확인 자체가 실패하면(Redis
    * 오류) 판단을 유보하고 지우지 않는다(다음 조회에서 다시 시도).
+   *
+   * roomExistsStrict 확인과 removeFromIndex 사이에 room lock이 없으면, 그 틈에 다른
+   * 작업(예: joinRoom)이 이미 이 roomId의 락을 쥔 채 방을 다시 저장(TTL 갱신)해도
+   * 우리는 "없었다"는 낡은 판단으로 그 방을 index에서 지워버릴 수 있다. deleteRoom과
+   * 동일하게 room lock으로 확인·삭제를 하나의 임계구역으로 묶어, 그 사이에는 어떤
+   * saveRoom도 끼어들 수 없게 한다.
    */
   private async reconcileStaleIndexEntry(roomId: string): Promise<void> {
-    const stillExists = await this.roomRepository.roomExistsStrict(roomId);
-    if (stillExists) {
-      return;
-    }
-    await this.roomRepository.removeFromIndex(roomId);
+    await this.withRoomLock(roomId, async () => {
+      const stillExists = await this.roomRepository.roomExistsStrict(roomId);
+      if (stillExists) {
+        return;
+      }
+      await this.roomRepository.removeFromIndex(roomId);
+    });
   }
 
   async getRoom(roomId: string): Promise<RoomItemDto | undefined> {

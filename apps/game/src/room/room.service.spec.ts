@@ -14,7 +14,7 @@ import { FakeRedis } from '../common/testing/fake-redis';
 import { QuizClient } from './clients/quiz.client';
 import { RoomLockService } from './room-lock.service';
 import { RoomRoundService } from './room-round.service';
-import { RoomRepository } from './room.repository';
+import { roomLockKey, RoomRepository } from './room.repository';
 import { RoomTimerService } from './room-timer.service';
 import { RoomService } from './room.service';
 
@@ -462,6 +462,50 @@ describe('RoomService', () => {
       expect(await localRoomRepository.getRoomIndex()).not.toContain(
         room.roomId,
       );
+    });
+
+    it('reconciliation이 확인하는 동안 다른 워커가 이미 그 방의 락을 쥔 채 방을 되살리면(TTL 갱신), index에서 지우지 않는다', async () => {
+      const { room } = await localRoomService.createRoom({
+        roomTtl: '아이유 방',
+        quizId: '1',
+        isRandom: false,
+        speedModeEnabled: false,
+        maxUserCnt: 4,
+        nickname: '방장',
+      });
+      const roomId = room.roomId;
+
+      // 1. joinRoom 같은 작업이 이미 이 roomId의 락을 쥐고 있다(reconciliation이
+      //    시작되기 전에 먼저 락을 잡아둔다 — 실패 시나리오의 1단계).
+      let releaseInFlightWrite: () => void = () => undefined;
+      const inFlightWrite = localRoomLockService.withLock(
+        roomLockKey(roomId),
+        async () => {
+          await new Promise<void>((resolve) => {
+            releaseInFlightWrite = resolve;
+          });
+          // 3. 그 사이 진행 중이던 작업이 방을 다시 저장한다(TTL 갱신 = 되살림).
+          await localRoomRepository.saveRoom(room);
+        },
+      );
+      await delay(20); // 워커가 확실히 락을 잡을 시간을 준다.
+
+      // 2. 락을 쥔 워커가 아직 안에 있는 상태에서 Redis TTL 자연 만료를 흉내낸다.
+      await redis.del(`room:${roomId}`);
+
+      // 4. getRooms()의 reconciliation이 시작된다 — 같은 roomId 락을 기다려야 한다.
+      const rooms = await localRoomService.getRooms();
+      expect(rooms.map((r) => r.roomId)).not.toContain(roomId);
+      await delay(20); // reconciliation이 락 획득(재시도)을 시도할 시간을 준다.
+
+      // 5. 진행 중이던 작업이 락을 놓아 되살리기(saveRoom)를 마친다.
+      releaseInFlightWrite();
+      await inFlightWrite;
+
+      // 6. reconciliation이 뒤이어 락을 잡고 재확인하면 이미 되살아난 방을 보게
+      //    되므로, index에서 지우면 안 된다.
+      await delay(50);
+      expect(await localRoomRepository.getRoomIndex()).toContain(roomId);
     });
   });
 
