@@ -27,7 +27,11 @@ local latest = redis.call("GET", KEYS[1])
 if latest and tonumber(latest) > tonumber(ARGV[1]) then
   return 0
 end
-redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
+if tonumber(ARGV[3]) > 0 then
+  redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
+else
+  redis.call("SET", KEYS[2], ARGV[2])
+end
 return 1
 `;
 
@@ -187,7 +191,11 @@ export class CacheService implements OnApplicationShutdown {
       this.setLocal(key, serialized, ttlSeconds);
       return;
     }
-    await this.redis.set(key, serialized, 'EX', ttlSeconds);
+    if (ttlSeconds > 0) {
+      await this.redis.set(key, serialized, 'EX', ttlSeconds);
+    } else {
+      await this.redis.set(key, serialized);
+    }
   }
 
   /**
@@ -195,6 +203,8 @@ export class CacheService implements OnApplicationShutdown {
    * 이미 발급됐는지"를 Redis 안에서 원자적으로 확인하고, 그렇다면 쓰지 않고 false를
    * 반환한다(락 TTL이 만료된 뒤 뒤늦게 깨어난 stale worker의 덮어쓰기 차단).
    * guard가 null이면(로컬 폴백 모드이거나 락 밖의 쓰기) 기존 setStrict와 동일하다.
+   * ttlSeconds가 0 이하이면 만료 없이(영구) 저장한다 — room:index처럼 개별 항목의
+   * add/remove로만 정합성을 유지하고 TTL로 통째로 사라지면 안 되는 키에 쓴다.
    */
   async setStrictFenced<T>(
     key: string,

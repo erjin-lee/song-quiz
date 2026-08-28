@@ -49,6 +49,14 @@ export class FakeRedis {
     return existed ? 1 : 0;
   }
 
+  /** ioredis의 PERSIST: TTL이 걸려있었으면 지우고 1, 아니었으면(키가 없어도) 0을 반환한다. */
+  async persist(key: string): Promise<number> {
+    this.assertDataCommandsUp();
+    this.sweep();
+    const hadTtl = this.expiresAt.delete(key);
+    return hadTtl ? 1 : 0;
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async eval(script: string, numKeys: number, ...args: any[]): Promise<number> {
     this.assertUp();
@@ -71,6 +79,13 @@ export class FakeRedis {
       }
       this.evalKinds.push('fenced-set');
       return this.fencedSet(keys, argv);
+    }
+    // ACQUIRE_SCRIPT도 "INCR"을 담고 있어서, 그보다 먼저 걸러야 한다. 이 스크립트는
+    // PEXPIRE가 아니라 EXPIRE(초 단위)를 쓰는 것으로 구분한다.
+    if (script.includes('redis.call("EXPIRE"')) {
+      this.assertDataCommandsUp();
+      this.evalKinds.push('incr-with-expire');
+      return this.incrWithExpire(keys, argv);
     }
     if (script.includes('INCR')) {
       this.evalKinds.push('acquire');
@@ -115,6 +130,24 @@ export class FakeRedis {
     return fence;
   }
 
+  /**
+   * INCR_WITH_EXPIRE_SCRIPT: INCR하고, 그 결과가 1(=새로 생긴 카운터)일 때만 EXPIRE를
+   * 건다. 실제 Lua eval처럼 한 번의 호출 안에서 동기로 끝나므로, 이 메서드를 await 없이
+   * 여러 번 동시에 "호출"해도(테스트가 Promise.all로 여러 assertRoomCreationAllowed를
+   * 동시에 시작해도) 서로 끼어들 여지가 없다 — 원자성 회귀 테스트가 의미를 가지려면
+   * 이 성질이 반드시 필요하다.
+   */
+  private incrWithExpire(keys: string[], argv: string[]): number {
+    const [key] = keys;
+    const [ttlSeconds] = argv;
+    const count = Number(this.values.get(key) ?? '0') + 1;
+    this.values.set(key, String(count));
+    if (count === 1) {
+      this.expiresAt.set(key, Date.now() + Number(ttlSeconds) * 1000);
+    }
+    return count;
+  }
+
   /** EXTEND_SCRIPT: 내 token일 때만 TTL을 다시 민다. */
   private extend(keys: string[], argv: string[]): number {
     const [lockKey] = keys;
@@ -138,7 +171,10 @@ export class FakeRedis {
     return 1;
   }
 
-  /** FENCED_SET_SCRIPT: 더 새로운 fence가 이미 발급됐으면 쓰지 않는다. */
+  /**
+   * FENCED_SET_SCRIPT: 더 새로운 fence가 이미 발급됐으면 쓰지 않는다.
+   * ttlSeconds가 0 이하면(room:index 등) EX 없이 SET한 것처럼 영구 저장한다.
+   */
   private fencedSet(keys: string[], argv: string[]): number {
     const [fenceKey, targetKey] = keys;
     const [token, serialized, ttlSeconds] = argv;
@@ -147,7 +183,11 @@ export class FakeRedis {
       return 0;
     }
     this.values.set(targetKey, serialized);
-    this.expiresAt.set(targetKey, Date.now() + Number(ttlSeconds) * 1000);
+    if (Number(ttlSeconds) > 0) {
+      this.expiresAt.set(targetKey, Date.now() + Number(ttlSeconds) * 1000);
+    } else {
+      this.expiresAt.delete(targetKey);
+    }
     return 1;
   }
 

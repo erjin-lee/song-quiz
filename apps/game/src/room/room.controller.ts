@@ -91,7 +91,11 @@ export class RoomController {
     @Req() req: Request,
   ): Promise<RoomJoinResultDto> {
     const accountUserId = await this.resolveAccountUserId(req);
-    return this.roomService.createRoom(createRoomRequestDto, accountUserId);
+    return this.roomService.createRoom(
+      createRoomRequestDto,
+      accountUserId,
+      req.ip,
+    );
   }
 
   @Post(':roomId/join')

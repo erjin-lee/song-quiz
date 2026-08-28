@@ -4,8 +4,10 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { CacheService } from '../cache/cache.service';
+import { delay } from '../common/delay';
 import { QuizRoundData } from './clients/quiz.client';
 import { RoomItemDto } from './dto/room-item.dto';
 import { RoomLockService, StaleFencingWriteError } from './room-lock.service';
@@ -17,9 +19,44 @@ import { RoomLockService, StaleFencingWriteError } from './room-lock.service';
 const PASSWORD_ATTEMPT_LIMIT = 5;
 const PASSWORD_ATTEMPT_WINDOW_SECONDS = 60;
 
+/**
+ * 공개 POST /rooms는 비로그인 게스트도 호출할 수 있고, isPrivate방은 생성마다
+ * bcrypt.hash까지 돈다. IP당 방 생성 빈도를 제한해 반복 호출로 CPU(bcrypt)와
+ * Redis(room 레코드 + index) 소비를 무한히 늘리는 것을 막는다.
+ */
+const ROOM_CREATION_LIMIT = 10;
+const ROOM_CREATION_WINDOW_SECONDS = 60;
+const ROOM_CREATION_CACHE_KEY_PREFIX = 'room:create-attempts:';
+
+/**
+ * INCR과 최초 1회의 EXPIRE를 한 Lua 실행으로 묶는다. GET → +1 → SET처럼 나누면 동시
+ * 요청이 모두 같은 이전 값을 읽고 통과할 수 있어(단일 프로세스 안에서도 await 사이에
+ * 요청이 교차한다), rate limit 자체가 우회된다.
+ */
+const INCR_WITH_EXPIRE_SCRIPT = `
+local count = redis.call("INCR", KEYS[1])
+if count == 1 then
+  redis.call("EXPIRE", KEYS[1], ARGV[1])
+end
+return count
+`;
+
+/** room:index PERSIST 마이그레이션 재시도 한도(부팅 직후 Redis가 아직 준비되지 않았을 수 있어서). */
+const INDEX_TTL_MIGRATION_MAX_ATTEMPTS = 5;
+const INDEX_TTL_MIGRATION_RETRY_MS = 1_000;
+
 const ROOM_INDEX_CACHE_KEY = 'room:index';
 /** room:index read-modify-write를 인스턴스 간에 직렬화하기 위한 락 키. */
 const ROOM_INDEX_LOCK_KEY = 'room-index';
+/**
+ * room 본체는 활동마다 TTL이 갱신되는 sliding TTL이지만, room:index는 room 하나하나의
+ * 활동을 알 방법이 없다. 예전처럼 index에도 ROOM_TTL_SECONDS를 걸면, 방 생성/삭제 없이
+ * 활동만 오래 이어질 때 index가 먼저 만료되어 살아있는 방이 전부 목록에서 사라지는
+ * 문제가 생긴다. 그래서 index는 만료시키지 않고(0 = 영구), addToIndex/removeFromIndex로
+ * 항목 단위로만 정합성을 맞춘다. 방이 TTL로 자연 만료돼 removeFromIndex 경로를 타지
+ * 못한 stale entry는 RoomService.getRooms가 조회 시점에 걸러내며 정리한다.
+ */
+const ROOM_INDEX_TTL_SECONDS = 0;
 const ROOM_CACHE_KEY_PREFIX = 'room:';
 const PASSWORD_ATTEMPT_CACHE_KEY_PREFIX = 'room:pwd-attempts:';
 const SONG_ORDER_CACHE_KEY_PREFIX = 'room:song-order:';
@@ -64,7 +101,7 @@ export type RoomRecord = RoomItemDto & { pwdHash: string | null };
  * 담당한다. 라운드 진행 오케스트레이션(RoomService)이 이 계층을 호출한다.
  */
 @Injectable()
-export class RoomRepository {
+export class RoomRepository implements OnModuleInit {
   private readonly logger = new Logger(RoomRepository.name);
 
   /**
@@ -74,10 +111,49 @@ export class RoomRepository {
    */
   private readonly chatHistory = new Map<string, ChatHistoryEntry[]>();
 
+  /**
+   * clientIp -> 방 생성 카운터(REDIS_HOST 미설정이거나 Redis가 순간 응답하지 못할 때의
+   * 폴백). 단일 프로세스 내 Map 연산은 await 없이 동기로 끝나므로 그 자체로 원자적이다.
+   */
+  private readonly localRoomCreationCounts = new Map<
+    string,
+    { count: number; resetAt: number }
+  >();
+
   constructor(
     private readonly cacheService: CacheService,
     private readonly roomLockService: RoomLockService,
   ) {}
+
+  /**
+   * 배포 전에 room:index에 걸려있던 sliding TTL(최대 6h)이 남아있으면, 이번 배포로
+   * index를 영구 키로 바꿔도 그 TTL이 그대로 살아 한 번 더 만료될 수 있다. 부팅마다
+   * PERSIST를 시도해 제거한다 — PERSIST는 멱등이라 이미 영구이거나 키가 없어도 안전하다.
+   * 부팅을 막지 않도록 기다리지 않고, Redis가 아직 준비되지 않았을 수 있는 초기 구간은
+   * 짧게 재시도한다.
+   */
+  onModuleInit(): void {
+    void this.persistLegacyRoomIndexTtl(1);
+  }
+
+  private async persistLegacyRoomIndexTtl(attempt: number): Promise<void> {
+    const redis = this.cacheService.getRedisClient();
+    if (!redis) {
+      return;
+    }
+    try {
+      await redis.persist(ROOM_INDEX_CACHE_KEY);
+    } catch (err) {
+      if (attempt >= INDEX_TTL_MIGRATION_MAX_ATTEMPTS) {
+        this.logger.warn(
+          `room:index의 기존 TTL 제거(마이그레이션)에 실패했습니다. 다음 재시작 시 다시 시도됩니다: ${(err as Error).message}`,
+        );
+        return;
+      }
+      await delay(INDEX_TTL_MIGRATION_RETRY_MS * attempt);
+      await this.persistLegacyRoomIndexTtl(attempt + 1);
+    }
+  }
 
   /**
    * 채팅/시스템 메시지를 히스토리에 기록한다(재접속 시 복원용). 방 상태와 무관해 락을 타지 않는다.
@@ -164,6 +240,20 @@ export class RoomRepository {
         isAccount: participant.isAccount ?? false,
       })),
     };
+  }
+
+  /**
+   * room:index 정리(reconciliation) 전용 존재 확인. getRoomRecord()는 Redis 오류 시
+   * 로컬 폴백으로 undefined를 반환할 수 있어(목록 표시용으로는 안전하지만), 그 결과를
+   * "방이 진짜 없다"고 오인해 index에서 지우면 일시 오류로 살아있는 방이 영구히
+   * 사라진다. getStrict는 폴백 없이 Redis 오류를 그대로 던지므로, 호출자가 "정말 없음"과
+   * "지금은 판단 불가"를 구분할 수 있다.
+   */
+  async roomExistsStrict(roomId: string): Promise<boolean> {
+    const room = await this.cacheService.getStrict<RoomRecord>(
+      this.roomKey(roomId),
+    );
+    return room !== undefined;
   }
 
   async getRoomOrThrow(roomId: string): Promise<RoomRecord> {
@@ -471,12 +561,15 @@ export class RoomRepository {
   async addToIndex(roomId: string): Promise<void> {
     await this.roomLockService.withLock(ROOM_INDEX_LOCK_KEY, async () => {
       const index = await this.getRoomIndexStrict();
+      if (index.includes(roomId)) {
+        return;
+      }
       index.push(roomId);
       // 이 안에서는 ambient lease가 room 락이 아니라 room-index 락의 것이다.
       await this.writeSharedState(
         ROOM_INDEX_CACHE_KEY,
         index,
-        ROOM_TTL_SECONDS,
+        ROOM_INDEX_TTL_SECONDS,
         ROOM_INDEX_LOCK_KEY,
       );
     });
@@ -485,12 +578,74 @@ export class RoomRepository {
   async removeFromIndex(roomId: string): Promise<void> {
     await this.roomLockService.withLock(ROOM_INDEX_LOCK_KEY, async () => {
       const index = await this.getRoomIndexStrict();
+      if (!index.includes(roomId)) {
+        return;
+      }
       await this.writeSharedState(
         ROOM_INDEX_CACHE_KEY,
         index.filter((id) => id !== roomId),
-        ROOM_TTL_SECONDS,
+        ROOM_INDEX_TTL_SECONDS,
         ROOM_INDEX_LOCK_KEY,
       );
     });
+  }
+
+  private roomCreationKey(clientIp: string | undefined): string {
+    return `${ROOM_CREATION_CACHE_KEY_PREFIX}${clientIp ?? 'unknown'}`;
+  }
+
+  /**
+   * IP당 방 생성 속도를 제한한다. bcrypt.hash나 Redis 쓰기를 하기 전, 요청 처리
+   * 맨 앞에서 불러야 한도 초과 요청의 비용을 최소화할 수 있다.
+   */
+  async assertRoomCreationAllowed(clientIp: string | undefined): Promise<void> {
+    const key = this.roomCreationKey(clientIp);
+    const attempts = await this.incrementRoomCreationCounter(key);
+    if (attempts > ROOM_CREATION_LIMIT) {
+      throw new HttpException(
+        '방 생성 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
+  /**
+   * GET → +1 → SET으로 나누면 동시 요청이 모두 같은 이전 값을 읽고 통과할 수 있어
+   * (appendChatHistory와 같은 이유로 Redis eval을 쓴다). INCR+최초 EXPIRE를 하나의
+   * Lua 실행으로 묶어 원자적으로 처리하고, Redis가 없거나 순간 응답하지 못하면
+   * 로컬 카운터로 폴백한다.
+   */
+  private async incrementRoomCreationCounter(key: string): Promise<number> {
+    const redis = this.cacheService.getRedisClient();
+    if (redis && this.cacheService.isRedisReady()) {
+      try {
+        const count = await redis.eval(
+          INCR_WITH_EXPIRE_SCRIPT,
+          1,
+          key,
+          ROOM_CREATION_WINDOW_SECONDS,
+        );
+        return Number(count);
+      } catch (err) {
+        this.logger.warn(
+          `방 생성 rate limit 카운터 Redis 갱신 실패, 로컬 카운터로 폴백합니다: ${(err as Error).message}`,
+        );
+      }
+    }
+    return this.incrementLocalRoomCreationCounter(key);
+  }
+
+  private incrementLocalRoomCreationCounter(key: string): number {
+    const now = Date.now();
+    const entry = this.localRoomCreationCounts.get(key);
+    if (!entry || entry.resetAt <= now) {
+      this.localRoomCreationCounts.set(key, {
+        count: 1,
+        resetAt: now + ROOM_CREATION_WINDOW_SECONDS * 1000,
+      });
+      return 1;
+    }
+    entry.count += 1;
+    return entry.count;
   }
 }

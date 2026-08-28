@@ -9,10 +9,12 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { CacheService } from '../cache/cache.service';
+import { delay } from '../common/delay';
+import { FakeRedis } from '../common/testing/fake-redis';
 import { QuizClient } from './clients/quiz.client';
 import { RoomLockService } from './room-lock.service';
 import { RoomRoundService } from './room-round.service';
-import { RoomRepository } from './room.repository';
+import { roomLockKey, RoomRepository } from './room.repository';
 import { RoomTimerService } from './room-timer.service';
 import { RoomService } from './room.service';
 
@@ -354,6 +356,156 @@ describe('RoomService', () => {
 
       const finalRoom = await roomService.getRoom(room.roomId);
       expect(finalRoom?.curUserCnt).toBe(3);
+    });
+  });
+
+  /**
+   * getRooms()의 room:index 정리(reconciliation)는 Redis가 실제로 있어야 의미 있게
+   * 검증할 수 있다(로컬 폴백 모드에서는 get()이 실패할 일이 없다). 그래서 이 블록만
+   * 상단 beforeEach의 REDIS_HOST 삭제/DI 인스턴스와 별개로, room.repository.spec.ts와
+   * 같은 방식으로 FakeRedis를 끼운 별도의 인스턴스를 직접 구성해 쓴다.
+   */
+  describe('room:index 정리(reconciliation)와 Redis 일시 오류', () => {
+    let redis: FakeRedis;
+    let localCacheService: CacheService;
+    let localRoomRepository: RoomRepository;
+    let localRoomLockService: RoomLockService;
+    let localRoomService: RoomService;
+
+    beforeEach(() => {
+      redis = new FakeRedis();
+      localCacheService = new CacheService();
+      Object.defineProperty(localCacheService, 'redis', {
+        value: redis,
+        writable: true,
+      });
+      Object.defineProperty(localCacheService, 'redisReady', {
+        get: () => !redis.down,
+      });
+
+      localRoomLockService = new RoomLockService(localCacheService);
+      localRoomRepository = new RoomRepository(
+        localCacheService,
+        localRoomLockService,
+      );
+      const localRoomTimerService = new RoomTimerService(localCacheService);
+      const localRoomRoundService = new RoomRoundService(
+        localRoomRepository,
+        localRoomTimerService,
+        quizClientMock as unknown as QuizClient,
+      );
+      localRoomService = new RoomService(
+        localRoomRepository,
+        localRoomRoundService,
+        localRoomLockService,
+        localRoomTimerService,
+        quizClientMock as unknown as QuizClient,
+      );
+    });
+
+    afterEach(async () => {
+      localRoomLockService.onModuleDestroy();
+      Object.defineProperty(localCacheService, 'redis', {
+        value: null,
+        writable: true,
+      });
+      await localCacheService.onApplicationShutdown();
+    });
+
+    it('room 레코드 조회가 일시적으로 실패해도(undefined로 폴백) 살아있는 방을 index에서 지우지 않는다', async () => {
+      const { room } = await localRoomService.createRoom({
+        roomTtl: '아이유 방',
+        quizId: '1',
+        isRandom: false,
+        speedModeEnabled: false,
+        maxUserCnt: 4,
+        nickname: '방장',
+      });
+
+      // getRoomRecord()가 쓰는 get()만 실패시킨다(방 레코드는 Redis에 그대로 살아있다).
+      redis.dataCommandsDown = true;
+      const roomsDuringOutage = await localRoomService.getRooms();
+      // 표시 목록에서는(로컬 폴백에도 값이 없으므로) 당장 빠질 수 있다 — 기존 동작 그대로.
+      expect(roomsDuringOutage.map((r) => r.roomId)).not.toContain(room.roomId);
+
+      // 백그라운드 정리(reconcileStaleIndexEntry)가 roomExistsStrict로 재확인하다가
+      // 같은 오류를 만나면 판단을 유보해야 한다 — index에서 지우면 안 된다.
+      // 정리 작업은 락 획득/조회/쓰기/해제까지 여러 await를 거치므로, 단순 마이크로
+      // 태스크 flush(Promise.resolve 반복)로는 부족하다. 실제 타이머로 짧게 기다린다.
+      await delay(50);
+
+      redis.dataCommandsDown = false;
+      const roomsAfterRecovery = await localRoomService.getRooms();
+      expect(roomsAfterRecovery.map((r) => r.roomId)).toContain(room.roomId);
+    });
+
+    it('실제로 방 레코드가 사라진(TTL 자연 만료) stale roomId는 재조회 시 index에서 정리된다', async () => {
+      const { room } = await localRoomService.createRoom({
+        roomTtl: '아이유 방',
+        quizId: '1',
+        isRandom: false,
+        speedModeEnabled: false,
+        maxUserCnt: 4,
+        nickname: '방장',
+      });
+
+      // removeFromIndex를 거치지 않고 room 레코드만 지워, TTL 자연 만료를 흉내낸다.
+      await redis.del(`room:${room.roomId}`);
+
+      const rooms = await localRoomService.getRooms();
+      expect(rooms.map((r) => r.roomId)).not.toContain(room.roomId);
+
+      // 정리 작업은 락 획득/조회/쓰기/해제까지 여러 await를 거치므로, 단순 마이크로
+      // 태스크 flush(Promise.resolve 반복)로는 부족하다. 실제 타이머로 짧게 기다린다.
+      await delay(50);
+
+      expect(await localRoomRepository.getRoomIndex()).not.toContain(
+        room.roomId,
+      );
+    });
+
+    it('reconciliation이 확인하는 동안 다른 워커가 이미 그 방의 락을 쥔 채 방을 되살리면(TTL 갱신), index에서 지우지 않는다', async () => {
+      const { room } = await localRoomService.createRoom({
+        roomTtl: '아이유 방',
+        quizId: '1',
+        isRandom: false,
+        speedModeEnabled: false,
+        maxUserCnt: 4,
+        nickname: '방장',
+      });
+      const roomId = room.roomId;
+
+      // 1. joinRoom 같은 작업이 이미 이 roomId의 락을 쥐고 있다(reconciliation이
+      //    시작되기 전에 먼저 락을 잡아둔다 — 실패 시나리오의 1단계).
+      let releaseInFlightWrite: () => void = () => undefined;
+      const inFlightWrite = localRoomLockService.withLock(
+        roomLockKey(roomId),
+        async () => {
+          await new Promise<void>((resolve) => {
+            releaseInFlightWrite = resolve;
+          });
+          // 3. 그 사이 진행 중이던 작업이 방을 다시 저장한다(TTL 갱신 = 되살림).
+          await localRoomRepository.saveRoom(room);
+        },
+      );
+      await delay(20); // 워커가 확실히 락을 잡을 시간을 준다.
+
+      // 2. 락을 쥔 워커가 아직 안에 있는 상태에서 Redis TTL 자연 만료를 흉내낸다.
+      await redis.del(`room:${roomId}`);
+
+      // 4. getRooms()의 reconciliation이 시작된다 — 같은 roomId 락을 기다려야 한다.
+      const rooms = await localRoomService.getRooms();
+      expect(rooms.map((r) => r.roomId)).not.toContain(roomId);
+      await delay(20); // reconciliation이 락 획득(재시도)을 시도할 시간을 준다.
+
+      // 5. 진행 중이던 작업이 락을 놓아 되살리기(saveRoom)를 마친다.
+      releaseInFlightWrite();
+      await inFlightWrite;
+
+      // 6. reconciliation이 뒤이어 락을 잡고 재확인하면 이미 되살아난 방을 보게
+      //    되므로, index에서 지우면 안 된다.
+      await delay(50);
+      expect(await localRoomRepository.getRoomIndex()).toContain(roomId);
     });
   });
 

@@ -113,6 +113,11 @@ export class RoomService extends EventEmitter {
       roomIds.map((roomId) => this.roomRepository.getRoomRecord(roomId)),
     );
 
+    const staleRoomIds = roomIds.filter((_, i) => records[i] === undefined);
+    if (staleRoomIds.length > 0) {
+      this.pruneStaleIndexEntries(staleRoomIds);
+    }
+
     const publicRooms = records
       .filter(
         (room): room is RoomRecord => room !== undefined && !room.isUnlisted,
@@ -127,6 +132,45 @@ export class RoomService extends EventEmitter {
     return publicRooms.slice(start, start + pageSize);
   }
 
+  /**
+   * room:index는 이제 만료시키지 않으므로(ROOM_INDEX_TTL_SECONDS), 방이 TTL로
+   * 자연 만료돼 removeFromIndex를 못 탄 stale entry는 여기서만 정리된다. 목록
+   * 조회 응답을 늦추지 않도록 기다리지 않고(fire-and-forget) 백그라운드에서
+   * 지운다 — 실패해도 다음 조회에서 다시 시도되므로 결국 정리된다.
+   */
+  private pruneStaleIndexEntries(roomIds: string[]): void {
+    for (const roomId of roomIds) {
+      this.reconcileStaleIndexEntry(roomId).catch((err) => {
+        this.logger.warn(
+          `만료된 방을 room:index에서 정리하지 못했습니다(roomId: ${roomId}): ${(err as Error).message}`,
+        );
+      });
+    }
+  }
+
+  /**
+   * getRooms()가 쓰는 getRoomRecord()는 Redis 오류 시 로컬 폴백으로 undefined를 반환할
+   * 수 있다(목록 표시용으로는 안전하지만, 그 결과만으로 index에서 지우면 일시적인 Redis
+   * 오류를 "방 만료"로 오인해 살아있는 방을 영구히 목록에서 지울 수 있다). 그래서 지우기
+   * 전에 폴백 없는 roomExistsStrict로 한 번 더 확인한다 — 이 확인 자체가 실패하면(Redis
+   * 오류) 판단을 유보하고 지우지 않는다(다음 조회에서 다시 시도).
+   *
+   * roomExistsStrict 확인과 removeFromIndex 사이에 room lock이 없으면, 그 틈에 다른
+   * 작업(예: joinRoom)이 이미 이 roomId의 락을 쥔 채 방을 다시 저장(TTL 갱신)해도
+   * 우리는 "없었다"는 낡은 판단으로 그 방을 index에서 지워버릴 수 있다. deleteRoom과
+   * 동일하게 room lock으로 확인·삭제를 하나의 임계구역으로 묶어, 그 사이에는 어떤
+   * saveRoom도 끼어들 수 없게 한다.
+   */
+  private async reconcileStaleIndexEntry(roomId: string): Promise<void> {
+    await this.withRoomLock(roomId, async () => {
+      const stillExists = await this.roomRepository.roomExistsStrict(roomId);
+      if (stillExists) {
+        return;
+      }
+      await this.roomRepository.removeFromIndex(roomId);
+    });
+  }
+
   async getRoom(roomId: string): Promise<RoomItemDto | undefined> {
     const record = await this.roomRepository.getRoomRecord(roomId);
     return record ? this.roomRepository.toPublicRoom(record) : undefined;
@@ -135,7 +179,10 @@ export class RoomService extends EventEmitter {
   async createRoom(
     dto: CreateRoomRequestDto,
     accountUserId?: string,
+    clientIp?: string,
   ): Promise<RoomJoinResultDto> {
+    await this.roomRepository.assertRoomCreationAllowed(clientIp);
+
     const summary = await this.quizClient.getSummary(dto.quizId);
 
     const songLimit = dto.songLimit ?? summary.songCount;
@@ -189,7 +236,18 @@ export class RoomService extends EventEmitter {
     };
 
     await this.roomRepository.saveRoom(room);
-    await this.roomRepository.addToIndex(room.roomId);
+    try {
+      await this.roomRepository.addToIndex(room.roomId);
+    } catch (err) {
+      // index 등록에 실패한 채로 두면 아무도 모르는(응답도 못 받은) orphan room이
+      // Redis에 남는다. 방 본체를 되돌려 orphan을 남기지 않는다.
+      await this.roomRepository.deleteRoomRecord(room.roomId).catch(() => {
+        this.logger.error(
+          `방 생성 롤백 실패(roomId: ${room.roomId}): index 등록 실패 후 방 레코드 정리도 실패했습니다.`,
+        );
+      });
+      throw err;
+    }
 
     updateLogContext({ roomId: room.roomId });
     this.logger.log(
@@ -801,7 +859,14 @@ export class RoomService extends EventEmitter {
 
   private async deleteRoom(roomId: string): Promise<void> {
     await this.roomRepository.deleteRoomRecord(roomId);
-    await this.roomRepository.removeFromIndex(roomId);
+    // index 정리 실패로 "방은 이미 지워졌는데 삭제 요청 자체가 실패한 것처럼" 보이면
+    // 안 되므로 best-effort로만 처리한다. 남는 stale entry는 getRooms 조회 시점에
+    // pruneStaleIndexEntries가 정리한다.
+    await this.roomRepository.removeFromIndex(roomId).catch((err) => {
+      this.logger.warn(
+        `방 삭제 후 room:index 정리 실패(roomId: ${roomId}), 다음 목록 조회 시 정리됩니다: ${(err as Error).message}`,
+      );
+    });
     this.roomRoundService.clearRoundTimer(roomId);
     this.roomRoundService.clearSpeedModeTimer(roomId);
     await Promise.all([
