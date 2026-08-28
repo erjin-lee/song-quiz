@@ -80,6 +80,36 @@ resource "aws_security_group" "app" {
   }
 }
 
+# ECS Fargate 이관 2단계(docs/infra/ecs-fargate-migration-plan.md) - apps/api Fargate
+# 태스크 전용 보안 그룹. game은 아직 app SG를 쓰는 EC2에 남아 있으므로 별도로 둔다
+# (한쪽 컨테이너 포트 변경이 반대쪽에 영향을 주지 않게 하려는 목적 - 계획 문서 참고).
+# SSH 규칙이 없다 - ECS 태스크는 SSH 접속 대상이 아니다.
+resource "aws_security_group" "ecs_api" {
+  name        = "${var.project_name}-ecs-api"
+  description = "Security group for apps/api ECS Fargate tasks"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    description     = "App port from public tier"
+    from_port       = var.app_port
+    to_port         = var.app_port
+    protocol        = "tcp"
+    security_groups = [aws_security_group.public.id]
+  }
+
+  egress {
+    description = "Allow all outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.project_name}-ecs-api"
+  }
+}
+
 resource "aws_security_group" "db" {
   name        = "${var.project_name}-db"
   description = "Security group for private db tier"
@@ -91,6 +121,18 @@ resource "aws_security_group" "db" {
     to_port         = var.db_port
     protocol        = "tcp"
     security_groups = [aws_security_group.app.id]
+  }
+
+  # ECS Fargate 이관 2단계 - apps/api가 app_a EC2에서 ecs_api SG를 쓰는 Fargate
+  # 태스크로 옮겨간다. game은 DB에 직접 접근하지 않으므로(ADR-0004) app SG의 DB
+  # 접근 규칙은 game이 EC2에 남아 있는 동안 굳이 지울 필요는 없지만(위 규칙 유지),
+  # ecs_api를 추가로 허용해야 새 태스크가 RDS에 붙을 수 있다.
+  ingress {
+    description     = "DB port from ecs_api tier"
+    from_port       = var.db_port
+    to_port         = var.db_port
+    protocol        = "tcp"
+    security_groups = [aws_security_group.ecs_api.id]
   }
 
   egress {

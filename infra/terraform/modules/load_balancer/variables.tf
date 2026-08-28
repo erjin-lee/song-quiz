@@ -52,3 +52,19 @@ variable "domain_name" {
   description = "Route53에 이미 만들어진 호스팅 영역 도메인"
   type        = string
 }
+
+variable "api_ecs_health_check_path" {
+  description = "app_ecs 타겟그룹(ECS Fargate) 헬스체크 경로 - readiness(DB/Redis 연결 확인)를 쓴다. 기존 EC2 app 타겟그룹은 계속 alb_health_check_path(liveness)를 쓴다"
+  type        = string
+  default     = "/ready"
+}
+
+variable "api_traffic_target" {
+  description = "ALB HTTPS 리스너 default_action이 API 트래픽을 보낼 대상. \"ec2\"(app_a, 기존) 또는 \"ecs\"(Fargate, 신규). ECS 이관 2단계 컷오버 스위치 - environments/prod의 동일 이름 변수 참고"
+  type        = string
+
+  validation {
+    condition     = contains(["ec2", "ecs"], var.api_traffic_target)
+    error_message = "api_traffic_target은 \"ec2\" 또는 \"ecs\"만 허용합니다."
+  }
+}

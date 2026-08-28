@@ -142,3 +142,18 @@ output "ecr_game_repository_url" {
   description = "apps/game ECR 리포지토리 URL - .github/workflows/publish-ecr.yml이 docker push할 대상"
   value       = module.ecr.game_repository_url
 }
+
+output "ecs_cluster_name" {
+  description = "ECS 클러스터 이름 - aws ecs 콘솔/CLI 조회에 사용"
+  value       = module.ecs.cluster_name
+}
+
+output "ecs_api_service_name" {
+  description = "apps/api ECS 서비스 이름 - aws ecs describe-services 등에 사용"
+  value       = module.ecs.api_service_name
+}
+
+output "api_current_traffic_target" {
+  description = "지금 apply된 api_traffic_target 값(\"ec2\" 또는 \"ecs\") - ALB가 실제로 어디로 API 트래픽을 보내고 있는지 확인용"
+  value       = var.api_traffic_target
+}

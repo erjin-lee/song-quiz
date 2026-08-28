@@ -23,3 +23,18 @@ variable "ec2_metric_namespace" {
   type        = string
   default     = "SongQuiz/EC2"
 }
+
+variable "aws_region" {
+  description = "kms:Decrypt Resource(alias/aws/ssm) ARN을 구성할 때 쓰는 리전 (ECS Fargate 이관 2단계)"
+  type        = string
+}
+
+variable "ecr_api_repository_arn" {
+  description = "ECS Task Execution Role의 이미지 pull 권한을 제한할 apps/api ECR 리포지토리 ARN (ecr 모듈 출력)"
+  type        = string
+}
+
+variable "ecs_api_secret_arns" {
+  description = "ECS Task Execution Role의 ssm:GetParameters 권한을 제한할 apps/api SSM Parameter Store(SecureString) ARN 목록 (environments/prod/secrets.tf 출력)"
+  type        = list(string)
+}

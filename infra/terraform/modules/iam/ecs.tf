@@ -1,0 +1,135 @@
+# ECS Fargate 이관 2단계(docs/infra/ecs-fargate-migration-plan.md) - apps/api Fargate
+# 태스크가 쓰는 두 역할. 성격이 다르다:
+#   - Task Execution Role: ECS 에이전트가 컨테이너를 "시작하기 위해" 쓰는 역할(ECR
+#     이미지 pull, SSM Parameter Store 시크릿 복호화, awslogs로 로그 쓰기). 애플리케이션
+#     코드는 이 역할의 자격증명에 접근하지 못한다.
+#   - Task Role: 컨테이너 "안에서 실행 중인 애플리케이션 코드"가 AWS SDK로 쓰는 역할
+#     (SES 발신 등) - EC2의 app 역할(위)과 같은 역할을 ECS에서 대신한다.
+data "aws_caller_identity" "current" {}
+
+resource "aws_iam_role" "ecs_api_task_execution" {
+  name = "${var.project_name}-ecs-api-task-execution"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Principal = { Service = "ecs-tasks.amazonaws.com" }
+        Action    = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = {
+    Name = "${var.project_name}-ecs-api-task-execution"
+  }
+}
+
+resource "aws_iam_role_policy" "ecs_api_task_execution_ecr" {
+  name = "${var.project_name}-ecs-api-task-execution-ecr"
+  role = aws_iam_role.ecs_api_task_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        # ecr:GetAuthorizationToken은 리포지토리 단위로 범위를 좁힐 수 없는 계정 레벨
+        # 액션이다(publish-ecr.yml의 ci_ecr_push 정책과 동일한 이유).
+        Effect   = "Allow"
+        Action   = "ecr:GetAuthorizationToken"
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+        ]
+        Resource = var.ecr_api_repository_arn
+      }
+    ]
+  })
+}
+
+# app_cloudwatch_logs(위, EC2용)와 같은 이유로 CreateLogStream/PutLogEvents만 준다 -
+# Log Group 자체는 logging 모듈이 미리 만들어두므로 CreateLogGroup은 필요 없다.
+resource "aws_iam_role_policy" "ecs_api_task_execution_logs" {
+  name = "${var.project_name}-ecs-api-task-execution-logs"
+  role = aws_iam_role.ecs_api_task_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+        ]
+        Resource = "${var.api_log_group_arn}:*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "ecs_api_task_execution_ssm" {
+  name = "${var.project_name}-ecs-api-task-execution-ssm"
+  role = aws_iam_role.ecs_api_task_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "ssm:GetParameters"
+        Resource = var.ecs_api_secret_arns
+      },
+      {
+        # SecureString은 커스텀 KMS 키를 지정하지 않으면 AWS 관리형 키(alias/aws/ssm)로
+        # 암호화된다 - 이 키에 대한 kms:Decrypt 권한이 없으면 위 ssm:GetParameters가
+        # 있어도 값 복호화 단계에서 AccessDenied로 실패한다.
+        Effect   = "Allow"
+        Action   = "kms:Decrypt"
+        Resource = "arn:aws:kms:${var.aws_region}:${data.aws_caller_identity.current.account_id}:alias/aws/ssm"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role" "ecs_api_task" {
+  name = "${var.project_name}-ecs-api-task"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Principal = { Service = "ecs-tasks.amazonaws.com" }
+        Action    = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = {
+    Name = "${var.project_name}-ecs-api-task"
+  }
+}
+
+# app_ses_send(위, EC2용)와 동일한 최소 권한을 ECS 태스크 역할에도 그대로 준다.
+resource "aws_iam_role_policy" "ecs_api_task_ses_send" {
+  name = "${var.project_name}-ecs-api-task-ses-send"
+  role = aws_iam_role.ecs_api_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["ses:SendEmail", "ses:SendRawEmail"]
+        Resource = var.ses_domain_identity_arn
+      }
+    ]
+  })
+}
