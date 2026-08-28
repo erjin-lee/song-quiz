@@ -48,3 +48,18 @@ variable "ec2_metric_namespace" {
   description = "CloudWatch Agent EC2 Memory/Disk 지표의 namespace (iam 모듈 출력)"
   type        = string
 }
+
+variable "api_ecs_target_group_arn_suffix" {
+  description = "apps/api ECS Fargate 타겟그룹(app_ecs)의 arn_suffix (load_balancer 모듈 출력, TargetGroup dimension) - ECS Fargate 이관 2단계"
+  type        = string
+}
+
+variable "ecs_cluster_name" {
+  description = "AWS/ECS 지표의 ClusterName dimension 값 (ecs 모듈 출력) - ECS Fargate 이관 2단계"
+  type        = string
+}
+
+variable "ecs_api_service_name" {
+  description = "AWS/ECS 지표의 ServiceName dimension 값 (ecs 모듈 출력) - ECS Fargate 이관 2단계"
+  type        = string
+}

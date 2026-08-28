@@ -30,6 +30,14 @@ locals {
       label                   = "Game"
       target_group_arn_suffix = var.game_target_group_arn_suffix
     }
+    # ECS Fargate 이관 2단계 - api_traffic_target이 아직 "ec2"(기본값)라 app_ecs
+    # 타겟그룹에는 weight 0으로 트래픽이 거의 없을 수 있지만, 컷오버 전에 미리
+    # UnhealthyHost/Target5xx 알람을 만들어둬야 실제로 "ecs"로 전환한 뒤에도 공백 없이
+    # 관측된다(전환 시점에 알람을 뒤늦게 추가하면 그 사이가 무방비 상태가 된다).
+    api_ecs = {
+      label                   = "API-ECS"
+      target_group_arn_suffix = var.api_ecs_target_group_arn_suffix
+    }
   }
 }
 
@@ -150,6 +158,66 @@ resource "aws_cloudwatch_metric_alarm" "ec2_high_memory" {
   tags = {
     Environment = "prod"
     Service     = "ec2"
+    Severity    = "warning"
+    Category    = "infrastructure"
+  }
+}
+
+# --- Infrastructure: ECS API High CPU (Warning) ---
+# ECS Fargate 이관 2단계 - AWS/ECS 서비스 CPU/MemoryUtilization은 Container Insights
+# 없이도 기본 제공되는 지표라 추가 비용 없이 바로 쓸 수 있다. RunningTaskCount 등
+# 태스크 개수 기반 지표는 Container Insights가 있어야 하므로(비용 발생) 이번 단계에서는
+# 도입하지 않는다 - 3단계(관측 안정화)에서 필요성을 다시 판단한다.
+resource "aws_cloudwatch_metric_alarm" "ecs_api_high_cpu" {
+  alarm_name        = "SongQuiz-Prod-Warning-API-ECS-HighCPU"
+  alarm_description = "apps/api ECS service average CPU utilization exceeded 90% over a 5-minute period. service=api_ecs severity=warning category=infrastructure signal=CPUUtilization condition=avg>90/5m"
+
+  namespace   = "AWS/ECS"
+  metric_name = "CPUUtilization"
+  statistic   = "Average"
+  dimensions = {
+    ClusterName = var.ecs_cluster_name
+    ServiceName = var.ecs_api_service_name
+  }
+
+  period              = 300
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  threshold           = 90
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+
+  tags = {
+    Environment = "prod"
+    Service     = "api_ecs"
+    Severity    = "warning"
+    Category    = "infrastructure"
+  }
+}
+
+# --- Infrastructure: ECS API High Memory (Warning) ---
+resource "aws_cloudwatch_metric_alarm" "ecs_api_high_memory" {
+  alarm_name        = "SongQuiz-Prod-Warning-API-ECS-HighMemory"
+  alarm_description = "apps/api ECS service average memory utilization exceeded 90% over a 5-minute period. service=api_ecs severity=warning category=infrastructure signal=MemoryUtilization condition=avg>90/5m"
+
+  namespace   = "AWS/ECS"
+  metric_name = "MemoryUtilization"
+  statistic   = "Average"
+  dimensions = {
+    ClusterName = var.ecs_cluster_name
+    ServiceName = var.ecs_api_service_name
+  }
+
+  period              = 300
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  threshold           = 90
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+
+  tags = {
+    Environment = "prod"
+    Service     = "api_ecs"
     Severity    = "warning"
     Category    = "infrastructure"
   }

@@ -133,11 +133,28 @@ resource "aws_lb_listener" "https" {
   certificate_arn   = var.certificate_arn
 
   # Host 헤더 규칙에 걸리지 않는 모든 트래픽(api 서브도메인 포함)은 이 default_action이
-  # 받는다. var.api_traffic_target으로 EC2(app)/ECS(app_ecs) 타겟그룹 중 어디로 보낼지
-  # 고른다 - target_group_arn 값만 바뀌는 in-place 업데이트라 전환 자체는 순간적이다.
+  # 받는다. 단일 target_group_arn 대신 weighted forward를 쓰는 이유: ECS 서비스는
+  # load_balancer 블록에 넣는 타겟그룹이 리스너/규칙에 이미 연결(associated)되어 있어야
+  # 생성된다 - target_group_arn을 삼항식으로만 쓰면 api_traffic_target = "ec2"(기본값)일
+  # 때 app_ecs 타겟그룹이 어떤 리스너에도 연결되지 않은 채로 남아, 최초 apply에서
+  # ECS 서비스 생성 자체가 "target group ... does not have an associated load balancer"로
+  # 실패한다. weight 0/100으로 두 타겟그룹을 항상 같이 연결해두면 이 문제가 없고,
+  # var.api_traffic_target으로 실제 트래픽 비중만 100/0으로 뒤바뀐다(weight 0은 실제로
+  # 트래픽을 받지 않는다) - 전환/롤백 모두 순간적인 in-place 업데이트인 것도 동일하다.
   default_action {
-    type             = "forward"
-    target_group_arn = var.api_traffic_target == "ecs" ? aws_lb_target_group.app_ecs.arn : aws_lb_target_group.app.arn
+    type = "forward"
+
+    forward {
+      target_group {
+        arn    = aws_lb_target_group.app.arn
+        weight = var.api_traffic_target == "ecs" ? 0 : 100
+      }
+
+      target_group {
+        arn    = aws_lb_target_group.app_ecs.arn
+        weight = var.api_traffic_target == "ecs" ? 100 : 0
+      }
+    }
   }
 }
 

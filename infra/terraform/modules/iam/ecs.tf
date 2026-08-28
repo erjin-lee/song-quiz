@@ -5,7 +5,6 @@
 #     코드는 이 역할의 자격증명에 접근하지 못한다.
 #   - Task Role: 컨테이너 "안에서 실행 중인 애플리케이션 코드"가 AWS SDK로 쓰는 역할
 #     (SES 발신 등) - EC2의 app 역할(위)과 같은 역할을 ECS에서 대신한다.
-data "aws_caller_identity" "current" {}
 
 resource "aws_iam_role" "ecs_api_task_execution" {
   name = "${var.project_name}-ecs-api-task-execution"
@@ -87,12 +86,13 @@ resource "aws_iam_role_policy" "ecs_api_task_execution_ssm" {
         Resource = var.ecs_api_secret_arns
       },
       {
-        # SecureString은 커스텀 KMS 키를 지정하지 않으면 AWS 관리형 키(alias/aws/ssm)로
-        # 암호화된다 - 이 키에 대한 kms:Decrypt 권한이 없으면 위 ssm:GetParameters가
-        # 있어도 값 복호화 단계에서 AccessDenied로 실패한다.
+        # var.ecs_api_secrets_kms_key_arn은 secrets.tf가 만든 전용 KMS 키다(기본
+        # alias/aws/ssm이 아니다) - 이 키의 정책 자체가 Decrypt를 이 역할에게만
+        # 허용하므로, 여기 IAM 정책의 kms:Decrypt는 그 허용을 실제로 쓰기 위한
+        # 반대쪽 절반이다(키 정책 + IAM 정책 둘 다 허용해야 동작).
         Effect   = "Allow"
         Action   = "kms:Decrypt"
-        Resource = "arn:aws:kms:${var.aws_region}:${data.aws_caller_identity.current.account_id}:alias/aws/ssm"
+        Resource = var.ecs_api_secrets_kms_key_arn
       }
     ]
   })

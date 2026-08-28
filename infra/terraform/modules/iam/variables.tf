@@ -24,11 +24,6 @@ variable "ec2_metric_namespace" {
   default     = "SongQuiz/EC2"
 }
 
-variable "aws_region" {
-  description = "kms:Decrypt Resource(alias/aws/ssm) ARN을 구성할 때 쓰는 리전 (ECS Fargate 이관 2단계)"
-  type        = string
-}
-
 variable "ecr_api_repository_arn" {
   description = "ECS Task Execution Role의 이미지 pull 권한을 제한할 apps/api ECR 리포지토리 ARN (ecr 모듈 출력)"
   type        = string
@@ -37,4 +32,9 @@ variable "ecr_api_repository_arn" {
 variable "ecs_api_secret_arns" {
   description = "ECS Task Execution Role의 ssm:GetParameters 권한을 제한할 apps/api SSM Parameter Store(SecureString) ARN 목록 (environments/prod/secrets.tf 출력)"
   type        = list(string)
+}
+
+variable "ecs_api_secrets_kms_key_arn" {
+  description = "위 SSM 파라미터를 암호화하는 KMS 키 ARN (environments/prod/secrets.tf 출력) - 기본 AWS 관리형 키(alias/aws/ssm)를 쓰지 않는 이유는 secrets.tf 주석 참고. kms:Decrypt 권한을 이 키로만 좁혀서, ssm:GetParameters를 가진 다른 role(예: ReadOnlyAccess만 붙은 ci_terraform_plan)이 값을 복호화하지 못하게 한다"
+  type        = string
 }

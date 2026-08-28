@@ -43,9 +43,9 @@ module "iam" {
 
   # ECS Fargate 이관 2단계(docs/infra/ecs-fargate-migration-plan.md) - apps/api Task
   # Execution Role이 ECR pull/SSM 시크릿 복호화 권한을 제한할 때 쓴다.
-  aws_region             = var.aws_region
-  ecr_api_repository_arn = module.ecr.api_repository_arn
-  ecs_api_secret_arns    = values(local.api_secret_arns)
+  ecr_api_repository_arn      = module.ecr.api_repository_arn
+  ecs_api_secret_arns         = values(local.api_secret_arns)
+  ecs_api_secrets_kms_key_arn = aws_kms_key.api_secrets.arn
 }
 
 module "compute" {
@@ -167,6 +167,13 @@ module "monitoring" {
   cache_cluster_id             = module.cache.cluster_id
   game_metric_namespace        = module.logging.game_metric_namespace
   ec2_metric_namespace         = module.iam.ec2_metric_namespace
+
+  # ECS Fargate 이관 2단계 - api_traffic_target을 "ecs"로 전환하기 전에 UnhealthyHost/
+  # Target5xx/CPU/Memory 알람을 미리 만들어둔다(notification 모듈이 "SongQuiz-Prod-"
+  # prefix로 자동 매칭하므로 별도 배선 없이 Slack까지 연결된다).
+  api_ecs_target_group_arn_suffix = module.load_balancer.app_ecs_target_group_arn_suffix
+  ecs_cluster_name                = module.ecs.cluster_name
+  ecs_api_service_name            = module.ecs.api_service_name
 }
 
 # CloudWatch Alarm(SongQuiz-Prod-*) 상태 변화를 EventBridge -> Lambda로 받아 Slack에 전달한다.
