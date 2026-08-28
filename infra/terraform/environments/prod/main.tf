@@ -40,6 +40,12 @@ module "iam" {
   ses_domain_identity_arn = module.ses.domain_identity_arn
   api_log_group_arn       = module.logging.api_log_group_arn
   game_log_group_arn      = module.logging.game_log_group_arn
+
+  # ECS Fargate 이관 2단계(docs/infra/ecs-fargate-migration-plan.md) - apps/api Task
+  # Execution Role이 ECR pull/SSM 시크릿 복호화 권한을 제한할 때 쓴다.
+  ecr_api_repository_arn      = module.ecr.api_repository_arn
+  ecs_api_secret_arns         = values(local.api_secret_arns)
+  ecs_api_secrets_kms_key_arn = aws_kms_key.api_secrets.arn
 }
 
 module "compute" {
@@ -70,6 +76,10 @@ module "load_balancer" {
   certificate_arn          = module.acm.certificate_arn
   game_subdomain           = var.game_subdomain
   domain_name              = var.domain_name
+
+  # ECS Fargate 이관 2단계 - "ec2"(기본값)면 지금과 동일하게 app_a EC2로, "ecs"로
+  # 바꾸면 apps/api Fargate 태스크로 트래픽이 전환된다.
+  api_traffic_target = var.api_traffic_target
 }
 
 module "acm" {
@@ -135,13 +145,14 @@ module "database" {
 module "cache" {
   source = "../../modules/cache"
 
-  project_name          = var.project_name
-  vpc_id                = module.network.vpc_id
-  private_db_subnet_ids = module.network.private_db_subnet_ids
-  app_security_group_id = module.security.app_security_group_id
-  cache_port            = var.cache_port
-  cache_engine_version  = var.cache_engine_version
-  cache_node_type       = var.cache_node_type
+  project_name              = var.project_name
+  vpc_id                    = module.network.vpc_id
+  private_db_subnet_ids     = module.network.private_db_subnet_ids
+  app_security_group_id     = module.security.app_security_group_id
+  ecs_api_security_group_id = module.security.ecs_api_security_group_id
+  cache_port                = var.cache_port
+  cache_engine_version      = var.cache_engine_version
+  cache_node_type           = var.cache_node_type
 }
 
 module "monitoring" {
@@ -156,6 +167,13 @@ module "monitoring" {
   cache_cluster_id             = module.cache.cluster_id
   game_metric_namespace        = module.logging.game_metric_namespace
   ec2_metric_namespace         = module.iam.ec2_metric_namespace
+
+  # ECS Fargate 이관 2단계 - api_traffic_target을 "ecs"로 전환하기 전에 UnhealthyHost/
+  # Target5xx/CPU/Memory 알람을 미리 만들어둔다(notification 모듈이 "SongQuiz-Prod-"
+  # prefix로 자동 매칭하므로 별도 배선 없이 Slack까지 연결된다).
+  api_ecs_target_group_arn_suffix = module.load_balancer.app_ecs_target_group_arn_suffix
+  ecs_cluster_name                = module.ecs.cluster_name
+  ecs_api_service_name            = module.ecs.api_service_name
 }
 
 # CloudWatch Alarm(SongQuiz-Prod-*) 상태 변화를 EventBridge -> Lambda로 받아 Slack에 전달한다.
@@ -222,4 +240,72 @@ module "ecr" {
   source = "../../modules/ecr"
 
   project_name = var.project_name
+}
+
+# ECS Fargate 이관 2단계 - apps/api 컨테이너에 평문으로 주입할 환경변수. secrets.tf의
+# api_secret_arns(시크릿)와 짝을 이룬다. DB_HOST_NAME/REDIS_HOST는 module.database/
+# module.cache의 address 출력(호스트만, 포트 제외)을 쓴다 - endpoint 출력은 "호스트:포트"
+# 형태라 DB_PORT/REDIS_PORT와 값이 겹친다.
+locals {
+  api_environment_variables = {
+    NODE_ENV     = "production"
+    PORT         = tostring(var.app_port)
+    COMMIT_SHA   = var.api_image_git_sha
+    DB_HOST_NAME = module.database.address
+    DB_PORT      = tostring(var.db_port)
+    DB_USER_NAME = var.db_username
+    # var.db_name이 아니다 - var.db_name은 RDS 인스턴스 생성 시점에만 쓰이는 값이고
+    # (현재 RDS에서는 비어있는 "appdb"), 실제 애플리케이션 테이블은 별도로 만들어진
+    # api_db_schema_name 스키마에 있다. variables.tf의 설명 참고.
+    DB_AUTH_DB_NAME = var.api_db_schema_name
+    REDIS_HOST      = module.cache.address
+    REDIS_PORT      = tostring(var.cache_port)
+    REDIS_DB        = "0"
+    CORS_ORIGIN     = "https://${var.domain_name}"
+    COOKIE_DOMAIN   = ".${var.domain_name}"
+    # game은 아직 EC2에 남아 있다(2단계는 api만 이관) - Fargate 태스크가 있는 public
+    # 서브넷에서 game이 있는 private-app 서브넷으로 직접 SG 규칙을 새로 뚫는 대신,
+    # 이미 열려 있는 public ALB(game 서브도메인)를 그대로 거쳐 호출한다.
+    GAME_SERVICE_URL  = "https://${var.game_subdomain}.${var.domain_name}"
+    AD_ENABLED        = "false"
+    ADMIN_USER        = var.admin_user
+    API_DOCS_USER     = var.api_docs_user
+    MAIL_FROM_ADDRESS = var.mail_from_address
+    # SES_ACCESS_KEY/SES_SECRET_KEY는 의도적으로 넣지 않는다 - MailService가 이제
+    # 두 값이 모두 있을 때만 명시적 자격증명을 쓰므로(apps/api/src/mail/mail.service.ts),
+    # 여기서 비워두면 AWS SDK 기본 provider chain이 ecs_api_task 역할(SES 발신 권한)을
+    # 자동으로 쓴다.
+    SES_REGION = var.aws_region
+  }
+}
+
+module "ecs" {
+  source = "../../modules/ecs"
+
+  project_name              = var.project_name
+  aws_region                = var.aws_region
+  public_subnet_ids         = module.network.public_subnet_ids
+  ecs_api_security_group_id = module.security.ecs_api_security_group_id
+  api_target_group_arn      = module.load_balancer.app_ecs_target_group_arn
+  execution_role_arn        = module.iam.ecs_api_task_execution_role_arn
+  task_role_arn             = module.iam.ecs_api_task_role_arn
+  api_repository_url        = module.ecr.api_repository_url
+  api_image_git_sha         = var.api_image_git_sha
+  api_log_group_name        = module.logging.api_log_group_name
+  app_port                  = var.app_port
+  api_task_cpu              = var.api_task_cpu
+  api_task_memory           = var.api_task_memory
+  api_desired_count         = var.api_desired_count
+  environment_variables     = local.api_environment_variables
+  secret_arns               = local.api_secret_arns
+
+  # aws_ecs_service.api는 api_target_group_arn(위)을 통해 module.load_balancer의
+  # aws_lb_target_group.app_ecs에는 이미 참조 기반 의존성이 있지만, 그 타겟그룹을
+  # 실제로 "리스너에 연결"하는 aws_lb_listener.https(weighted forward)는 별도
+  # 리소스라 이 참조만으로는 순서가 보장되지 않는다 - 최초 apply에서 둘이 병렬로
+  # 실행되면 ECS가 서비스를 만들려는 시점에 타겟그룹이 아직 어떤 리스너에도 연결되지
+  # 않은 상태일 수 있어 "target group ... does not have an associated load balancer"로
+  # 실패할 수 있다. module 전체에 대한 depends_on으로 load_balancer의 모든 리소스
+  # (리스너 포함)가 끝난 뒤에만 ecs가 시작되도록 명시적으로 순서를 고정한다.
+  depends_on = [module.load_balancer]
 }

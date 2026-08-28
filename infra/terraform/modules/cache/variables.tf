@@ -18,6 +18,11 @@ variable "app_security_group_id" {
   type        = string
 }
 
+variable "ecs_api_security_group_id" {
+  description = "Redis 접근을 허용할 apps/api ECS Fargate 보안 그룹 ID (security 모듈 출력, ECS Fargate 이관 2단계)"
+  type        = string
+}
+
 variable "cache_port" {
   description = "Redis 포트"
   type        = number

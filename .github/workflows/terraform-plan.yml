@@ -102,4 +102,28 @@ jobs:
           # list(string)이라 JSON 배열 형태의 문자열로 secret에 저장해야 한다(예: ["a@b.com"]).
           TF_VAR_monthly_budget_usd: ${{ secrets.TF_VAR_MONTHLY_BUDGET_USD }}
           TF_VAR_budget_alert_emails: ${{ secrets.TF_VAR_BUDGET_ALERT_EMAILS }}
-        run: terraform plan -input=false -no-color -lock-timeout=5m
+          # --- ECS Fargate 이관 2단계: 이 5개는 진짜 운영 시크릿(admin/JWT/OpenAI 등)이
+          # 아니라 plan 전용 하드코딩 placeholder다 - real value가 필요 없다(apply는 이
+          # 워크플로우에서 하지 않아 SSM에 실제로 쓰이지 않고, secrets.tf가 value_wo를
+          # 쓰므로 어차피 이 값 자체가 state에도 남지 않는다). repository secret으로
+          # 등록하지 않는 이유: PR을 열기만 하면 도는 ci_terraform_plan role(원래
+          # ReadOnlyAccess 조회 전용)의 프로세스 환경변수에 진짜 운영 시크릿이 존재하는
+          # 것 자체가 불필요한 노출이라, 애초에 이 값을 알 필요가 없게 만든다.
+          TF_VAR_admin_password: "plan-placeholder"
+          TF_VAR_admin_jwt_secret: "plan-placeholder"
+          TF_VAR_user_jwt_secret: "plan-placeholder"
+          TF_VAR_gpt_secret_key: "plan-placeholder"
+          TF_VAR_internal_service_secret: "plan-placeholder"
+          TF_VAR_admin_user: "plan-placeholder"
+          TF_VAR_mail_from_address: "plan-placeholder@example.com"
+          TF_VAR_api_image_git_sha: "0000000000000000000000000000000000000000"
+        # -refresh=false: apps/api SSM SecureString(secrets.tf)의 KMS 키는 ECS Task
+        # Execution Role에게만 kms:Decrypt를 허용한다(finding: 시크릿 KMS 분리 참고) -
+        # ci_terraform_plan(ReadOnlyAccess)은 의도적으로 그 권한이 없다. 기본 refresh
+        # 단계는 aws_ssm_parameter를 최신 상태로 가져오려고 항상 GetParameter(with
+        # decryption)를 호출하므로, 그 권한이 없는 이 role로는 refresh 자체가
+        # AccessDeniedException으로 plan 전체를 실패시킨다. 이 워크플로우는 실제
+        # apply를 하지 않는 미리보기 전용이라(이 프로젝트 원칙 - infra/terraform/CLAUDE.md,
+        # 실제 apply는 항상 로컬에서 전체 refresh와 함께 실행됨) 여기서만 refresh를
+        # 끄고 마지막으로 알려진 state 기준으로 diff를 보여준다.
+        run: terraform plan -input=false -no-color -lock-timeout=5m -refresh=false

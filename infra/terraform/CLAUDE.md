@@ -175,16 +175,19 @@ Avoid unnecessary variables for values that are truly implementation details.
 │                               # (Terraform 리소스 아님 - EC2에 수동 복사/적용)
 └── modules/
     ├── network/           # VPC, 서브넷, 라우팅
-    ├── security/          # public/app/db 보안 그룹
-    ├── iam/                # app 인스턴스 역할/정책
+    ├── security/          # public/app/db 보안 그룹 + ecs_api 보안 그룹(ECS Fargate
+    │                       # 이관 2단계, 2026-08-28)
+    ├── iam/                # app 인스턴스 역할/정책 + apps/api ECS Task Execution/Task
+    │                       # Role(2단계)
     ├── compute/           # bastion + app_a 인스턴스
-    ├── load_balancer/     # ALB, 타겟그룹, 리스너
+    ├── load_balancer/     # ALB, 타겟그룹, 리스너 + app_ecs 타겟그룹(2단계, ALB
+    │                       # default_action은 api_traffic_target 변수로 EC2/ECS 전환)
     ├── acm/                # ALB용 와일드카드 인증서
     ├── web/                # S3 + CloudFront (정적 웹)
     ├── dns/                # api/game 서브도메인 레코드
     ├── ses/                # SES 도메인 인증 + DKIM
-    ├── database/          # RDS
-    ├── cache/              # ElastiCache
+    ├── database/          # RDS (address output은 ECS 태스크의 DB_HOST_NAME 환경변수용, 2단계)
+    ├── cache/              # ElastiCache (address output/ecs_api SG 규칙도 2단계 추가)
     ├── logging/            # CloudWatch Log Group(api/game) + Game 실패 이벤트 Metric Filter
     ├── monitoring/         # CloudWatch Dashboard(SongQuiz-Prod) + Alarm 1차 세트(alarms.tf) -
                              # 다른 모듈의 output만 참조, 새 Custom Metric/Metric Filter는 만들지
@@ -201,14 +204,20 @@ Avoid unnecessary variables for values that are truly implementation details.
     │                        # Incoming Webhook으로 전달한다 - notification과 동일한 Webhook을
     │                        # 재사용하지만 EventBridge Rule이 아니라 Scheduler로 트리거되는
     │                        # 점이 다르다 (2026-08-28 도입)
-    └── ecr/                # apps/api, apps/game 컨테이너 이미지를 저장할 ECR 리포지토리 2개
-                             # + 수명주기 정책. ECS Fargate 이관 1단계
-                             # (docs/infra/ecs-fargate-migration-plan.md) 산출물 - 다른 모듈의
-                             # output을 참조하지 않는 독립 모듈이다. CI가 이 리포지토리에 이미지를
-                             # push할 때 assume하는 IAM Role은 environments/bootstrap/ecr-push.tf에
-                             # 별도로 있다(다른 root state라 module output을 공유할 수 없어
-                             # project_name으로 ARN을 직접 구성 - ci_deploy_metadata와 동일한 이유)
-                             # (2026-08-28 도입)
+    ├── ecr/                # apps/api, apps/game 컨테이너 이미지를 저장할 ECR 리포지토리 2개
+    │                        # + 수명주기 정책. ECS Fargate 이관 1단계
+    │                        # (docs/infra/ecs-fargate-migration-plan.md) 산출물 - 다른 모듈의
+    │                        # output을 참조하지 않는 독립 모듈이다. CI가 이 리포지토리에 이미지를
+    │                        # push할 때 assume하는 IAM Role은 environments/bootstrap/ecr-push.tf에
+    │                        # 별도로 있다(다른 root state라 module output을 공유할 수 없어
+    │                        # project_name으로 ARN을 직접 구성 - ci_deploy_metadata와 동일한 이유)
+    │                        # (2026-08-28 도입)
+    └── ecs/                # apps/api ECS 클러스터/태스크 정의/서비스. ECS Fargate 이관 2단계
+                             # 산출물(2026-08-28) - game은 아직 대상이 아니다(api 전용). 시크릿
+                             # (DB_PASSWORD, JWT 시크릿 등)은 이 모듈이 만들지 않는다 -
+                             # environments/prod/secrets.tf가 SSM Parameter Store(SecureString)로
+                             # 만들고, 이 모듈과 iam 모듈 양쪽에 ARN을 나눠 전달한다(두 모듈이
+                             # 서로 참조하면 순환 참조가 생기기 때문 - secrets.tf 주석 참고)
 ```
 
 새 환경(예: staging)이 필요해지면 `environments/<env>/`를 추가하고 같은 모듈들을

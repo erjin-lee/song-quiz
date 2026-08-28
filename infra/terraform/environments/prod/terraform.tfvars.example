@@ -11,3 +11,25 @@ budget_alert_emails = [
   "ops@example.com",
 ]
 cost_anomaly_threshold_usd = 10
+
+# --- ECS Fargate 이관 2단계 (docs/infra/ecs-fargate-migration-plan.md) ---
+# 아래 값들은 새로 만드는 게 아니라 지금 app_a EC2의 .env에 이미 들어있는 값과
+# 정확히 동일해야 한다. 특히 user_jwt_secret/internal_service_secret은 apps/game
+# (아직 EC2)과 공유하는 값이라, 여기서 다른 값을 넣으면 로그인 세션이 무효화되거나
+# game<->api 내부 호출이 401로 깨진다.
+admin_user              = "REPLACE_WITH_EXISTING_.ENV_VALUE"
+admin_password          = "REPLACE_WITH_EXISTING_.ENV_VALUE"
+admin_jwt_secret        = "REPLACE_WITH_EXISTING_.ENV_VALUE"
+user_jwt_secret         = "REPLACE_WITH_EXISTING_.ENV_VALUE"
+gpt_secret_key          = "REPLACE_WITH_EXISTING_.ENV_VALUE"
+internal_service_secret = "REPLACE_WITH_EXISTING_.ENV_VALUE"
+mail_from_address       = "REPLACE_WITH_EXISTING_.ENV_VALUE"
+# api_docs_user/api_docs_password는 비워두면(기본값 "") Swagger 문서가 인증 없이
+# 열린다 - 기존 .env에 API_DOCS_USER/PASSWORD가 설정돼 있었다면 그 값을 그대로 옮긴다.
+
+# publish-ecr.yml로 push한 이미지의 git commit SHA(전체 40자). 배포할 때마다 갱신한다.
+api_image_git_sha = "REPLACE_WITH_PUSHED_IMAGE_SHA"
+
+# ECS 서비스가 healthy한 것을 확인하기 전까지는 "ec2"로 둔다. 확인 후 "ecs"로 바꾸면
+# API 트래픽이 전환되고, 문제가 생기면 다시 "ec2"로 돌리면 즉시 롤백된다.
+api_traffic_target = "ec2"

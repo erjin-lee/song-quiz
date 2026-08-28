@@ -18,6 +18,16 @@ resource "aws_security_group" "cache" {
     security_groups = [var.app_security_group_id]
   }
 
+  # ECS Fargate 이관 2단계 - apps/api Fargate 태스크도 room 스냅샷 캐시 등에 Redis를
+  # 쓴다. game(app SG, 위 규칙)이 room 상태의 주 사용자라 그 규칙은 그대로 두고 추가한다.
+  ingress {
+    description     = "Redis from ecs_api tier"
+    from_port       = var.cache_port
+    to_port         = var.cache_port
+    protocol        = "tcp"
+    security_groups = [var.ecs_api_security_group_id]
+  }
+
   egress {
     description = "Allow all outbound"
     from_port   = 0
