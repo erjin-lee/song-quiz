@@ -11,7 +11,12 @@ import {
 import { CacheService } from '../cache/cache.service';
 import { delay } from '../common/delay';
 import { FakeRedis } from '../common/testing/fake-redis';
+import { ChatHistoryRepository } from './chat-history.repository';
 import { QuizClient } from './clients/quiz.client';
+import { RoomAbuseGuardRepository } from './room-abuse-guard.repository';
+import { RoomFencedStateStore } from './room-fenced-state.store';
+import { RoomIndexReconciler } from './room-index-reconciler.service';
+import { RoomIndexRepository } from './room-index.repository';
 import { RoomLockService } from './room-lock.service';
 import { RoomRoundService } from './room-round.service';
 import { roomLockKey, RoomRepository } from './room.repository';
@@ -87,6 +92,11 @@ describe('RoomService', () => {
       providers: [
         RoomService,
         RoomRepository,
+        RoomFencedStateStore,
+        RoomIndexRepository,
+        RoomIndexReconciler,
+        ChatHistoryRepository,
+        RoomAbuseGuardRepository,
         RoomRoundService,
         CacheService,
         RoomLockService,
@@ -369,6 +379,7 @@ describe('RoomService', () => {
     let redis: FakeRedis;
     let localCacheService: CacheService;
     let localRoomRepository: RoomRepository;
+    let localRoomIndexRepository: RoomIndexRepository;
     let localRoomLockService: RoomLockService;
     let localRoomService: RoomService;
 
@@ -384,9 +395,29 @@ describe('RoomService', () => {
       });
 
       localRoomLockService = new RoomLockService(localCacheService);
-      localRoomRepository = new RoomRepository(
+      const localStateStore = new RoomFencedStateStore(
         localCacheService,
         localRoomLockService,
+      );
+      localRoomRepository = new RoomRepository(
+        localCacheService,
+        localStateStore,
+      );
+      localRoomIndexRepository = new RoomIndexRepository(
+        localCacheService,
+        localRoomLockService,
+        localStateStore,
+      );
+      const localRoomIndexReconciler = new RoomIndexReconciler(
+        localRoomRepository,
+        localRoomIndexRepository,
+        localRoomLockService,
+      );
+      const localChatHistoryRepository = new ChatHistoryRepository(
+        localCacheService,
+      );
+      const localRoomAbuseGuard = new RoomAbuseGuardRepository(
+        localCacheService,
       );
       const localRoomTimerService = new RoomTimerService(localCacheService);
       const localRoomRoundService = new RoomRoundService(
@@ -396,6 +427,10 @@ describe('RoomService', () => {
       );
       localRoomService = new RoomService(
         localRoomRepository,
+        localRoomIndexRepository,
+        localRoomIndexReconciler,
+        localChatHistoryRepository,
+        localRoomAbuseGuard,
         localRoomRoundService,
         localRoomLockService,
         localRoomTimerService,
@@ -459,7 +494,7 @@ describe('RoomService', () => {
       // 태스크 flush(Promise.resolve 반복)로는 부족하다. 실제 타이머로 짧게 기다린다.
       await delay(50);
 
-      expect(await localRoomRepository.getRoomIndex()).not.toContain(
+      expect(await localRoomIndexRepository.getRoomIndex()).not.toContain(
         room.roomId,
       );
     });
@@ -505,7 +540,7 @@ describe('RoomService', () => {
       // 6. reconciliation이 뒤이어 락을 잡고 재확인하면 이미 되살아난 방을 보게
       //    되므로, index에서 지우면 안 된다.
       await delay(50);
-      expect(await localRoomRepository.getRoomIndex()).toContain(roomId);
+      expect(await localRoomIndexRepository.getRoomIndex()).toContain(roomId);
     });
   });
 

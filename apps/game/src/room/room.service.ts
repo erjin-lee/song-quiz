@@ -11,6 +11,10 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { updateLogContext } from 'logger';
+import {
+  ChatHistoryEntry,
+  ChatHistoryRepository,
+} from './chat-history.repository';
 import { QuizClient } from './clients/quiz.client';
 import { CreateRoomRequestDto } from './dto/create-room-request.dto';
 import { JoinRoomRequestDto } from './dto/join-room-request.dto';
@@ -19,12 +23,10 @@ import { RoomItemDto } from './dto/room-item.dto';
 import { RoomJoinResultDto } from './dto/room-join-result.dto';
 import { UpdateRoomRequestDto } from './dto/update-room-request.dto';
 import { normalizeAnswer, pointsForRank } from './game-scoring.util';
-import {
-  ChatHistoryEntry,
-  roomLockKey,
-  RoomRecord,
-  RoomRepository,
-} from './room.repository';
+import { RoomAbuseGuardRepository } from './room-abuse-guard.repository';
+import { RoomIndexReconciler } from './room-index-reconciler.service';
+import { RoomIndexRepository } from './room-index.repository';
+import { roomLockKey, RoomRecord, RoomRepository } from './room.repository';
 import { RoomLockService } from './room-lock.service';
 import { RoomRoundService } from './room-round.service';
 import { RoomTimerService } from './room-timer.service';
@@ -85,6 +87,10 @@ export class RoomService extends EventEmitter {
 
   constructor(
     private readonly roomRepository: RoomRepository,
+    private readonly roomIndexRepository: RoomIndexRepository,
+    private readonly roomIndexReconciler: RoomIndexReconciler,
+    private readonly chatHistoryRepository: ChatHistoryRepository,
+    private readonly roomAbuseGuard: RoomAbuseGuardRepository,
     private readonly roomRoundService: RoomRoundService,
     private readonly roomLockService: RoomLockService,
     private readonly roomTimerService: RoomTimerService,
@@ -108,14 +114,14 @@ export class RoomService extends EventEmitter {
    * 응답 형식을 깨지 않기 위함이다.
    */
   async getRooms(page?: number, pageSize?: number): Promise<RoomItemDto[]> {
-    const roomIds = await this.roomRepository.getRoomIndex();
+    const roomIds = await this.roomIndexRepository.getRoomIndex();
     const records = await Promise.all(
       roomIds.map((roomId) => this.roomRepository.getRoomRecord(roomId)),
     );
 
     const staleRoomIds = roomIds.filter((_, i) => records[i] === undefined);
     if (staleRoomIds.length > 0) {
-      this.pruneStaleIndexEntries(staleRoomIds);
+      this.roomIndexReconciler.pruneStaleEntries(staleRoomIds);
     }
 
     const publicRooms = records
@@ -132,45 +138,6 @@ export class RoomService extends EventEmitter {
     return publicRooms.slice(start, start + pageSize);
   }
 
-  /**
-   * room:index는 이제 만료시키지 않으므로(ROOM_INDEX_TTL_SECONDS), 방이 TTL로
-   * 자연 만료돼 removeFromIndex를 못 탄 stale entry는 여기서만 정리된다. 목록
-   * 조회 응답을 늦추지 않도록 기다리지 않고(fire-and-forget) 백그라운드에서
-   * 지운다 — 실패해도 다음 조회에서 다시 시도되므로 결국 정리된다.
-   */
-  private pruneStaleIndexEntries(roomIds: string[]): void {
-    for (const roomId of roomIds) {
-      this.reconcileStaleIndexEntry(roomId).catch((err) => {
-        this.logger.warn(
-          `만료된 방을 room:index에서 정리하지 못했습니다(roomId: ${roomId}): ${(err as Error).message}`,
-        );
-      });
-    }
-  }
-
-  /**
-   * getRooms()가 쓰는 getRoomRecord()는 Redis 오류 시 로컬 폴백으로 undefined를 반환할
-   * 수 있다(목록 표시용으로는 안전하지만, 그 결과만으로 index에서 지우면 일시적인 Redis
-   * 오류를 "방 만료"로 오인해 살아있는 방을 영구히 목록에서 지울 수 있다). 그래서 지우기
-   * 전에 폴백 없는 roomExistsStrict로 한 번 더 확인한다 — 이 확인 자체가 실패하면(Redis
-   * 오류) 판단을 유보하고 지우지 않는다(다음 조회에서 다시 시도).
-   *
-   * roomExistsStrict 확인과 removeFromIndex 사이에 room lock이 없으면, 그 틈에 다른
-   * 작업(예: joinRoom)이 이미 이 roomId의 락을 쥔 채 방을 다시 저장(TTL 갱신)해도
-   * 우리는 "없었다"는 낡은 판단으로 그 방을 index에서 지워버릴 수 있다. deleteRoom과
-   * 동일하게 room lock으로 확인·삭제를 하나의 임계구역으로 묶어, 그 사이에는 어떤
-   * saveRoom도 끼어들 수 없게 한다.
-   */
-  private async reconcileStaleIndexEntry(roomId: string): Promise<void> {
-    await this.withRoomLock(roomId, async () => {
-      const stillExists = await this.roomRepository.roomExistsStrict(roomId);
-      if (stillExists) {
-        return;
-      }
-      await this.roomRepository.removeFromIndex(roomId);
-    });
-  }
-
   async getRoom(roomId: string): Promise<RoomItemDto | undefined> {
     const record = await this.roomRepository.getRoomRecord(roomId);
     return record ? this.roomRepository.toPublicRoom(record) : undefined;
@@ -181,7 +148,7 @@ export class RoomService extends EventEmitter {
     accountUserId?: string,
     clientIp?: string,
   ): Promise<RoomJoinResultDto> {
-    await this.roomRepository.assertRoomCreationAllowed(clientIp);
+    await this.roomAbuseGuard.assertRoomCreationAllowed(clientIp);
 
     const summary = await this.quizClient.getSummary(dto.quizId);
 
@@ -237,7 +204,7 @@ export class RoomService extends EventEmitter {
 
     await this.roomRepository.saveRoom(room);
     try {
-      await this.roomRepository.addToIndex(room.roomId);
+      await this.roomIndexRepository.addToIndex(room.roomId);
     } catch (err) {
       // index 등록에 실패한 채로 두면 아무도 모르는(응답도 못 받은) orphan room이
       // Redis에 남는다. 방 본체를 되돌려 orphan을 남기지 않는다.
@@ -298,7 +265,7 @@ export class RoomService extends EventEmitter {
       }
 
       if (room.isPrivate) {
-        await this.roomRepository.assertPasswordAttemptAllowed(
+        await this.roomAbuseGuard.assertPasswordAttemptAllowed(
           roomId,
           clientIp,
         );
@@ -307,13 +274,13 @@ export class RoomService extends EventEmitter {
           room.pwdHash !== null &&
           (await bcrypt.compare(dto.password ?? '', room.pwdHash));
         if (!matches) {
-          await this.roomRepository.recordFailedPasswordAttempt(
+          await this.roomAbuseGuard.recordFailedPasswordAttempt(
             roomId,
             clientIp,
           );
           throw new UnauthorizedException('비밀번호가 올바르지 않습니다.');
         }
-        await this.roomRepository.clearPasswordAttempts(roomId, clientIp);
+        await this.roomAbuseGuard.clearPasswordAttempts(roomId, clientIp);
       }
 
       const userId = accountUserId ?? randomUUID();
@@ -772,17 +739,17 @@ export class RoomService extends EventEmitter {
     });
   }
 
-  /** 채팅/시스템 메시지를 히스토리에 기록한다(재접속 시 복원용). 저장 방식은 RoomRepository 참고. */
+  /** 채팅/시스템 메시지를 히스토리에 기록한다(재접속 시 복원용). 저장 방식은 ChatHistoryRepository 참고. */
   async appendChatHistory(
     roomId: string,
     entry: ChatHistoryEntry,
   ): Promise<void> {
-    return this.roomRepository.appendChatHistory(roomId, entry);
+    return this.chatHistoryRepository.appendChatHistory(roomId, entry);
   }
 
   /** roomId의 채팅 히스토리를 조회한다(재접속 시 복원용). */
   async getChatHistory(roomId: string): Promise<ChatHistoryEntry[]> {
-    return this.roomRepository.getChatHistory(roomId);
+    return this.chatHistoryRepository.getChatHistory(roomId);
   }
 
   private assertHost(room: RoomItemDto, requesterUserId: string): void {
@@ -861,8 +828,8 @@ export class RoomService extends EventEmitter {
     await this.roomRepository.deleteRoomRecord(roomId);
     // index 정리 실패로 "방은 이미 지워졌는데 삭제 요청 자체가 실패한 것처럼" 보이면
     // 안 되므로 best-effort로만 처리한다. 남는 stale entry는 getRooms 조회 시점에
-    // pruneStaleIndexEntries가 정리한다.
-    await this.roomRepository.removeFromIndex(roomId).catch((err) => {
+    // RoomIndexReconciler가 정리한다.
+    await this.roomIndexRepository.removeFromIndex(roomId).catch((err) => {
       this.logger.warn(
         `방 삭제 후 room:index 정리 실패(roomId: ${roomId}), 다음 목록 조회 시 정리됩니다: ${(err as Error).message}`,
       );
@@ -874,7 +841,7 @@ export class RoomService extends EventEmitter {
       this.roomRepository.deleteRoundsSnapshot(roomId),
       this.roomRepository.deleteCurrentAnswers(roomId),
       this.roomRepository.deleteCurrentReveal(roomId),
-      this.roomRepository.deleteChatHistory(roomId),
+      this.chatHistoryRepository.deleteChatHistory(roomId),
     ]);
   }
 
