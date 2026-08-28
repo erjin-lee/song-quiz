@@ -54,13 +54,13 @@ describe("collectLogs", () => {
       results: [
         [
           field("@timestamp", "2026-08-24 02:29:59.000"),
-          field("@message", '{"event":"quiz_snapshot_failed"}'),
+          field("message", "quiz snapshot fetch failed"),
           field("event", "quiz_snapshot_failed"),
           field("errorCode", "QUIZ_ROUNDS_FETCH_FAILED"),
         ],
         [
           field("@timestamp", "2026-08-24 02:20:00.000"),
-          field("@message", '{"level":"error"}'),
+          field("message", "internal api timeout"),
           field("level", "error"),
           field("errorCode", "INTERNAL_API_TIMEOUT"),
         ],
@@ -88,7 +88,7 @@ describe("collectLogs", () => {
       status: "Complete",
       results: Array.from({ length: 5 }, (_, i) => [
         field("@timestamp", `2026-08-24 02:2${i}:00.000`),
-        field("@message", "dup"),
+        field("message", "dup"),
         field("event", "quiz_snapshot_failed"),
         field("errorCode", "QUIZ_ROUNDS_FETCH_FAILED"),
       ]),
@@ -108,7 +108,7 @@ describe("collectLogs", () => {
         [
           field("@timestamp", "2026-08-24 02:29:59.000"),
           field(
-            "@message",
+            "message",
             "퀴즈 라운드 스냅샷 조회 실패(roomId: 11111111-2222-3333-4444-555555555555, quizId: 42): timeout",
           ),
           field("event", "quiz_snapshot_failed"),
@@ -131,6 +131,20 @@ describe("collectLogs", () => {
     expect(sample).not.toHaveProperty("roomId");
     expect(sample).not.toHaveProperty("userId");
     expect(sample.traceId).toBe("a".repeat(32));
+  });
+
+  it("@message(로그 레코드 원문)가 아니라 message 필드만 선택한다(개인정보 유출 방지)", async () => {
+    sendMock.mockResolvedValueOnce({ queryId: "q-1" });
+    sendMock.mockResolvedValueOnce({ status: "Complete", results: [] });
+
+    await runCollectLogs();
+
+    const startQueryInput = sendMock.mock.calls[0][0].input;
+    // game 로그 그룹에도 access 로그(AccessLogMiddleware)가 같은 파일에 섞여 쌓이고
+    // ip/claimedUserId/query/body/userAgent를 같은 JSON 레코드에 남긴다 - @message를
+    // 그대로 가져오면 allowlist를 우회해 그 필드들이 OpenAI로 전달된다.
+    expect(startQueryInput.queryString).not.toMatch(/@message/);
+    expect(startQueryInput.queryString).toMatch(/\bmessage\b/);
   });
 
   it("쿼리가 Failed 상태로 끝나면 failed 상태와 빈 요약을 반환한다", async () => {
