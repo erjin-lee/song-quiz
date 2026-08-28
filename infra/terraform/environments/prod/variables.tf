@@ -100,6 +100,12 @@ variable "db_password" {
   sensitive   = true
 }
 
+variable "api_db_schema_name" {
+  description = "apps/api ECS 태스크의 DB_AUTH_DB_NAME 환경변수(TypeORM이 실제로 연결할 스키마 이름) - var.db_name과는 다른 값이다. var.db_name은 RDS 인스턴스 생성 시점에만 쓰이는 초기 스키마 이름(실사용 안 함, 현재 RDS에서는 비어있는 \"appdb\")이고, 실제 애플리케이션 테이블(SQ_USER 등)은 별도로 만들어진 \"song_quiz\" 스키마에 있다(2026-08-29, bastion 터널로 직접 확인) - var.db_name을 바꾸면 aws_db_instance의 db_name이 ForceNew라 RDS가 재생성될 위험이 있어 별도 변수로 완전히 분리한다"
+  type        = string
+  default     = "song_quiz"
+}
+
 variable "db_multi_az" {
   description = "RDS Multi-AZ(대기 복본) 활성화 여부"
   type        = bool

@@ -248,13 +248,16 @@ module "ecr" {
 # 형태라 DB_PORT/REDIS_PORT와 값이 겹친다.
 locals {
   api_environment_variables = {
-    NODE_ENV        = "production"
-    PORT            = tostring(var.app_port)
-    COMMIT_SHA      = var.api_image_git_sha
-    DB_HOST_NAME    = module.database.address
-    DB_PORT         = tostring(var.db_port)
-    DB_USER_NAME    = var.db_username
-    DB_AUTH_DB_NAME = var.db_name
+    NODE_ENV     = "production"
+    PORT         = tostring(var.app_port)
+    COMMIT_SHA   = var.api_image_git_sha
+    DB_HOST_NAME = module.database.address
+    DB_PORT      = tostring(var.db_port)
+    DB_USER_NAME = var.db_username
+    # var.db_name이 아니다 - var.db_name은 RDS 인스턴스 생성 시점에만 쓰이는 값이고
+    # (현재 RDS에서는 비어있는 "appdb"), 실제 애플리케이션 테이블은 별도로 만들어진
+    # api_db_schema_name 스키마에 있다. variables.tf의 설명 참고.
+    DB_AUTH_DB_NAME = var.api_db_schema_name
     REDIS_HOST      = module.cache.address
     REDIS_PORT      = tostring(var.cache_port)
     REDIS_DB        = "0"
