@@ -40,9 +40,9 @@ Redis Memory/Connections/Evictions, RDS CPU/Connections가 함께 포함된 경�
   상실이나 Redis 장애를 단정하지 않는다(다음 하트비트에서 회복되면 정상이다).
 - RoomLockLeaseLost는 그 워커가 실제로 lease 유효기간을 상실했다는 뜻이지만, 다른 worker가
   그 사이 같은 락을 획득했다는 사실까지 증명하지는 않는다.
-- StaleFencingWriteRejected는 더 최신 fencing token이 이미 발급돼 stale write/delete가
-  차단된 강한 충돌 신호이지만, 방어 로직이 정상 작동해 데이터 정합성이 지켜졌다는 뜻이기도
-  하다 - 발생 자체를 장애로 단정하지 않는다.
+- StaleFencingWriteRejected는 더 최신 fencing token이 존재해 stale write/delete가 실제로
+  차단된 강한 충돌 신호다. 방어 로직이 정상 작동해 데이터 정합성 훼손은 막았지만, 이 지표만
+  으로 Redis 자체 장애나 데이터 corruption이 발생했다고 단정하지 않는다.
 - RDS CPU가 정상 범위라고 해서 DB 문제 가능성을 완전히 배제하지 않는다(Connection 수·Lock
   대기 등 CPU 외의 문제일 수 있다).
 - 최근 Deployment가 존재한다는 사실만으로 그 배포가 원인이라고 단정하지 않는다(위 deployments
@@ -82,9 +82,9 @@ access 로그가 섞여 있고, access 로그는 method/path/statusCode를 갖�
   넓게 분산돼 있는지, 아니면 소수의 뚜렷하게 구분되는 경로에 몰려 있는지 정도만 참고 근거로
   삼는다.
 - Game lock metric(RedisLockRenewFailure/RoomLockLeaseLost/StaleFencingWriteRejected)은
-  Game 서비스 쪽 지표일 뿐이다 - 관측됐다는 사실만으로 API 오류의 직접 원인이라고 단정하지
-  않는다(cross-service 보조 근거로만 쓴다 - Game 5xx/RequestCount 등 다른 Game 지표까지
-  함께 이상을 보여야 API 장애와의 연관성을 고려할 수 있다).
+  API 오류의 직접 원인이 아니라 cross-service 보조 근거로만 사용한다. API Logs, Redis
+  infrastructure metric, Game 5xx/RequestCount 등 독립된 다른 근거와 함께 이상이 관측될
+  때만 연관성을 고려한다.
 
 deployments(최근 Production 배포 + 연결된 PR)는 반드시 보조 근거로만 쓴다.
 - 최근에 배포되었다는 사실만으로 그 배포나 PR을 장애 원인으로 단정하지 않는다.

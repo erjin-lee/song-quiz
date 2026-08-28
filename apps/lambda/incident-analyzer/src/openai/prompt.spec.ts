@@ -39,7 +39,7 @@ describe("SYSTEM_PROMPT", () => {
   });
 
   it("Game lock metric은 API Target5xx에서 cross-service 보조 근거일 뿐이라는 규칙을 포함한다", () => {
-    expect(SYSTEM_PROMPT).toContain("cross-service 보조 근거로만 쓴다");
+    expect(SYSTEM_PROMPT).toContain("cross-service 보조 근거로만 사용한다");
   });
 
   it("API Target5xx 분석 목표(비교해야 할 가능성 후보)를 포함한다", () => {

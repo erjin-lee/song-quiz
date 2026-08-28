@@ -43,9 +43,10 @@ CPU/Memory/Disk 등)은 EventBridge Rule에도 Lambda 방어 로직에도 걸리
 IncidentType이 공유한다.
 
 `QUIZ_SNAPSHOT_FAILURE`가 조회하는 10개 Metric(최초 구현(v1) 7개 + room 분산 락 Redis 장애
-내성 이벤트 3종). 게임 시작이 room lock 아래에서 수행되므로, 같은 게임 시작 흐름 또는 동일
-시간대의 lock 이상 여부를 보조 근거로 함께 관찰한다. 단, lock 이상 자체가
-quiz_snapshot_failed 이벤트의 직접 원인이라는 의미는 아니다.
+내성 이벤트 3종). 게임 시작이 room lock 아래에서 수행되므로, 동일 분석 시간대에 lock
+이상이 함께 발생했는지를 보조 근거로 관찰한다(lock metric에는 roomId dimension이 없어
+"같은 게임 시작 흐름"까지는 특정할 수 없다). 단, lock 이상 자체가 quiz_snapshot_failed의
+직접 원인이라는 의미는 아니다.
 
 | Metric | Namespace | Dimension |
 |---|---|---|
