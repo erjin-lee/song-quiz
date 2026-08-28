@@ -32,9 +32,9 @@ CPU/Memory/Disk 등)은 EventBridge Rule에도 Lambda 방어 로직에도 걸리
 
 | Alarm | IncidentType | 비고 |
 |---|---|---|
-| `SongQuiz-Prod-High-Game-QuizSnapshotFailure` | `QUIZ_SNAPSHOT_FAILURE` | 최초 구현(v1) - Metric 7개 |
-| `SongQuiz-Prod-High-Game-Target5xx` | `GAME_TARGET_5XX` | v1-2 추가 - Metric 16개(아래 참고) |
-| `SongQuiz-Prod-High-API-Target5xx` | `API_TARGET_5XX` | v1-3 추가 - Metric 13개, Log Group만 apps/api로 전환(아래 참고) |
+| `SongQuiz-Prod-High-Game-QuizSnapshotFailure` | `QUIZ_SNAPSHOT_FAILURE` | 최초 구현(v1) - Metric 10개(아래 참고) |
+| `SongQuiz-Prod-High-Game-Target5xx` | `GAME_TARGET_5XX` | v1-2 추가 - Metric 19개(아래 참고) |
+| `SongQuiz-Prod-High-API-Target5xx` | `API_TARGET_5XX` | v1-3 추가 - Metric 16개, Log Group만 apps/api로 전환(아래 참고) |
 
 `IncidentType`별로 실제 조회하는 Metric 목록은 `src/context/collect-metrics.ts`의
 `INCIDENT_METRIC_NAMES`에서 관리한다(범용 Policy Engine/YAML/Plugin framework 없이, 이
@@ -42,7 +42,24 @@ CPU/Memory/Disk 등)은 EventBridge Rule에도 Lambda 방어 로직에도 걸리
 메시지 포맷(`src/openai/schema.ts`, `src/slack/build-ai-analysis-message.ts`)은 모든
 IncidentType이 공유한다.
 
-`GAME_TARGET_5XX`가 조회하는 16개 Metric(모두 `infra/terraform/modules/monitoring/dashboard.tf`가
+`QUIZ_SNAPSHOT_FAILURE`가 조회하는 10개 Metric(최초 구현(v1) 7개 + room 분산 락 Redis 장애
+내성 이벤트 3종 - 게임 시작(prepareFirstRound)이 room lock을 잡은 채로 진행되므로 lock
+경합/lease 만료도 QuizSnapshotFailure의 근거가 될 수 있다):
+
+| Metric | Namespace | Dimension |
+|---|---|---|
+| Game.QuizSnapshotFailure | `GAME_METRIC_NAMESPACE`(기본 SongQuiz/Game) | 없음 |
+| Game.RedisLockRenewFailure | `GAME_METRIC_NAMESPACE` | 없음 |
+| Game.RoomLockLeaseLost | `GAME_METRIC_NAMESPACE` | 없음 |
+| Game.StaleFencingWriteRejected | `GAME_METRIC_NAMESPACE` | 없음 |
+| API.HTTPCode_Target_5XX_Count | AWS/ApplicationELB | LoadBalancer, TargetGroup(api) |
+| API.TargetResponseTime | AWS/ApplicationELB | LoadBalancer, TargetGroup(api) |
+| Game.HTTPCode_Target_5XX_Count | AWS/ApplicationELB | LoadBalancer, TargetGroup(game) |
+| Game.TargetResponseTime | AWS/ApplicationELB | LoadBalancer, TargetGroup(game) |
+| RDS.CPUUtilization | AWS/RDS | DBInstanceIdentifier |
+| RDS.DatabaseConnections | AWS/RDS | DBInstanceIdentifier |
+
+`GAME_TARGET_5XX`가 조회하는 19개 Metric(모두 `infra/terraform/modules/monitoring/dashboard.tf`가
 이미 쓰는 것과 동일한 namespace/dimension을 재사용한다 - 새 Custom Metric은 만들지 않는다):
 
 | Metric | Namespace | Dimension |
@@ -56,6 +73,9 @@ IncidentType이 공유한다.
 | Game.QuizSnapshotFailure | `GAME_METRIC_NAMESPACE`(기본 SongQuiz/Game) | 없음 |
 | Game.RedisLockFailure | `GAME_METRIC_NAMESPACE` | 없음 |
 | Game.TimerClaimFailure | `GAME_METRIC_NAMESPACE` | 없음 |
+| Game.RedisLockRenewFailure | `GAME_METRIC_NAMESPACE` | 없음 |
+| Game.RoomLockLeaseLost | `GAME_METRIC_NAMESPACE` | 없음 |
+| Game.StaleFencingWriteRejected | `GAME_METRIC_NAMESPACE` | 없음 |
 | EC2.CPUUtilization | AWS/EC2 | InstanceId |
 | EC2.MemoryUsedPercent | `EC2_METRIC_NAMESPACE`(CloudWatch Agent) | InstanceId |
 | Redis.MemoryUsagePercentage | AWS/ElastiCache | CacheClusterId |
@@ -69,8 +89,8 @@ Logs/Trace/Deployment 수집 로직(`collect-logs.ts`/`collect-traces.ts`/`colle
 기준, quiz_snapshot_failed 이벤트만 대상이 아니다) -> 로그의 traceId로 X-Ray 조회 ->
 API/Game Production Deployment 순으로 그대로 동작한다.
 
-`API_TARGET_5XX`(v1-3)는 `INCIDENT_METRIC_NAMES`에서 아래 13개 metric만 고른다(새 metric
-spec 없이 `GAME_TARGET_5XX`가 이미 쓰는 spec을 그대로 재사용):
+`API_TARGET_5XX`(v1-3)는 `INCIDENT_METRIC_NAMES`에서 아래 16개 metric만 고른다(새 metric
+spec 없이 `GAME_TARGET_5XX`가 이미 쓰는 spec을 그대로 재사용 - room 분산 락 3종 포함):
 
 | Metric | Namespace | Dimension |
 |---|---|---|
@@ -80,6 +100,9 @@ spec 없이 `GAME_TARGET_5XX`가 이미 쓰는 spec을 그대로 재사용):
 | Game.HTTPCode_Target_5XX_Count | AWS/ApplicationELB | LoadBalancer, TargetGroup(game) |
 | Game.TargetResponseTime | AWS/ApplicationELB | LoadBalancer, TargetGroup(game) |
 | Game.RequestCount | AWS/ApplicationELB | LoadBalancer, TargetGroup(game) |
+| Game.RedisLockRenewFailure | `GAME_METRIC_NAMESPACE` | 없음 |
+| Game.RoomLockLeaseLost | `GAME_METRIC_NAMESPACE` | 없음 |
+| Game.StaleFencingWriteRejected | `GAME_METRIC_NAMESPACE` | 없음 |
 | RDS.CPUUtilization | AWS/RDS | DBInstanceIdentifier |
 | RDS.DatabaseConnections | AWS/RDS | DBInstanceIdentifier |
 | EC2.CPUUtilization | AWS/EC2 | InstanceId |
@@ -280,7 +303,7 @@ aws cloudwatch set-alarm-state \
 CloudWatch Console > Lambda > `song-quiz-prod-incident-analyzer` > Monitor > Logs에서
 `incident_analysis_started` -> `incident_context_collected` -> `incident_analysis_completed`
 (또는 실패 시 `incident_analysis_failed` + `stage`)를 확인한다. `incident_context_collected`
-로그의 `metricCount`가 QuizSnapshotFailure는 7, Game Target5xx는 16, API Target5xx는 13인지도
+로그의 `metricCount`가 QuizSnapshotFailure는 10, Game Target5xx는 19, API Target5xx는 16인지도
 함께 확인한다.
 
 ### 2) 실제 장애 기반 end-to-end 테스트

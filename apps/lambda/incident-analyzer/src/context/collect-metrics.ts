@@ -27,6 +27,9 @@ const METRIC_SEMANTICS: Record<string, MetricSemantic> = {
   "Game.RequestCount": "sparse_count",
   "Game.RedisLockFailure": "sparse_count",
   "Game.TimerClaimFailure": "sparse_count",
+  "Game.RedisLockRenewFailure": "sparse_count",
+  "Game.RoomLockLeaseLost": "sparse_count",
+  "Game.StaleFencingWriteRejected": "sparse_count",
   "RDS.CPUUtilization": "gauge",
   "RDS.DatabaseConnections": "gauge",
   "EC2.CPUUtilization": "gauge",
@@ -69,14 +72,20 @@ export interface CollectMetricsResult {
 }
 
 // Incident 종류별로 실제 조회할 metric 이름 목록(§v1-2 최소 공통화) - 새 Alarm이 추가될
-// 때마다 이 맵에 목록 하나만 더한다. QuizSnapshotFailure는 기존 7개를 그대로 유지해
-// 기존 분석이 깨지지 않게 한다(regression). Game Target5xx는 요청받은 16개 metric
-// 전체를 dashboard.tf/alarms.tf가 이미 쓰는 namespace/dimension으로만 구성한다.
-// API Target5xx(§AIOps v1-3)도 이미 buildAllQuerySpecs에 존재하는 13개 spec만 골라 쓴다 -
-// 새 metric spec은 추가하지 않는다.
+// 때마다 이 맵에 목록 하나만 더한다. room 분산 락 Redis 장애 내성 이벤트 3종
+// (RedisLockRenewFailure/RoomLockLeaseLost/StaleFencingWriteRejected -
+// logging/metric-filters.tf의 room_lock_lease_lost 등과 동일 namespace/dimension)은
+// 세 IncidentType 모두에 추가한다 - 게임 시작(QuizSnapshotFailure)과 API/Game 5xx 모두
+// room lock 경합/lease 만료가 원인일 수 있어, 어떤 Alarm으로 들어오든 같은 근거를 볼 수
+// 있어야 한다. Game Target5xx(요청받은 16개 + lock 3종 = 19개)와 달리 QuizSnapshotFailure/
+// API Target5xx에는 원래 Game.RedisLockFailure/Game.TimerClaimFailure가 없었으므로
+// 새로 추가하지 않고, 이번에 요청받은 lock 3종만 더한다.
 const INCIDENT_METRIC_NAMES: Record<IncidentType, string[]> = {
   QUIZ_SNAPSHOT_FAILURE: [
     "Game.QuizSnapshotFailure",
+    "Game.RedisLockRenewFailure",
+    "Game.RoomLockLeaseLost",
+    "Game.StaleFencingWriteRejected",
     "API.HTTPCode_Target_5XX_Count",
     "API.TargetResponseTime",
     "Game.HTTPCode_Target_5XX_Count",
@@ -94,6 +103,9 @@ const INCIDENT_METRIC_NAMES: Record<IncidentType, string[]> = {
     "Game.QuizSnapshotFailure",
     "Game.RedisLockFailure",
     "Game.TimerClaimFailure",
+    "Game.RedisLockRenewFailure",
+    "Game.RoomLockLeaseLost",
+    "Game.StaleFencingWriteRejected",
     "EC2.CPUUtilization",
     "EC2.MemoryUsedPercent",
     "Redis.MemoryUsagePercentage",
@@ -109,6 +121,9 @@ const INCIDENT_METRIC_NAMES: Record<IncidentType, string[]> = {
     "Game.HTTPCode_Target_5XX_Count",
     "Game.TargetResponseTime",
     "Game.RequestCount",
+    "Game.RedisLockRenewFailure",
+    "Game.RoomLockLeaseLost",
+    "Game.StaleFencingWriteRejected",
     "RDS.CPUUtilization",
     "RDS.DatabaseConnections",
     "EC2.CPUUtilization",
@@ -194,6 +209,27 @@ function buildAllQuerySpecs(config: CollectMetricsConfig): MetricQuerySpec[] {
       name: "Game.TimerClaimFailure",
       namespace: config.gameMetricNamespace,
       metricName: "TimerClaimFailure",
+      stat: "Sum",
+    },
+    {
+      id: "gameRedisLockRenewFailure",
+      name: "Game.RedisLockRenewFailure",
+      namespace: config.gameMetricNamespace,
+      metricName: "RedisLockRenewFailure",
+      stat: "Sum",
+    },
+    {
+      id: "gameRoomLockLeaseLost",
+      name: "Game.RoomLockLeaseLost",
+      namespace: config.gameMetricNamespace,
+      metricName: "RoomLockLeaseLost",
+      stat: "Sum",
+    },
+    {
+      id: "gameStaleFencingWriteRejected",
+      name: "Game.StaleFencingWriteRejected",
+      namespace: config.gameMetricNamespace,
+      metricName: "StaleFencingWriteRejected",
       stat: "Sum",
     },
     {
@@ -306,9 +342,9 @@ function computeTrend(values: number[]): MetricTrend {
   return "stable";
 }
 
-// 이 7개 외의 이름이 들어올 일은 없지만(buildQuerySpecs가 고정된 spec만 만든다), 정책에
-// 없는 이름이 들어와도 gauge로 안전하게 취급한다(sparse count로 잘못 취급해 원본 null을
-// 0으로 덮어쓰는 쪽보다, 값을 모른다고 두는 쪽이 더 안전한 기본값이다).
+// METRIC_SEMANTICS에 없는 이름이 들어올 일은 없지만(buildQuerySpecs가 고정된 spec만
+// 만든다), 정책에 없는 이름이 들어와도 gauge로 안전하게 취급한다(sparse count로 잘못
+// 취급해 원본 null을 0으로 덮어쓰는 쪽보다, 값을 모른다고 두는 쪽이 더 안전한 기본값이다).
 function resolveSemantic(name: string): MetricSemantic {
   return METRIC_SEMANTICS[name] ?? "gauge";
 }
