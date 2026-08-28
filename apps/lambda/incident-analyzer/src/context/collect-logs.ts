@@ -33,28 +33,29 @@ const LOG_SOURCE_BY_INCIDENT_TYPE: Record<IncidentType, LogSource> = {
   API_TARGET_5XX: "api",
 };
 
-// game 구조화 로그(JSON)에서 이 필드들만 CloudWatch Logs Insights로 조회한다.
-// $.event/$.level/$.errorCode/$.requestId/$.traceId는 metric-filters.tf가 이미
-// 전제하는 것과 동일한 최상위 JSON 필드다.
+// game 로그 그룹에도 구조화 app 로그(event/errorCode)와 access 로그
+// (AccessLogMiddleware, ip/claimedUserId/query/body/userAgent)가 같은 PM2 stdout으로
+// 섞여 쌓인다(ecosystem.config.js가 둘 다 logs/game.log 하나로 합침). access 로그도
+// statusCode>=500이면 level="error"를 남겨 이 필터에 걸리므로, @message(로그 레코드
+// 원문 전체)를 그대로 가져오면 그 개인정보 필드들이 문자열 안에 실려 allowlist를
+// 우회해 OpenAI로 전달된다(§13). API_QUERY와 동일한 이유로 message(JSON 최상위
+// 필드)만 선택한다 - $.event/$.level/$.errorCode/$.requestId/$.traceId는
+// metric-filters.tf가 이미 전제하는 것과 동일한 최상위 JSON 필드다.
 const GAME_QUERY = `
-fields @timestamp, @message, event, level, errorCode, requestId, traceId
+fields @timestamp, message, event, level, errorCode, requestId, traceId
 | filter event = "quiz_snapshot_failed" or level = "error"
 | sort @timestamp desc
 | limit ${QUERY_ROW_LIMIT}
 `;
 
-// apps/api 로그 그룹에는 구조화 app 로그(LoggingExceptionFilter, event/errorCode)와
-// access 로그(AccessLogMiddleware, method/path/statusCode)가 같은 PM2 stdout으로 섞여
-// 쌓인다(ecosystem.config.js가 둘 다 logs/api.log 하나로 합침). 두 로그 모두 5xx/예외
-// 상황에서 level="error"를 남기므로(AccessLogMiddleware는 statusCode>=500일 때, app 로그는
+// apps/api 로그 그룹에도 같은 이유로 구조화 app 로그와 access 로그가 logs/api.log
+// 하나에 섞여 쌓인다(ecosystem.config.js). 두 로그 모두 5xx/예외 상황에서
+// level="error"를 남기므로(AccessLogMiddleware는 statusCode>=500일 때, app 로그는
 // LoggingExceptionFilter가 5xx HttpException 또는 처리되지 않은 예외에서) 이 필터 하나로
 // 두 종류를 함께 잡는다. game과 달리 우선시할 단일 target event가 없다.
 //
-// game과 달리 @message(로그 레코드 원문 전체)를 조회하지 않는다 - AccessLogMiddleware가
-// 같은 JSON 레코드에 ip/userId/claimedUserId/query/body/userAgent까지 함께 남기므로(§13
-// 개인정보 allowlist), @message를 그대로 가져오면 그 필드들이 문자열 안에 그대로 실려
-// allowlist를 우회해 OpenAI로 전달된다. 대신 message(JSON 최상위 필드, event/level 등과
-// 동일한 방식)만 선택한다 - access 로그는 `${method} ${path}`, app 예외 로그는
+// GAME_QUERY와 동일하게 @message가 아니라 message(JSON 최상위 필드)만 선택한다(§13
+// 개인정보 allowlist) - access 로그는 `${method} ${path}`, app 예외 로그는
 // exception.message만 담겨 있어 다른 필드가 섞여 들어올 수 없다.
 const API_QUERY = `
 fields @timestamp, message, event, level, errorCode, requestId, traceId, method, path, statusCode
@@ -142,11 +143,7 @@ function redactMessage(message: string): string {
   );
 }
 
-// game은 기존 동작(회귀 테스트 포함)을 그대로 유지하기 위해 @message(로그 레코드 원문)를
-// 계속 쓰고, api는 message(JSON 최상위 필드)만 쓴다 - API_QUERY 위 주석 참고.
-type MessageField = "@message" | "message";
-
-function toLogSample(row: InsightsRow, messageField: MessageField): LogSample {
+function toLogSample(row: InsightsRow): LogSample {
   const sample: LogSample = { timestamp: row["@timestamp"] ?? "" };
   if (row.level) sample.level = row.level;
   if (row.event) sample.event = row.event;
@@ -160,7 +157,7 @@ function toLogSample(row: InsightsRow, messageField: MessageField): LogSample {
     if (!Number.isNaN(statusCode)) sample.statusCode = statusCode;
   }
 
-  const rawMessage = row[messageField];
+  const rawMessage = row.message;
   if (rawMessage) {
     sample.message = redactMessage(rawMessage).slice(0, 500);
   }
@@ -188,7 +185,6 @@ function countBy(
 function pickSamples(
   rows: InsightsRow[],
   targetEvent: string | undefined,
-  messageField: MessageField,
 ): LogSample[] {
   const orderedRows = targetEvent
     ? [...rows].sort((a, b) => {
@@ -210,7 +206,7 @@ function pickSamples(
     const dedupeKey = `${row.event ?? ""}::${row.errorCode ?? ""}::${row.method ?? ""}::${row.path ?? ""}::${row.statusCode ?? ""}`;
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
-    samples.push(toLogSample(row, messageField));
+    samples.push(toLogSample(row));
   }
 
   return samples;
@@ -249,7 +245,6 @@ export async function collectLogs(
 
   const query = source === "api" ? API_QUERY : GAME_QUERY;
   const targetEvent = source === "game" ? TARGET_EVENT : undefined;
-  const messageField: MessageField = source === "api" ? "message" : "@message";
 
   try {
     const rows = await runInsightsQuery(logGroupName, window, query);
@@ -264,7 +259,7 @@ export async function collectLogs(
         errorCode: key,
         count,
       })),
-      samples: pickSamples(rows, targetEvent, messageField),
+      samples: pickSamples(rows, targetEvent),
     };
 
     return { status: "success", logs };
