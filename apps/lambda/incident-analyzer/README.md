@@ -41,13 +41,25 @@ Alarm(UnhealthyHost, EC2 CPU/Memory/Disk 등)은 EventBridge Rule에도 Lambda �
 deployment 대상 서비스)은 `src/context/incident-policy.ts`의 `INCIDENT_POLICIES`
 (`IncidentPolicy`)에서 한 곳에 모아 관리한다(범용 Policy Engine/YAML/Plugin framework
 없이, 이 정도 크기에서는 TypeScript 타입 + 작은 상수 맵으로 충분하다고 판단했다) -
-`collect-metrics.ts`/`collect-logs.ts`/`collect-deployments.ts`/`handler.ts`는 이 맵을
-조회하기만 하고 IncidentType별 분기를 따로 두지 않는다. 새 IncidentType을 추가할 때는
-`INCIDENT_POLICIES`에 항목 하나를 추가하고(필요하면 `collect-metrics.ts`의
-`buildAllQuerySpecs`에 새 metric spec을 더하고), `src/context/types.ts`의 `IncidentType`
-union에 값을 추가하면 된다. Structured Output schema/Slack 메시지 포맷
-(`src/openai/schema.ts`, `src/slack/build-ai-analysis-message.ts`)은 모든 IncidentType이
-공유한다.
+`collect-metrics.ts`/`collect-logs.ts`/`handler.ts`는 이 맵을 조회하기만 하고
+IncidentType별 분기를 따로 두지 않는다(`collect-deployments.ts`가 이 맵을 조회하는
+방식은 아래 "Logs/Trace/Deployment 수집 로직" 절 참고). `IncidentPolicy`는 어디까지나
+이 Lambda 내부 수집 로직의 source of truth일 뿐, AIOps 전체 routing의 유일한 source of
+truth는 아니다 - 새 IncidentType을 실제 Production에 연결하려면 아래 항목을 모두 함께
+바꿔야 한다.
+
+1. `INCIDENT_POLICIES`에 항목 하나를 추가하고(필요하면 `collect-metrics.ts`의
+   `buildAllQuerySpecs`에 새 metric spec을 더한다), `src/context/types.ts`의
+   `IncidentType` union에 값을 추가한다.
+2. `infra/terraform/modules/aiops/eventbridge.tf`의 EventBridge Rule이 이 Alarm 이름을
+   `ALARM` 상태 필터에 포함하도록 수정하고 `terraform apply`한다 - 이 Rule에 없으면
+   `INCIDENT_POLICIES`에만 추가해도 이 Lambda가 아예 호출되지 않는다.
+3. 그 IncidentType이 새로 필요로 하는 환경변수(Log Group, metric dimension 등)를
+   Terraform으로 추가하고, 이 Lambda의 IAM Role에 필요한 권한(새 namespace/Log Group
+   조회 등)이 이미 포함돼 있는지 확인한다.
+
+Structured Output schema/Slack 메시지 포맷(`src/openai/schema.ts`,
+`src/slack/build-ai-analysis-message.ts`)은 모든 IncidentType이 공유한다.
 
 `QUIZ_SNAPSHOT_FAILURE`가 조회하는 10개 Metric(최초 구현(v1) 7개 + room 분산 락 Redis 장애
 내성 이벤트 3종). 게임 시작이 room lock 아래에서 수행되므로, 동일 분석 시간대에 lock
@@ -96,7 +108,12 @@ union에 값을 추가하면 된다. Structured Output schema/Slack 메시지 �
 Logs/Trace/Deployment 수집 로직(`collect-logs.ts`/`collect-traces.ts`/`collect-deployments.ts`)은
 `QUIZ_SNAPSHOT_FAILURE`와 동일하게 재사용한다 - Game 최근 15분 error 로그(`level = "error"`
 기준, quiz_snapshot_failed 이벤트만 대상이 아니다) -> 로그의 traceId로 X-Ray 조회 ->
-API/Game Production Deployment 순으로 그대로 동작한다.
+API/Game Production Deployment 순으로 그대로 동작한다. `collect-deployments.ts`는
+`INCIDENT_POLICIES`를 직접 조회하지 않는다 - `handler.ts`가 `IncidentPolicy.deploymentServices`를
+먼저 확인해, 대상에 포함된 서비스의 SSM parameter 이름만 `collectDeployments`의
+config로 넘긴다(대상이 아닌 서비스는 parameter 이름 자리에 `undefined`를 넘겨 조회
+자체를 건너뛰게 한다). 세 IncidentType 모두 현재 `deploymentServices: ["api", "game"]`라
+동작상 차이는 없다.
 
 `API_TARGET_5XX`(v1-3)는 `INCIDENT_POLICIES.API_TARGET_5XX.metricNames`에서 아래 16개 metric만 고른다(새 metric
 spec 없이 `GAME_TARGET_5XX`가 이미 쓰는 spec을 그대로 재사용 - room 분산 락 3종 포함):
