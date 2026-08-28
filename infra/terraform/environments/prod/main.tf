@@ -193,3 +193,25 @@ module "aiops" {
   ec2_metric_namespace = module.iam.ec2_metric_namespace
   cache_cluster_id     = module.cache.cluster_id
 }
+
+# 계정 청구(Billing) 단위 리소스(Budget/Cost Anomaly Detection) - EC2/RDS 등 다른 모듈의
+# output을 참조하지 않는 완전히 독립된 책임이라 별도 모듈로 둔다(notification이 aiops의
+# EventBridge Rule을 참조하지 않는 것과 같은 이유).
+module "finops" {
+  source = "../../modules/finops"
+
+  project_name               = var.project_name
+  monthly_budget_usd         = var.monthly_budget_usd
+  budget_alert_emails        = var.budget_alert_emails
+  cost_anomaly_threshold_usd = var.cost_anomaly_threshold_usd
+}
+
+# 매일 전일 AWS 비용을 Cost Explorer에서 조회해 Slack으로 보내는 Lambda. notification/aiops와
+# 동일하게 Lambda 하나 = 모듈 하나 컨벤션을 따른다. finops 모듈(Budget/Anomaly Detection)과는
+# 서로 참조하지 않는 독립 경로다 - 이 Lambda가 실패해도 Budget/Anomaly 알림에는 영향 없다.
+module "cost_reporter" {
+  source = "../../modules/cost-reporter"
+
+  aws_region       = var.aws_region
+  lambda_dist_path = abspath("${path.root}/../../../../apps/lambda/cost-reporter/dist")
+}

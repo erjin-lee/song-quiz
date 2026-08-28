@@ -71,8 +71,11 @@ resource "aws_instance" "bastion" {
   vpc_security_group_ids      = [aws_security_group.bastion.id]
   associate_public_ip_address = true
 
+  # bastion은 api/game 어느 한쪽 서비스 전용이 아니라 운영 접근용 공용 인스턴스라
+  # Service = "shared"로 태그한다.
   tags = {
-    Name = "${var.project_name}-bastion"
+    Name    = "${var.project_name}-bastion"
+    Service = "shared"
   }
 
   # data.aws_ami.amazon_linux가 most_recent = true라서 AWS가 새 AMI를 배포할 때마다
@@ -89,10 +92,13 @@ resource "aws_eip" "bastion" {
   instance = aws_instance.bastion.id
 
   tags = {
-    Name = "${var.project_name}-bastion"
+    Name    = "${var.project_name}-bastion"
+    Service = "shared"
   }
 }
 
+# apps/api와 apps/game이 같은 인스턴스에서 다른 포트로 함께 실행되므로(root main.tf 주석
+# 참고) 이 인스턴스 비용은 한쪽 서비스에 귀속시킬 수 없어 Service = "shared"로 태그한다.
 resource "aws_instance" "app_a" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.app_instance_type
@@ -102,6 +108,7 @@ resource "aws_instance" "app_a" {
   iam_instance_profile   = var.iam_instance_profile_name
 
   tags = {
-    Name = "${var.project_name}-app-a"
+    Name    = "${var.project_name}-app-a"
+    Service = "shared"
   }
 }

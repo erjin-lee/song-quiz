@@ -189,9 +189,18 @@ Avoid unnecessary variables for values that are truly implementation details.
     ├── monitoring/         # CloudWatch Dashboard(SongQuiz-Prod) + Alarm 1차 세트(alarms.tf) -
                              # 다른 모듈의 output만 참조, 새 Custom Metric/Metric Filter는 만들지
                              # 않고 기존 지표를 시각화/알람화만 한다
-    └── notification/       # CloudWatch Alarm(SongQuiz-Prod-*) 상태변화 -> EventBridge -> Lambda
-                             # (apps/lambda/alarm-notifier) -> Slack Incoming Webhook. monitoring의
-                             # 개별 Alarm 리소스를 직접 참조하지 않고 alarm 이름 prefix로만 연결된다
+    ├── notification/       # CloudWatch Alarm(SongQuiz-Prod-*) 상태변화 -> EventBridge -> Lambda
+    │                        # (apps/lambda/alarm-notifier) -> Slack Incoming Webhook. monitoring의
+    │                        # 개별 Alarm 리소스를 직접 참조하지 않고 alarm 이름 prefix로만 연결된다
+    ├── finops/             # 계정 청구(Billing) 단위 FinOps 리소스 - Monthly Budget(실제/예상
+    │                        # 비용 임계치 이메일 알림) + Cost Anomaly Detection(계정 전체 서비스
+    │                        # 비용 1개 Monitor). Lambda가 없는 순수 AWS Billing 리소스라 다른
+    │                        # 모듈 output을 참조하지 않는 독립 모듈이다 (2026-08-28 도입)
+    └── cost-reporter/      # 매일 EventBridge Scheduler(10:00 Asia/Seoul) -> Lambda
+                             # (apps/lambda/cost-reporter)가 Cost Explorer 비용을 조회해 Slack
+                             # Incoming Webhook으로 전달한다 - notification과 동일한 Webhook을
+                             # 재사용하지만 EventBridge Rule이 아니라 Scheduler로 트리거되는
+                             # 점이 다르다 (2026-08-28 도입)
 ```
 
 새 환경(예: staging)이 필요해지면 `environments/<env>/`를 추가하고 같은 모듈들을

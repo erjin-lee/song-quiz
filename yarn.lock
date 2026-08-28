@@ -188,6 +188,22 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@aws-sdk/client-cost-explorer@npm:^3.700.0":
+  version: 3.1120.0
+  resolution: "@aws-sdk/client-cost-explorer@npm:3.1120.0"
+  dependencies:
+    "@aws-sdk/core": "npm:^3.977.9"
+    "@aws-sdk/credential-provider-node": "npm:^3.972.81"
+    "@aws-sdk/types": "npm:^3.974.5"
+    "@smithy/core": "npm:^3.33.3"
+    "@smithy/fetch-http-handler": "npm:^5.7.2"
+    "@smithy/node-http-handler": "npm:^4.11.3"
+    "@smithy/types": "npm:^4.17.2"
+    tslib: "npm:^2.6.2"
+  checksum: 10c0/26f4ca6572b9621841b3c4b2af63d81271bf9ceee294991ee4ff7d4b0d39bb0751083665c5312f4974d00e224fe05d54e77f729c6ceaace186214f4d8febee61
+  languageName: node
+  linkType: hard
+
 "@aws-sdk/client-ec2@npm:^3.1101.0":
   version: 3.1119.0
   resolution: "@aws-sdk/client-ec2@npm:3.1119.0"
@@ -8943,6 +8959,27 @@ __metadata:
   checksum: 10c0/0382a9ed13208f8bfc22ca2f62b364855207dffdb73dc26e150ade78c3093f1cf56172df2dd460c8caf2afa91c0ed4ec8a88c62f8f9cd1cf423d26506aa8797a
   languageName: node
   linkType: hard
+
+"cost-reporter@workspace:apps/lambda/cost-reporter":
+  version: 0.0.0-use.local
+  resolution: "cost-reporter@workspace:apps/lambda/cost-reporter"
+  dependencies:
+    "@aws-sdk/client-cost-explorer": "npm:^3.700.0"
+    "@aws-sdk/client-ssm": "npm:^3.700.0"
+    "@types/aws-lambda": "npm:^8.10.145"
+    "@types/jest": "npm:^29.5.2"
+    "@types/node": "npm:^20.3.1"
+    "@typescript-eslint/eslint-plugin": "npm:^8.0.0"
+    "@typescript-eslint/parser": "npm:^8.0.0"
+    eslint: "npm:^8.0.0"
+    eslint-config-prettier: "npm:^9.0.0"
+    eslint-plugin-prettier: "npm:^5.0.0"
+    jest: "npm:^29.5.0"
+    prettier: "npm:^3.0.0"
+    ts-jest: "npm:^29.1.0"
+    typescript: "npm:^5.5.3"
+  languageName: unknown
+  linkType: soft
 
 "create-jest@npm:^29.7.0":
   version: 29.7.0
