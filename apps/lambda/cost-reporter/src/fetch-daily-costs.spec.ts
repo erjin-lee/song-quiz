@@ -14,16 +14,25 @@ describe("fetchDailyCosts", () => {
     jest.resetModules();
   });
 
-  it("ResultsByTime을 날짜/UnblendedCost 금액 배열로 변환한다", async () => {
+  it("ResultsByTime을 날짜별 RECORD_TYPE 금액 배열로 변환한다", async () => {
     sendMock.mockResolvedValueOnce({
       ResultsByTime: [
         {
           TimePeriod: { Start: "2026-08-27", End: "2026-08-28" },
-          Total: { UnblendedCost: { Amount: "2.14", Unit: "USD" } },
+          Groups: [
+            {
+              Keys: ["Usage"],
+              Metrics: { UnblendedCost: { Amount: "10.22", Unit: "USD" } },
+            },
+            {
+              Keys: ["Credit"],
+              Metrics: { UnblendedCost: { Amount: "-10.22", Unit: "USD" } },
+            },
+          ],
         },
         {
           TimePeriod: { Start: "2026-08-28", End: "2026-08-29" },
-          Total: { UnblendedCost: { Amount: "0", Unit: "USD" } },
+          Groups: [],
         },
       ],
     });
@@ -32,8 +41,14 @@ describe("fetchDailyCosts", () => {
     const result = await fetchDailyCosts("2026-08-01", "2026-08-29");
 
     expect(result).toEqual([
-      { date: "2026-08-27", amountUsd: 2.14 },
-      { date: "2026-08-28", amountUsd: 0 },
+      {
+        date: "2026-08-27",
+        recordTypeAmounts: [
+          { recordType: "Usage", amountUsd: 10.22 },
+          { recordType: "Credit", amountUsd: -10.22 },
+        ],
+      },
+      { date: "2026-08-28", recordTypeAmounts: [] },
     ]);
   });
 
