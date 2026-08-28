@@ -35,7 +35,13 @@ describe("handler", () => {
     };
 
     mockFetchDailyCosts.mockResolvedValue([
-      { date: "2026-08-27", amountUsd: 2.14 },
+      {
+        date: "2026-08-27",
+        recordTypeAmounts: [
+          { recordType: "Usage", amountUsd: 12.36 },
+          { recordType: "Credit", amountUsd: -10.22 },
+        ],
+      },
     ]);
     mockFetchServiceCosts.mockResolvedValue([
       { service: "Amazon EC2", amountUsd: 0.82 },
@@ -51,13 +57,14 @@ describe("handler", () => {
     process.env = originalEnv;
   });
 
-  it("정상 흐름: Cost Explorer 결과를 모아 Slack에 한 번 전송한다", async () => {
+  it("정상 흐름: Cost Explorer 결과를 모아 Slack에 한 번 전송한다(크레딧 포함)", async () => {
     const { handler } = await import("./handler");
     await handler();
 
     expect(mockSendSlackMessage).toHaveBeenCalledTimes(1);
     const [, message] = mockSendSlackMessage.mock.calls[0];
     expect(message.text).toBe("💰 SongQuiz AWS Cost");
+    expect(JSON.stringify(message.blocks)).toContain("전일 적용 크레딧");
   });
 
   it("SLACK_WEBHOOK_PARAMETER_NAME이 없으면 AWS를 호출하지 않고 에러를 던진다", async () => {

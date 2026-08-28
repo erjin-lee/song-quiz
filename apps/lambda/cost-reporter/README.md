@@ -7,7 +7,8 @@ SongQuiz AWS 인프라 비용을 추적하는 FinOps v1의 일부다. 매일 전
 ```text
 EventBridge Scheduler(매일 10:00 Asia/Seoul)
   -> 이 Lambda
-     -> Cost Explorer GetCostAndUsage(전일 비용 + 이번 달 누적, 서비스별 Top N)
+     -> Cost Explorer GetCostAndUsage(전일 비용 + 이번 달 누적 + 적용된 크레딧, RECORD_TYPE로 그룹핑)
+     -> Cost Explorer GetCostAndUsage(서비스별 Top N, SERVICE로 그룹핑 - 별도 호출)
      -> Cost Explorer GetCostForecast(이번 달 남은 기간 예상 비용, 실패해도 나머지는 계속 진행)
      -> SSM(Slack Webhook - alarm-notifier와 동일 파라미터 재사용)
   -> Slack Incoming Webhook
@@ -73,15 +74,33 @@ Terraform이 하는 일은 리소스에 태그를 **붙이는 것**까지다. �
 
 ## 조회하는 정보
 
-- 전일 비용, 이번 달 누적 비용: `GetCostAndUsage`(Granularity `DAILY`, GroupBy 없음) 한 번 호출로
-  함께 얻는다 - 매달 1일에는 "어제"(지난달 마지막 날)가 "이번 달 1일"보다 앞서므로, 두 날짜 중
-  이른 쪽부터 조회한 뒤(`getDailyCostsQueryStart`) `summarizeDailyCosts`가 각각 골라낸다.
+- 전일 비용, 이번 달 누적 비용, 적용된 크레딧: `GetCostAndUsage`(Granularity `DAILY`, GroupBy
+  `RECORD_TYPE`) 호출로 모두 얻는다(`fetch-daily-costs.ts`) - 매달 1일에는 "어제"(지난달
+  마지막 날)가 "이번 달 1일"보다 앞서므로, 두 날짜 중 이른 쪽부터 조회한 뒤
+  (`getDailyCostsQueryStart`) `summarizeDailyCosts`가 각 날짜 버킷의 `RECORD_TYPE`별 금액을
+  다시 더해 "전일/누적(모든 RECORD_TYPE 합 = 순비용)"과 "전일/누적 크레딧(`RECORD_TYPE = Credit`만
+  합산)"을 함께 만든다. `RECORD_TYPE`으로 그룹핑해도 정상 호출 시 API 호출 횟수는 늘지 않는다
+  (아래 "크레딧까지 함께 보여주는 이유" 참고). 다만 GroupBy로 응답이 커져 AWS가 결과를
+  `NextPageToken`으로 여러 페이지에 나눠 줄 수 있어(월 최대 31일 x RECORD_TYPE 종류), 페이지가
+  없어질 때까지 반복 호출해 날짜별로 그룹을 합친다 - 페이지 하나만 읽고 끝내면 월말처럼 결과가
+  많아지는 시점에 뒷페이지 날짜/그룹이 누락되어 순비용·크레딧이 실제보다 작게 나올 수 있다.
 - 서비스별 전일 비용 Top 5 + 기타: `GetCostAndUsage`(GroupBy `SERVICE`, 전일 하루만) 별도 호출.
   Top 5를 넘는 나머지는(비용이 0이거나 아주 작은 서비스 포함) 개별로 나열하지 않고 "기타" 합계
   하나로 접는다(`buildTopServices`).
 - 이번 달 예상 비용: `GetCostForecast`(오늘부터 월말까지 "남은 기간"만 예측 - Forecast API는
   과거를 예측할 수 없다) + 이미 확정된 이번 달 누적을 더해서 계산한다(`computeMonthForecastUsd`).
   실패해도(권한/데이터 부족 등) 나머지 리포트는 그대로 보낸다(fail-open, 아래 "실패 처리" 참고).
+
+### 크레딧까지 함께 보여주는 이유
+
+AWS Cost Explorer 콘솔의 기본 "비용 및 사용량 그래프"는 `RECORD_TYPE = Credit`(AWS가 자동
+적용하는 프로모션/Free Tier 크레딧)이 반영되기 **전의 원가(raw usage cost)**를 보여줄 수 있다.
+반면 이 리포트가 표시하는 "전일 비용(순)"/"이번 달 누적(순)"은 크레딧까지 이미 반영된, 실제
+청구서에 찍히는 금액(순비용)이다. 같은 계정인데 콘솔 그래프와 이 리포트의 숫자가 크게 달라
+보이는 건 버그가 아니라 이 차이 때문이다 - 그래서 순비용 옆에 "얼마만큼의 크레딧이 그 차이를
+만들었는지"를 `*전일 적용 크레딧*`/`*이번 달 적용 크레딧*` 필드로 함께 보여준다. 크레딧 잔액이
+소진되면 순비용이 원가에 근접하게 올라가므로, 이 필드로 크레딧 소진 추이를 미리 가늠할 수 있다
+(정확한 잔액/만료일은 AWS Billing 콘솔의 **Credits** 메뉴에서 확인).
 
 ## 실패 처리
 
@@ -128,9 +147,11 @@ yarn workspace cost-reporter test
 ```
 
 Cost Explorer(`@aws-sdk/client-cost-explorer`)/SSM/Slack 전송은 전부 mock한다 - 실제 AWS/Slack
-호출 없이 실행된다. 아래를 포함해 38개 테스트로 검증한다:
+호출 없이 실행된다. 아래를 포함해 42개 테스트로 검증한다:
 
-- Cost Explorer 결과 -> 전일 비용/이번 달 누적 변환(`summarize-daily-costs.spec.ts`)
+- Cost Explorer 결과 -> 전일 비용/이번 달 누적/적용된 크레딧 변환(`summarize-daily-costs.spec.ts`)
+- `GetCostAndUsage` `NextPageToken` 페이지네이션 - 여러 페이지 반복 호출, 같은 날짜가 페이지
+  경계에서 나뉘어도 누락 없이 합산(`fetch-daily-costs.spec.ts`)
 - 서비스별 비용 정렬 및 Top N + 기타 처리(`build-top-services.spec.ts`)
 - 데이터가 없는 경우(전일 데이터 미반영, 서비스 내역 없음)
 - Cost Explorer 호출 실패 시 처리(핵심 정보는 실패시키고, 보조 정보는 fail-open)
