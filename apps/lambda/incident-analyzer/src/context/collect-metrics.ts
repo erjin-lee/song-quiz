@@ -10,6 +10,7 @@ import {
   MetricSummary,
   MetricTrend,
 } from "./types";
+import { INCIDENT_POLICIES } from "./incident-policy";
 
 // count 계열(이벤트 발생 시에만 값이 존재)과 gauge/continuous 계열(항상 어떤 값이든
 // 존재해야 정상)은 datapoint가 없을 때의 의미가 다르다(§9~10). Alarm 종류가 늘어나도
@@ -70,69 +71,6 @@ export interface CollectMetricsResult {
   status: CollectionStatus;
   metrics: MetricSummary[];
 }
-
-// Incident 종류별로 실제 조회할 metric 이름 목록(§v1-2 최소 공통화) - 새 Alarm이 추가될
-// 때마다 이 맵에 목록 하나만 더한다. room 분산 락 Redis 장애 내성 이벤트 3종
-// (RedisLockRenewFailure/RoomLockLeaseLost/StaleFencingWriteRejected -
-// logging/metric-filters.tf의 room_lock_lease_lost 등과 동일 namespace/dimension)은
-// 세 IncidentType 모두에 추가한다 - 게임 시작(QuizSnapshotFailure)과 API/Game 5xx 모두
-// room lock 경합/lease 만료가 원인일 수 있어, 어떤 Alarm으로 들어오든 같은 근거를 볼 수
-// 있어야 한다. Game Target5xx(요청받은 16개 + lock 3종 = 19개)와 달리 QuizSnapshotFailure/
-// API Target5xx에는 원래 Game.RedisLockFailure/Game.TimerClaimFailure가 없었으므로
-// 새로 추가하지 않고, 이번에 요청받은 lock 3종만 더한다.
-const INCIDENT_METRIC_NAMES: Record<IncidentType, string[]> = {
-  QUIZ_SNAPSHOT_FAILURE: [
-    "Game.QuizSnapshotFailure",
-    "Game.RedisLockRenewFailure",
-    "Game.RoomLockLeaseLost",
-    "Game.StaleFencingWriteRejected",
-    "API.HTTPCode_Target_5XX_Count",
-    "API.TargetResponseTime",
-    "Game.HTTPCode_Target_5XX_Count",
-    "Game.TargetResponseTime",
-    "RDS.CPUUtilization",
-    "RDS.DatabaseConnections",
-  ],
-  GAME_TARGET_5XX: [
-    "Game.HTTPCode_Target_5XX_Count",
-    "Game.TargetResponseTime",
-    "Game.RequestCount",
-    "API.HTTPCode_Target_5XX_Count",
-    "API.TargetResponseTime",
-    "API.RequestCount",
-    "Game.QuizSnapshotFailure",
-    "Game.RedisLockFailure",
-    "Game.TimerClaimFailure",
-    "Game.RedisLockRenewFailure",
-    "Game.RoomLockLeaseLost",
-    "Game.StaleFencingWriteRejected",
-    "EC2.CPUUtilization",
-    "EC2.MemoryUsedPercent",
-    "Redis.MemoryUsagePercentage",
-    "Redis.CurrConnections",
-    "Redis.Evictions",
-    "RDS.CPUUtilization",
-    "RDS.DatabaseConnections",
-  ],
-  API_TARGET_5XX: [
-    "API.HTTPCode_Target_5XX_Count",
-    "API.TargetResponseTime",
-    "API.RequestCount",
-    "Game.HTTPCode_Target_5XX_Count",
-    "Game.TargetResponseTime",
-    "Game.RequestCount",
-    "Game.RedisLockRenewFailure",
-    "Game.RoomLockLeaseLost",
-    "Game.StaleFencingWriteRejected",
-    "RDS.CPUUtilization",
-    "RDS.DatabaseConnections",
-    "EC2.CPUUtilization",
-    "EC2.MemoryUsedPercent",
-    "Redis.MemoryUsagePercentage",
-    "Redis.CurrConnections",
-    "Redis.Evictions",
-  ],
-};
 
 /** 이 Lambda가 알고 있는 전체 metric spec(§v1-2). incidentType별로 이 중 필요한 것만 골라 쓴다. */
 function buildAllQuerySpecs(config: CollectMetricsConfig): MetricQuerySpec[] {
@@ -291,7 +229,7 @@ function buildAllQuerySpecs(config: CollectMetricsConfig): MetricQuerySpec[] {
   ];
 }
 
-/** incidentType에 필요한 metric만, INCIDENT_METRIC_NAMES에 나열한 순서 그대로 고른다. */
+/** incidentType에 필요한 metric만, IncidentPolicy.metricNames에 나열한 순서 그대로 고른다. */
 function buildQuerySpecs(
   config: CollectMetricsConfig,
   incidentType: IncidentType,
@@ -299,10 +237,12 @@ function buildQuerySpecs(
   const allSpecs = buildAllQuerySpecs(config);
   const specByName = new Map(allSpecs.map((spec) => [spec.name, spec]));
 
-  return INCIDENT_METRIC_NAMES[incidentType].map((name) => {
+  return INCIDENT_POLICIES[incidentType].metricNames.map((name) => {
     const spec = specByName.get(name);
     if (!spec) {
-      throw new Error(`Unknown metric name in INCIDENT_METRIC_NAMES: ${name}`);
+      throw new Error(
+        `Unknown metric name in IncidentPolicy.metricNames: ${name}`,
+      );
     }
     return spec;
   });
@@ -403,7 +343,7 @@ function collectionFailedSummary(name: string): MetricSummary {
 }
 
 /**
- * incidentType에 필요한 Metric 세트(INCIDENT_METRIC_NAMES)를 GetMetricData 한 번으로
+ * incidentType에 필요한 Metric 세트(IncidentPolicy.metricNames)를 GetMetricData 한 번으로
  * 조회한다. 새 Custom Metric/Metric Filter는 만들지 않고, monitoring 모듈 Dashboard/Alarm이
  * 이미 쓰는 것과 동일한 namespace/dimension만 재사용한다.
  */

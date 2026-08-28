@@ -25,10 +25,11 @@ CloudWatch Alarm(QuizSnapshotFailure | Game Target5xx | API Target5xx, ALARM)
 
 ## 지원하는 Alarm(IncidentType)
 
-Alarm 이름 -> `IncidentType`(`src/context/types.ts`) 매핑은 `src/handler.ts`의
-`INCIDENT_TYPE_BY_ALARM_NAME`에서 관리한다. 이 맵에 없는 Alarm(UnhealthyHost, EC2
-CPU/Memory/Disk 등)은 EventBridge Rule에도 Lambda 방어 로직에도 걸리지 않아 자동으로
-분석 대상에서 제외된다.
+Alarm 이름 -> `IncidentType`(`src/context/types.ts`) 매핑은 `src/context/incident-policy.ts`의
+`INCIDENT_POLICIES`(각 IncidentType의 `alarmNameEnvVar`/`defaultAlarmName`)를 source of
+truth로, `src/handler.ts`의 `INCIDENT_TYPE_BY_ALARM_NAME`이 조회해서 만든다. 이 맵에 없는
+Alarm(UnhealthyHost, EC2 CPU/Memory/Disk 등)은 EventBridge Rule에도 Lambda 방어 로직에도
+걸리지 않아 자동으로 분석 대상에서 제외된다.
 
 | Alarm | IncidentType | 비고 |
 |---|---|---|
@@ -36,11 +37,17 @@ CPU/Memory/Disk 등)은 EventBridge Rule에도 Lambda 방어 로직에도 걸리
 | `SongQuiz-Prod-High-Game-Target5xx` | `GAME_TARGET_5XX` | v1-2 추가 - Metric 19개(아래 참고) |
 | `SongQuiz-Prod-High-API-Target5xx` | `API_TARGET_5XX` | v1-3 추가 - Metric 16개, Log Group만 apps/api로 전환(아래 참고) |
 
-`IncidentType`별로 실제 조회하는 Metric 목록은 `src/context/collect-metrics.ts`의
-`INCIDENT_METRIC_NAMES`에서 관리한다(범용 Policy Engine/YAML/Plugin framework 없이, 이
-정도 크기에서는 작은 상수 맵으로 충분하다고 판단했다). Structured Output schema/Slack
-메시지 포맷(`src/openai/schema.ts`, `src/slack/build-ai-analysis-message.ts`)은 모든
-IncidentType이 공유한다.
+`IncidentType`별로 실제 조회하는 Metric 목록(과 log source/필수 env/trace 수집 여부/
+deployment 대상 서비스)은 `src/context/incident-policy.ts`의 `INCIDENT_POLICIES`
+(`IncidentPolicy`)에서 한 곳에 모아 관리한다(범용 Policy Engine/YAML/Plugin framework
+없이, 이 정도 크기에서는 TypeScript 타입 + 작은 상수 맵으로 충분하다고 판단했다) -
+`collect-metrics.ts`/`collect-logs.ts`/`collect-deployments.ts`/`handler.ts`는 이 맵을
+조회하기만 하고 IncidentType별 분기를 따로 두지 않는다. 새 IncidentType을 추가할 때는
+`INCIDENT_POLICIES`에 항목 하나를 추가하고(필요하면 `collect-metrics.ts`의
+`buildAllQuerySpecs`에 새 metric spec을 더하고), `src/context/types.ts`의 `IncidentType`
+union에 값을 추가하면 된다. Structured Output schema/Slack 메시지 포맷
+(`src/openai/schema.ts`, `src/slack/build-ai-analysis-message.ts`)은 모든 IncidentType이
+공유한다.
 
 `QUIZ_SNAPSHOT_FAILURE`가 조회하는 10개 Metric(최초 구현(v1) 7개 + room 분산 락 Redis 장애
 내성 이벤트 3종). 게임 시작이 room lock 아래에서 수행되므로, 동일 분석 시간대에 lock
@@ -91,7 +98,7 @@ Logs/Trace/Deployment 수집 로직(`collect-logs.ts`/`collect-traces.ts`/`colle
 기준, quiz_snapshot_failed 이벤트만 대상이 아니다) -> 로그의 traceId로 X-Ray 조회 ->
 API/Game Production Deployment 순으로 그대로 동작한다.
 
-`API_TARGET_5XX`(v1-3)는 `INCIDENT_METRIC_NAMES`에서 아래 16개 metric만 고른다(새 metric
+`API_TARGET_5XX`(v1-3)는 `INCIDENT_POLICIES.API_TARGET_5XX.metricNames`에서 아래 16개 metric만 고른다(새 metric
 spec 없이 `GAME_TARGET_5XX`가 이미 쓰는 spec을 그대로 재사용 - room 분산 락 3종 포함):
 
 | Metric | Namespace | Dimension |
@@ -113,8 +120,9 @@ spec 없이 `GAME_TARGET_5XX`가 이미 쓰는 spec을 그대로 재사용 - roo
 | Redis.CurrConnections | AWS/ElastiCache | CacheClusterId |
 | Redis.Evictions | AWS/ElastiCache | CacheClusterId |
 
-`API_TARGET_5XX`는 Logs만 다른 소스를 본다 - `collect-logs.ts`의
-`LOG_SOURCE_BY_INCIDENT_TYPE` 맵이 IncidentType마다 game/api Log Group과 쿼리를 고른다.
+`API_TARGET_5XX`는 Logs만 다른 소스를 본다 - `incident-policy.ts`의
+`IncidentPolicy.logSource`(`INCIDENT_POLICIES`)가 IncidentType마다 game/api Log Group을
+정하고, `collect-logs.ts`는 그 값에 맞는 쿼리를 고른다.
 apps/api Log Group(`API_LOG_GROUP_NAME`)에는 구조화 app 예외 로그(event/errorCode)와
 access 로그(method/path/statusCode, `AccessLogMiddleware`)가 같은 PM2 stdout으로 섞여
 쌓인다(`ecosystem.config.js`가 둘 다 `logs/api.log` 하나로 합침) - 두 로그 모두 5xx/예외
