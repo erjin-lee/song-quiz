@@ -72,6 +72,44 @@ resource "aws_cloudwatch_metric_alarm" "unhealthy_host_count" {
   }
 }
 
+# --- Availability: API-ECS No Healthy Hosts (Critical) ---
+# ECS Fargate 이관 2단계 - 이미지 pull 실패, SSM/KMS 권한 누락, 앱 부팅 실패 등으로
+# 태스크가 하나도 뜨지 못하면(0개) UnHealthyHostCount/Target5xx 둘 다 조용하다 -
+# 대상이 아예 없으면 "unhealthy"할 대상도, "5xx를 반환한" 대상도 없기 때문이다(이 경우
+# ALB 자신이 반환하는 503은 HTTPCode_ELB_5XX_Count로 집계되고 위 target_5xx가 보는
+# HTTPCode_Target_5XX_Count에는 잡히지 않는다). 그래서 UnHealthyHostCount만으로는 완전
+# 장애를 놓칠 수 있어, HealthyHostCount가 최소 1 미만으로 떨어지는지 별도로 본다.
+# treat_missing_data를 다른 알람들과 달리 "breaching"으로 두는 이유: 이 지표가 없다는
+# 것 자체가(등록된 target이 전혀 없다는 뜻이라) "healthy host가 없다"와 사실상 같은
+# 신호이기 때문이다 - 다른 알람들의 notBreaching(트래픽 부재를 장애로 오판하지 않으려는
+# 목적)과는 정반대 상황이다.
+resource "aws_cloudwatch_metric_alarm" "api_ecs_no_healthy_hosts" {
+  alarm_name        = "SongQuiz-Prod-Critical-API-ECS-NoHealthyHosts"
+  alarm_description = "apps/api ECS target group has had zero healthy hosts for 3 consecutive minutes - likely a total outage (image pull/SSM/KMS/boot failure) that UnhealthyHost/Target5xx alone would miss. service=api_ecs severity=critical category=availability signal=HealthyHostCount condition=min<1/3m(breaching on missing data)"
+
+  namespace   = "AWS/ApplicationELB"
+  metric_name = "HealthyHostCount"
+  statistic   = "Minimum"
+  dimensions = {
+    LoadBalancer = var.alb_arn_suffix
+    TargetGroup  = var.api_ecs_target_group_arn_suffix
+  }
+
+  period              = 60
+  evaluation_periods  = 3
+  datapoints_to_alarm = 3
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+  treat_missing_data  = "breaching"
+
+  tags = {
+    Environment = "prod"
+    Service     = "api_ecs"
+    Severity    = "critical"
+    Category    = "availability"
+  }
+}
+
 # --- Availability: Target 5xx (High) ---
 # 초기 threshold(5분 5건)는 운영값이며 실제 traffic/error baseline을 관찰한 뒤 조정한다.
 resource "aws_cloudwatch_metric_alarm" "target_5xx" {

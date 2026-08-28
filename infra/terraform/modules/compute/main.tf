@@ -111,4 +111,13 @@ resource "aws_instance" "app_a" {
     Name    = "${var.project_name}-app-a"
     Service = "shared"
   }
+
+  # data.aws_ami.ubuntu가 most_recent = true라서 AWS가 새 AMI를 배포할 때마다 ami 값이
+  # 바뀌는데, 이 속성은 변경 시 인스턴스를 강제로 교체(destroy + create)한다(bastion과
+  # 동일한 이유, 위 aws_instance.bastion 참고). app_a는 지금 실제로 API/Game 트래픽을
+  # 받고 있는 인스턴스라 이 lifecycle 없이 apply하면 ECS 이관 여부와 무관하게 AMI가
+  # 갱신될 때마다 두 서비스가 함께 재생성/중단될 수 있다 - 절대 생략하지 않는다.
+  lifecycle {
+    ignore_changes = [ami]
+  }
 }

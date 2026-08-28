@@ -295,4 +295,14 @@ module "ecs" {
   api_desired_count         = var.api_desired_count
   environment_variables     = local.api_environment_variables
   secret_arns               = local.api_secret_arns
+
+  # aws_ecs_service.api는 api_target_group_arn(위)을 통해 module.load_balancer의
+  # aws_lb_target_group.app_ecs에는 이미 참조 기반 의존성이 있지만, 그 타겟그룹을
+  # 실제로 "리스너에 연결"하는 aws_lb_listener.https(weighted forward)는 별도
+  # 리소스라 이 참조만으로는 순서가 보장되지 않는다 - 최초 apply에서 둘이 병렬로
+  # 실행되면 ECS가 서비스를 만들려는 시점에 타겟그룹이 아직 어떤 리스너에도 연결되지
+  # 않은 상태일 수 있어 "target group ... does not have an associated load balancer"로
+  # 실패할 수 있다. module 전체에 대한 depends_on으로 load_balancer의 모든 리소스
+  # (리스너 포함)가 끝난 뒤에만 ecs가 시작되도록 명시적으로 순서를 고정한다.
+  depends_on = [module.load_balancer]
 }

@@ -2,8 +2,15 @@
 # 값들. EC2/PM2 시절에는 WAS 서버의 .env 파일로 넘기던 값이라 Terraform이 값 자체를
 # 몰라도 됐지만, ECS Fargate에는 지속되는 서버가 없어 태스크가 시작할 때 어디선가 값을
 # 받아와야 한다 - AWS 권장 방식대로 SSM Parameter Store(SecureString)에 저장해두고,
-# 태스크 실행 역할이 시작 시점에만 복호화해서 컨테이너 환경변수로 주입한다(태스크 정의
-# JSON/Terraform state 어디에도 평문으로 남지 않는다).
+# 태스크 실행 역할이 시작 시점에만 복호화해서 컨테이너 환경변수로 주입한다.
+#
+# value_wo(write-only, Terraform 1.11+)를 쓰는 이유: 일반 value = var.x로 쓰면 SSM에는
+# 암호화되어 저장돼도 Terraform state에는 평문 그대로 남는다. 이 state는 S3에 있고,
+# PR마다 도는 ci_terraform_plan role이 state 버킷에 s3:GetObject 권한을 갖고 있어(락/
+# 조회에 필요, environments/bootstrap/ci.tf) KMS 키를 아무리 좁혀도 state를 직접 읽으면
+# 우회된다. value_wo는 그 값을 애초에 state에 쓰지 않는다 - value_wo_version은 실제
+# 값이 바뀌었을 때 갱신을 트리거하는 용도로만 쓰는 정수라, 값을 로테이션할 때 이 숫자를
+# 올려야 한다(값 자체로는 변경 여부를 diff할 수 없으므로).
 #
 # 이 리소스들을 modules/iam이나 modules/ecs 안에 두지 않고 루트에 직접 만드는 이유:
 # modules/iam(태스크 실행 역할의 ssm:GetParameters 정책)과 modules/ecs(태스크 정의의
@@ -47,21 +54,15 @@ resource "aws_kms_key" "api_secrets" {
         Action    = "kms:*"
         Resource  = "*"
       },
-      {
-        Sid    = "AllowEcsApiTaskExecutionDecrypt"
-        Effect = "Allow"
-        Principal = {
-          # modules/iam의 output(ecs_api_task_execution_role_arn)을 직접 참조하면
-          # module.iam이 이 키의 ARN을 입력으로 받아야 하는 구조와 순환 참조가 생긴다
-          # (module.iam -> 이 키, 이 키 정책 -> module.iam). ecr-push.tf(bootstrap)에서
-          # 이미 쓴 것과 같은 방식으로, project_name 네이밍 규칙 + account_id로 역할
-          # ARN을 직접 구성해서 순환을 끊는다 - modules/iam/ecs.tf의 실제 역할 이름
-          # ("${var.project_name}-ecs-api-task-execution")과 반드시 같아야 한다.
-          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-ecs-api-task-execution"
-        }
-        Action   = ["kms:Decrypt", "kms:DescribeKey"]
-        Resource = "*"
-      }
+      # ECS Task Execution Role에게 별도 Principal 문을 여기 추가하지 않는다 - 위
+      # EnableIamUserPermissions가 이미 이 키의 접근 판단을 전부 IAM 정책에 위임했으므로,
+      # modules/iam/ecs.tf의 ecs_api_task_execution_ssm 정책(kms:Decrypt를 이 키
+      # ARN으로 제한)만으로 충분하다. 예전에는 여기에도 그 role의 ARN을 문자열로 조립해
+      # 넣었었는데, 그러면 이 키(aws_kms_key.api_secrets)와 module.iam(그 role을 만드는
+      # 쪽) 사이에 Terraform이 아는 의존관계가 전혀 없어서 - 키 정책이 참조하는 role이
+      # 아직 존재하지 않는 순서로 최초 apply가 실행되면 KMS가
+      # MalformedPolicyDocumentException(존재하지 않는 principal)으로 키 생성 자체를
+      # 거부할 수 있었다. 문을 없애면 그 경합도 함께 사라진다.
     ]
   })
 
@@ -74,55 +75,61 @@ resource "aws_kms_alias" "api_secrets" {
 }
 
 resource "aws_ssm_parameter" "api_db_password" {
-  name   = "${local.api_ssm_parameter_prefix}/db-password"
-  type   = "SecureString"
-  key_id = aws_kms_key.api_secrets.key_id
-  value  = var.db_password
+  name             = "${local.api_ssm_parameter_prefix}/db-password"
+  type             = "SecureString"
+  key_id           = aws_kms_key.api_secrets.key_id
+  value_wo         = var.db_password
+  value_wo_version = 1
 
   tags = { Name = "${var.project_name}-api-db-password" }
 }
 
 resource "aws_ssm_parameter" "api_admin_password" {
-  name   = "${local.api_ssm_parameter_prefix}/admin-password"
-  type   = "SecureString"
-  key_id = aws_kms_key.api_secrets.key_id
-  value  = var.admin_password
+  name             = "${local.api_ssm_parameter_prefix}/admin-password"
+  type             = "SecureString"
+  key_id           = aws_kms_key.api_secrets.key_id
+  value_wo         = var.admin_password
+  value_wo_version = 1
 
   tags = { Name = "${var.project_name}-api-admin-password" }
 }
 
 resource "aws_ssm_parameter" "api_admin_jwt_secret" {
-  name   = "${local.api_ssm_parameter_prefix}/admin-jwt-secret"
-  type   = "SecureString"
-  key_id = aws_kms_key.api_secrets.key_id
-  value  = var.admin_jwt_secret
+  name             = "${local.api_ssm_parameter_prefix}/admin-jwt-secret"
+  type             = "SecureString"
+  key_id           = aws_kms_key.api_secrets.key_id
+  value_wo         = var.admin_jwt_secret
+  value_wo_version = 1
 
   tags = { Name = "${var.project_name}-api-admin-jwt-secret" }
 }
 
 resource "aws_ssm_parameter" "api_user_jwt_secret" {
-  name   = "${local.api_ssm_parameter_prefix}/user-jwt-secret"
-  type   = "SecureString"
-  key_id = aws_kms_key.api_secrets.key_id
-  value  = var.user_jwt_secret
+  name             = "${local.api_ssm_parameter_prefix}/user-jwt-secret"
+  type             = "SecureString"
+  key_id           = aws_kms_key.api_secrets.key_id
+  value_wo         = var.user_jwt_secret
+  value_wo_version = 1
 
   tags = { Name = "${var.project_name}-api-user-jwt-secret" }
 }
 
 resource "aws_ssm_parameter" "api_gpt_secret_key" {
-  name   = "${local.api_ssm_parameter_prefix}/gpt-secret-key"
-  type   = "SecureString"
-  key_id = aws_kms_key.api_secrets.key_id
-  value  = var.gpt_secret_key
+  name             = "${local.api_ssm_parameter_prefix}/gpt-secret-key"
+  type             = "SecureString"
+  key_id           = aws_kms_key.api_secrets.key_id
+  value_wo         = var.gpt_secret_key
+  value_wo_version = 1
 
   tags = { Name = "${var.project_name}-api-gpt-secret-key" }
 }
 
 resource "aws_ssm_parameter" "api_internal_service_secret" {
-  name   = "${local.api_ssm_parameter_prefix}/internal-service-secret"
-  type   = "SecureString"
-  key_id = aws_kms_key.api_secrets.key_id
-  value  = var.internal_service_secret
+  name             = "${local.api_ssm_parameter_prefix}/internal-service-secret"
+  type             = "SecureString"
+  key_id           = aws_kms_key.api_secrets.key_id
+  value_wo         = var.internal_service_secret
+  value_wo_version = 1
 
   tags = { Name = "${var.project_name}-api-internal-service-secret" }
 }
@@ -134,10 +141,11 @@ resource "aws_ssm_parameter" "api_internal_service_secret" {
 resource "aws_ssm_parameter" "api_docs_password" {
   count = var.api_docs_password != "" ? 1 : 0
 
-  name   = "${local.api_ssm_parameter_prefix}/docs-password"
-  type   = "SecureString"
-  key_id = aws_kms_key.api_secrets.key_id
-  value  = var.api_docs_password
+  name             = "${local.api_ssm_parameter_prefix}/docs-password"
+  type             = "SecureString"
+  key_id           = aws_kms_key.api_secrets.key_id
+  value_wo         = var.api_docs_password
+  value_wo_version = 1
 
   tags = { Name = "${var.project_name}-api-docs-password" }
 }
