@@ -1,10 +1,12 @@
 # 웹 정적 파일(S3) + CloudFront 배포. 원래 루트의 web.tf 그대로다.
 
+# apps/web(사용자 웹) 전용 정적 호스팅 리소스라 api/game과 구분되는 Service = "web"로 태그한다.
 resource "aws_s3_bucket" "web" {
   bucket = "${replace(var.domain_name, ".", "-")}-web"
 
   tags = {
-    Name = "${var.project_name}-web"
+    Name    = "${var.project_name}-web"
+    Service = "web"
   }
 }
 
@@ -134,7 +136,8 @@ resource "aws_cloudfront_distribution" "web" {
   }
 
   tags = {
-    Name = "${var.project_name}-web"
+    Name    = "${var.project_name}-web"
+    Service = "web"
   }
 }
 

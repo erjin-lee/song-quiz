@@ -37,7 +37,9 @@ resource "aws_db_instance" "main" {
   skip_final_snapshot       = false
   final_snapshot_identifier = "${var.project_name}-db-final"
 
+  # apps/api와 apps/game이 같은 RDS 인스턴스를 공유하므로 Service = "shared"로 태그한다.
   tags = {
-    Name = "${var.project_name}-db"
+    Name    = "${var.project_name}-db"
+    Service = "shared"
   }
 }

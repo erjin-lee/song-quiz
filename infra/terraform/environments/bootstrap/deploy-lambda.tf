@@ -15,10 +15,14 @@ locals {
   ci_deploy_lambda_workflow_names = [
     "Deploy Alarm Notifier Lambda",    # .github/workflows/deploy-alarm-notifier.yml의 `name:` 값
     "Deploy Incident Analyzer Lambda", # .github/workflows/deploy-incident-analyzer.yml의 `name:` 값
+    "Deploy Cost Reporter Lambda",     # .github/workflows/deploy-cost-reporter.yml의 `name:` 값
   ]
 
   alarm_notifier_function_arn    = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${local.lambda_name_prefix}-alarm-notifier"
   incident_analyzer_function_arn = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${local.lambda_name_prefix}-incident-analyzer"
+  # modules/cost-reporter의 name_prefix 기본값과 반드시 같아야 한다(위 lambda_name_prefix와
+  # 동일한 이유 - 이 두 root가 서로 다른 state를 쓴다).
+  cost_reporter_function_arn = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${local.lambda_name_prefix}-cost-reporter"
 }
 
 # 신뢰 조건은 ci_deploy_metadata와 동일한 구조(§1, deploy-metadata.tf 주석 참고) - sub의
@@ -75,6 +79,7 @@ resource "aws_iam_role_policy" "ci_deploy_lambda_update_code" {
         Resource = [
           local.alarm_notifier_function_arn,
           local.incident_analyzer_function_arn,
+          local.cost_reporter_function_arn,
         ]
       }
     ]

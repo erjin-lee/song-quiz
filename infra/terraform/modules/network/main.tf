@@ -125,23 +125,30 @@ resource "aws_route_table_association" "public_c" {
   route_table_id = aws_route_table.public.id
 }
 
+# 2024-02 AWS 정책 변경으로 모든 퍼블릭 IPv4(EIP 포함, 연결 여부 무관)에 시간당 요금이
+# 붙는다 - NAT Gateway와 마찬가지로 공용 아웃바운드 경로의 일부라 Service = "shared".
 resource "aws_eip" "nat" {
   domain = "vpc"
 
   tags = {
-    Name = "${var.project_name}-nat"
+    Name    = "${var.project_name}-nat"
+    Service = "shared"
   }
 
   depends_on = [aws_internet_gateway.main]
 }
 
 # public_a에 배치 - NAT 자신도 IGW를 거쳐 인터넷과 통신해야 한다.
+# NAT Gateway는 시간당 요금 + 데이터 처리 요금이 실제로 청구되는 리소스라(다른 네트워크
+# 리소스는 대부분 무료) Cost Explorer에서 api/game 어느 한쪽 것으로 나눌 수 없는 공용
+# 아웃바운드 경로라 Service = "shared"로 태그한다.
 resource "aws_nat_gateway" "main" {
   allocation_id = aws_eip.nat.id
   subnet_id     = aws_subnet.public_a.id
 
   tags = {
-    Name = "${var.project_name}-nat"
+    Name    = "${var.project_name}-nat"
+    Service = "shared"
   }
 
   depends_on = [aws_internet_gateway.main]

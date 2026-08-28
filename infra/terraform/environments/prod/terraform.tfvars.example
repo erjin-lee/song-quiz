@@ -2,3 +2,12 @@ aws_region   = "ap-northeast-2"
 aws_profile  = "default"
 project_name = "deploy-terraform"
 vpc_cidr     = "10.0.0.0/16"
+
+# --- FinOps (modules/finops, modules/cost-reporter) ---
+# monthly_budget_usd/budget_alert_emails는 기본값이 없다 - terraform.tfvars(gitignore 대상)에
+# 실제 값을 채워 넣어야 plan/apply가 가능하다.
+monthly_budget_usd = 50
+budget_alert_emails = [
+  "ops@example.com",
+]
+cost_anomaly_threshold_usd = 10

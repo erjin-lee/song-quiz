@@ -153,3 +153,22 @@ variable "game_subdomain" {
   type        = string
   default     = "game"
 }
+
+# --- FinOps (modules/finops, modules/cost-reporter) ---
+
+variable "monthly_budget_usd" {
+  description = "월간 AWS 비용 Budget 금액(USD). 기본값 없음 - terraform.tfvars 또는 TF_VAR_monthly_budget_usd로 직접 지정할 것."
+  type        = number
+}
+
+variable "budget_alert_emails" {
+  description = "Budget/Cost Anomaly Detection 알림을 받을 이메일 주소 목록. 민감한 환경별 값이라 기본값을 두지 않는다 - terraform.tfvars(gitignore 대상) 또는 TF_VAR_budget_alert_emails로 지정할 것."
+  type        = list(string)
+  sensitive   = true
+}
+
+variable "cost_anomaly_threshold_usd" {
+  description = "Cost Anomaly Detection이 알림을 보낼 이상 비용 절대값 임계치(USD)"
+  type        = number
+  default     = 10
+}

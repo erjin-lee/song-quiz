@@ -1,5 +1,8 @@
 # ALB + 타겟그룹 + 리스너. 원래 루트의 load_balancer.tf 그대로다.
 
+# api/game 타겟그룹을 하나의 ALB가 함께 라우팅하므로(리스너 규칙으로만 구분) ALB 자체의
+# 시간당/LCU 요금은 한쪽 서비스로 나눌 수 없어 Service = "shared"로 태그한다(타겟그룹은
+# 별도 청구 항목이 아니라 태그를 추가하지 않는다).
 resource "aws_lb" "main" {
   name               = "${var.project_name}-alb"
   internal           = false
@@ -8,7 +11,8 @@ resource "aws_lb" "main" {
   subnets            = var.public_subnet_ids
 
   tags = {
-    Name = "${var.project_name}-alb"
+    Name    = "${var.project_name}-alb"
+    Service = "shared"
   }
 }
 

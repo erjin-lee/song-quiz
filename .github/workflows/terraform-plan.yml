@@ -51,6 +51,15 @@ jobs:
           YARN_ENABLE_IMMUTABLE_INSTALLS=true yarn workspaces focus incident-analyzer
           yarn workspace incident-analyzer build
 
+      # modules/cost-reporter도 data "archive_file"로 apps/lambda/cost-reporter/dist를 그대로
+      # zip으로 묶으므로(위 두 Lambda와 동일한 이유), plan 전에 여기서도 먼저 빌드해둬야 한다.
+      - name: Build cost-reporter Lambda
+        working-directory: ${{ github.workspace }}
+        run: |
+          corepack enable
+          YARN_ENABLE_IMMUTABLE_INSTALLS=true yarn workspaces focus cost-reporter
+          yarn workspace cost-reporter build
+
       # 장기 액세스 키 없이, environments/bootstrap에서 만든 IAM Role을 OIDC로 assume한다.
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -89,4 +98,8 @@ jobs:
           # 존재하지 않는 프로필을 찾다 실패한다. 빈 문자열로 override해서 위 OIDC 자격증명을 쓰게 한다.
           TF_VAR_aws_profile: ""
           TF_VAR_db_password: ${{ secrets.TF_VAR_DB_PASSWORD }}
+          # db_password와 동일한 이유(민감/환경별 값이라 하드코딩하지 않음) - budget_alert_emails는
+          # list(string)이라 JSON 배열 형태의 문자열로 secret에 저장해야 한다(예: ["a@b.com"]).
+          TF_VAR_monthly_budget_usd: ${{ secrets.TF_VAR_MONTHLY_BUDGET_USD }}
+          TF_VAR_budget_alert_emails: ${{ secrets.TF_VAR_BUDGET_ALERT_EMAILS }}
         run: terraform plan -input=false -no-color -lock-timeout=5m

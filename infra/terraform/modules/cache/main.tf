@@ -31,6 +31,8 @@ resource "aws_security_group" "cache" {
   }
 }
 
+# apps/game(room 분산 락 등)이 주로 쓰지만 apps/api도 함께 접근할 수 있는 공용 캐시라
+# Service = "shared"로 태그한다.
 resource "aws_elasticache_cluster" "main" {
   cluster_id           = "${var.project_name}-cache"
   engine               = "redis"
@@ -43,6 +45,7 @@ resource "aws_elasticache_cluster" "main" {
   security_group_ids   = [aws_security_group.cache.id]
 
   tags = {
-    Name = "${var.project_name}-cache"
+    Name    = "${var.project_name}-cache"
+    Service = "shared"
   }
 }
