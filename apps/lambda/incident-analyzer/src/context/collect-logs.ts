@@ -11,6 +11,7 @@ import {
   LogSample,
   LogsSummary,
 } from "./types";
+import { INCIDENT_POLICIES } from "./incident-policy";
 
 const cloudWatchLogsClient = new CloudWatchLogsClient({});
 
@@ -22,16 +23,6 @@ const MAX_SAMPLE_COUNT = 8;
 // query completion polling(§13) - 무한 대기하지 않고 최대 시도/전체 timeout을 둔다.
 const POLL_MAX_ATTEMPTS = 10;
 const POLL_INTERVAL_MS = 1000;
-
-// IncidentType마다 조회할 Log Group이 다르다(§AIOps v1-3 - 범용 Log Plugin Framework는
-// 만들지 않고, 이 작은 맵 하나로만 game/api를 고른다).
-type LogSource = "game" | "api";
-
-const LOG_SOURCE_BY_INCIDENT_TYPE: Record<IncidentType, LogSource> = {
-  QUIZ_SNAPSHOT_FAILURE: "game",
-  GAME_TARGET_5XX: "game",
-  API_TARGET_5XX: "api",
-};
 
 // game 로그 그룹에도 구조화 app 로그(event/errorCode)와 access 로그
 // (AccessLogMiddleware, ip/claimedUserId/query/body/userAgent)가 같은 PM2 stdout으로
@@ -236,7 +227,7 @@ export async function collectLogs(
   config: CollectLogsConfig,
   incidentType: IncidentType,
 ): Promise<CollectLogsResult> {
-  const source = LOG_SOURCE_BY_INCIDENT_TYPE[incidentType];
+  const source = INCIDENT_POLICIES[incidentType].logSource;
   const logGroupName =
     source === "api" ? config.apiLogGroupName : config.gameLogGroupName;
   if (!logGroupName) {

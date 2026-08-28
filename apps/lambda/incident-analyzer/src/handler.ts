@@ -10,6 +10,7 @@ import {
   hasSufficientContext,
 } from "./context/build-incident-context";
 import { AnalysisWindow, IncidentType } from "./context/types";
+import { INCIDENT_POLICIES } from "./context/incident-policy";
 import { analyzeIncident } from "./openai/analyze-incident";
 import { buildAiAnalysisMessage } from "./slack/build-ai-analysis-message";
 import { sendSlackMessage } from "./send-slack-message";
@@ -18,20 +19,20 @@ import { getSsmParameter } from "./get-ssm-parameter";
 // EventBridge Rule(infra/terraform/modules/aiops/eventbridge.tf)이 이미 정확히 이 두 알람
 // 이름 + ALARM 상태로 좁혀 보내지만, alarm-notifier와 동일하게 Lambda 쪽에서도 한 번 더
 // 방어적으로 검증한다(§6 - OK/INSUFFICIENT_DATA는 분석하지 않는다, §5 - 다른 Alarm은
-// 분석하지 않는다). 새 Alarm을 추가할 때는 이 맵에 한 줄만 추가한다(§v1-2 최소 공통화) -
-// API Target5xx 등 아직 지원하지 않는 Alarm은 이 맵에 없으므로 자동으로 skip된다.
-const QUIZ_SNAPSHOT_FAILURE_ALARM_NAME =
-  process.env.QUIZ_SNAPSHOT_FAILURE_ALARM_NAME ??
-  "SongQuiz-Prod-High-Game-QuizSnapshotFailure";
-const GAME_TARGET_5XX_ALARM_NAME =
-  process.env.GAME_TARGET_5XX_ALARM_NAME ?? "SongQuiz-Prod-High-Game-Target5xx";
-const API_TARGET_5XX_ALARM_NAME =
-  process.env.API_TARGET_5XX_ALARM_NAME ?? "SongQuiz-Prod-High-API-Target5xx";
-const INCIDENT_TYPE_BY_ALARM_NAME: Record<string, IncidentType> = {
-  [QUIZ_SNAPSHOT_FAILURE_ALARM_NAME]: "QUIZ_SNAPSHOT_FAILURE",
-  [GAME_TARGET_5XX_ALARM_NAME]: "GAME_TARGET_5XX",
-  [API_TARGET_5XX_ALARM_NAME]: "API_TARGET_5XX",
-};
+// 분석하지 않는다). 새 Alarm을 추가할 때는 IncidentPolicy(context/incident-policy.ts)에
+// 항목 하나만 추가한다(§v1-2 최소 공통화) - 아직 지원하지 않는 Alarm은 이 맵에 없으므로
+// 자동으로 skip된다.
+const INCIDENT_TYPE_BY_ALARM_NAME: Record<string, IncidentType> =
+  Object.fromEntries(
+    (Object.keys(INCIDENT_POLICIES) as IncidentType[]).map(
+      (incidentType): [string, IncidentType] => {
+        const policy = INCIDENT_POLICIES[incidentType];
+        const alarmName =
+          process.env[policy.alarmNameEnvVar] ?? policy.defaultAlarmName;
+        return [alarmName, incidentType];
+      },
+    ),
+  );
 const ALARM_NAME_PREFIX = "SongQuiz-Prod-";
 const ANALYSIS_WINDOW_MINUTES = 15;
 const DEFAULT_OPENAI_MODEL = "gpt-5.6-luna";
@@ -71,25 +72,13 @@ function buildAnalysisWindow(triggeredAt: Date): AnalysisWindow {
 
 /**
  * 필수 환경변수가 하나라도 비어 있으면 AWS API를 호출하기 전에 즉시 실패시킨다.
- * API_LOG_GROUP_NAME은 API_TARGET_5XX일 때만 필수로 취급한다(§AIOps v1-3) - 다른 두
- * IncidentType은 그 값을 쓰지 않으므로, terraform apply 전이라 아직 없어도 영향받지 않는다.
+ * IncidentPolicy.requiredEnv만 검사한다 - API_LOG_GROUP_NAME처럼 IncidentType마다
+ * 다른 필수 환경변수도 이 목록에만 반영하면 되고(§AIOps v1-3), 여기서 별도로
+ * IncidentType 분기를 두지 않는다.
  */
 function findMissingEnv(incidentType: IncidentType): string | null {
-  const required: Record<string, string | undefined> = {
-    GAME_LOG_GROUP_NAME,
-    ALB_ARN_SUFFIX,
-    API_TARGET_GROUP_ARN_SUFFIX,
-    GAME_TARGET_GROUP_ARN_SUFFIX,
-    DB_INSTANCE_IDENTIFIER,
-    EC2_INSTANCE_ID,
-    EC2_METRIC_NAMESPACE,
-    CACHE_CLUSTER_ID,
-    SLACK_WEBHOOK_PARAMETER_NAME,
-    OPENAI_API_KEY_PARAMETER_NAME,
-    ...(incidentType === "API_TARGET_5XX" ? { API_LOG_GROUP_NAME } : {}),
-  };
-  const missing = Object.entries(required).find(([, value]) => !value);
-  return missing ? missing[0] : null;
+  const requiredEnv = INCIDENT_POLICIES[incidentType].requiredEnv;
+  return requiredEnv.find((key) => !process.env[key]) ?? null;
 }
 
 export async function handler(
@@ -145,6 +134,7 @@ export async function handler(
   const parsed = parseAlarmName(alarmName, ALARM_NAME_PREFIX);
   const triggeredAt = new Date(detail.state.timestamp);
   const window = buildAnalysisWindow(triggeredAt);
+  const policy = INCIDENT_POLICIES[incidentType];
 
   const [alarmDefinitionResult, metricsResult, logsResult, deploymentsResult] =
     await Promise.all([
@@ -173,18 +163,27 @@ export async function handler(
       ),
       collectDeployments(
         {
-          apiDeploymentParameterName: API_DEPLOYMENT_PARAMETER_NAME,
-          gameDeploymentParameterName: GAME_DEPLOYMENT_PARAMETER_NAME,
+          apiDeploymentParameterName: policy.deploymentServices.includes("api")
+            ? API_DEPLOYMENT_PARAMETER_NAME
+            : undefined,
+          gameDeploymentParameterName: policy.deploymentServices.includes(
+            "game",
+          )
+            ? GAME_DEPLOYMENT_PARAMETER_NAME
+            : undefined,
         },
         triggeredAt,
       ),
     ]);
 
   // X-Ray 조회는 로그에서 얻은 traceId에 의존하므로(§14) 로그 수집이 끝난 뒤 이어서 한다.
+  // IncidentPolicy.collectsTraces가 false인 IncidentType은 조회 자체를 시도하지 않는다.
   const traceIds = logsResult.logs.samples
     .map((sample) => sample.traceId)
     .filter((traceId): traceId is string => Boolean(traceId));
-  const tracesResult = await collectTraces(traceIds);
+  const tracesResult = policy.collectsTraces
+    ? await collectTraces(traceIds)
+    : { status: "success" as const, traces: [] };
 
   console.log(
     JSON.stringify({
