@@ -215,3 +215,11 @@ module "cost_reporter" {
   aws_region       = var.aws_region
   lambda_dist_path = abspath("${path.root}/../../../../apps/lambda/cost-reporter/dist")
 }
+
+# ECS Fargate 이관 1단계(docs/infra/ecs-fargate-migration-plan.md) - api/game 이미지를
+# 저장할 ECR 리포지토리만 먼저 만든다. 아직 다른 모듈의 output을 참조하지 않는 독립 모듈이다.
+module "ecr" {
+  source = "../../modules/ecr"
+
+  project_name = var.project_name
+}

@@ -1,0 +1,62 @@
+name: Publish ECR Images
+
+# ECS Fargate 이관 1단계(docs/infra/ecs-fargate-migration-plan.md) 전용 워크플로우다.
+# deploy-api.yml/deploy-game.yml(EC2 SSH 배포)과는 완전히 별개로 동작하며, 아직 어떤
+# 배포에도 연결되지 않는다 - apps/api, apps/game 이미지를 빌드해 ECR에 push하는 것까지만
+# 검증한다. main push에 자동으로 걸지 않고 수동 실행(workflow_dispatch)만 허용한다 -
+# ECS가 아직 이 이미지를 소비하지 않는 단계에서 커밋마다 이미지를 자동으로 쌓아두지
+# 않기 위함이다. 다음 단계(2단계, API ECS 전환)에서 실제 배포에 연결할 때 트리거를
+# 다시 검토한다.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    strategy:
+      matrix:
+        service: [api, game]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.CI_ECR_PUSH_ROLE_ARN }}
+          aws-region: ap-northeast-2
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tag
+        id: image
+        run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # 리포지토리 이름(deploy-terraform-api/-game)은 infra/terraform/modules/ecr의
+          # "${var.project_name}-api"/"${var.project_name}-game"과 반드시 같은 값이어야 한다
+          # (var.project_name의 실제 값은 "deploy-terraform" - environments/prod/providers.tf
+          # 참고). ECR 리포지토리 자체는 이 워크플로우가 아니라 terraform apply로 미리
+          # 만들어져 있어야 한다(1단계 작업 범위).
+          file: apps/${{ matrix.service }}/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/deploy-terraform-${{ matrix.service }}:${{ steps.image.outputs.tag }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}

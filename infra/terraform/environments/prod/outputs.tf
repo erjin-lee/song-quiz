@@ -132,3 +132,13 @@ output "cloudwatch_dashboard_url" {
   description = "운영 상태를 한 화면에서 보는 CloudWatch Dashboard 콘솔 URL"
   value       = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards:name=${module.monitoring.dashboard_name}"
 }
+
+output "ecr_api_repository_url" {
+  description = "apps/api ECR 리포지토리 URL - .github/workflows/publish-ecr.yml이 docker push할 대상"
+  value       = module.ecr.api_repository_url
+}
+
+output "ecr_game_repository_url" {
+  description = "apps/game ECR 리포지토리 URL - .github/workflows/publish-ecr.yml이 docker push할 대상"
+  value       = module.ecr.game_repository_url
+}

@@ -1,0 +1,24 @@
+# apps/api, apps/game 컨테이너 이미지 빌드 컨텍스트에서 제외할 항목.
+# yarn workspaces focus가 모든 워크스페이스의 package.json을 참조하므로 소스 자체는
+# 남겨두고, 빌드에 불필요하거나 큰 디렉토리만 제외한다.
+
+**/node_modules
+**/dist
+.git
+.idea
+.vscode
+
+*.log
+apps/*/logs
+logs
+
+.env
+.env.local
+.env.*.local
+
+# terraform provider 바이너리/캐시가 커서 빌드 컨텍스트를 불필요하게 키운다.
+infra
+
+docs
+evals
+load-tests

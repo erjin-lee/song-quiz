@@ -17,3 +17,8 @@ output "ci_deploy_lambda_role_arn" {
   description = "deploy-alarm-notifier.yml/deploy-incident-analyzer.yml이 Lambda 코드만 업데이트할 때 assume할 IAM Role ARN - 리포지토리 변수(CI_DEPLOY_LAMBDA_ROLE_ARN)에 이 값을 등록한다"
   value       = aws_iam_role.ci_deploy_lambda.arn
 }
+
+output "ci_ecr_push_role_arn" {
+  description = ".github/workflows/publish-ecr.yml이 ECR에 이미지를 push할 때 assume할 IAM Role ARN - 리포지토리 변수(CI_ECR_PUSH_ROLE_ARN)에 이 값을 등록한다"
+  value       = aws_iam_role.ci_ecr_push.arn
+}
