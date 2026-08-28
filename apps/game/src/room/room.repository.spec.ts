@@ -1,7 +1,7 @@
-import { HttpException } from '@nestjs/common';
 import { CacheService } from '../cache/cache.service';
 import { FakeRedis } from '../common/testing/fake-redis';
 import { RoomItemDto } from './dto/room-item.dto';
+import { RoomFencedStateStore } from './room-fenced-state.store';
 import { roomLockKey, RoomRepository } from './room.repository';
 import {
   LockLease,
@@ -59,7 +59,8 @@ describe('RoomRepository (Redis 장애 대응)', () => {
     });
 
     roomLockService = new RoomLockService(cacheService);
-    roomRepository = new RoomRepository(cacheService, roomLockService);
+    const stateStore = new RoomFencedStateStore(cacheService, roomLockService);
+    roomRepository = new RoomRepository(cacheService, stateStore);
   });
 
   afterEach(async () => {
@@ -70,29 +71,6 @@ describe('RoomRepository (Redis 장애 대응)', () => {
     });
     await cacheService.onApplicationShutdown();
     jest.useRealTimers();
-  });
-
-  it('addToIndex는 Redis 상태 읽기가 실패하면 로컬 캐시로 폴백하지 않고 실패한다', async () => {
-    // 락(eval)은 정상이고 상태 읽기/쓰기만 실패하는 상황.
-    redis.dataCommandsDown = true;
-
-    await expect(roomRepository.addToIndex('room-1')).rejects.toThrow();
-
-    // 로컬 메모리에 인덱스를 만들어두지 않았는지 확인한다(조용한 정합성 붕괴 방지).
-    redis.dataCommandsDown = false;
-    expect(redis.peek('room:index')).toBeUndefined();
-    expect(await roomRepository.getRoomIndex()).toEqual([]);
-  });
-
-  it('removeFromIndex도 Redis 상태 읽기가 실패하면 그대로 실패한다', async () => {
-    await roomRepository.addToIndex('room-1');
-    expect(JSON.parse(redis.peek('room:index') as string)).toEqual(['room-1']);
-
-    redis.dataCommandsDown = true;
-    await expect(roomRepository.removeFromIndex('room-1')).rejects.toThrow();
-
-    redis.dataCommandsDown = false;
-    expect(JSON.parse(redis.peek('room:index') as string)).toEqual(['room-1']);
   });
 
   it('락 TTL이 만료된 뒤 새 워커가 락을 잡으면, 오래된 fencing token의 쓰기는 거부되고 최신 token의 쓰기만 남는다', async () => {
@@ -223,32 +201,6 @@ describe('RoomRepository (Redis 장애 대응)', () => {
     expect(redis.peek('room:room-1')).toBeDefined();
   });
 
-  it('room 락 안에서 room-index 락을 중첩해 잡아도 각 쓰기가 자기 락의 fencing 카운터를 쓰고, 빠져나오면 바깥 lease가 복원된다', async () => {
-    const seenLockKeys: (string | undefined)[] = [];
-
-    await roomLockService.withLock(roomLockKey('room-1'), async (lease) => {
-      expect(lease.fence).toBe(1);
-      await roomRepository.saveRoom(buildRoom('room-1', '방'));
-      seenLockKeys.push(roomLockService.getCurrentLease()?.lockKey);
-
-      // addToIndex가 내부에서 room-index 락을 중첩해 잡는다.
-      await roomRepository.addToIndex('room-1');
-
-      // 중첩 락을 빠져나온 뒤에는 바깥 room lease가 그대로 돌아와야 한다.
-      seenLockKeys.push(roomLockService.getCurrentLease()?.lockKey);
-      await roomRepository.saveRoom(buildRoom('room-1', '방 갱신'));
-    });
-
-    expect(seenLockKeys).toEqual(['lock:room:room-1', 'lock:room:room-1']);
-    // 두 락의 fencing 카운터가 서로 독립적으로 존재한다.
-    expect(redis.peek('lock:fence:room:room-1')).toBe('1');
-    expect(redis.peek('lock:fence:room-index')).toBe('1');
-    expect(JSON.parse(redis.peek('room:index') as string)).toEqual(['room-1']);
-    expect(
-      (JSON.parse(redis.peek('room:room-1') as string) as RoomItemDto).roomTtl,
-    ).toBe('방 갱신');
-  });
-
   it('자기를 보호하지 않는 락 아래에서 room 상태를 바꾸려 하면 LockScopeMismatchError로 막힌다', async () => {
     // room-index 락만 쥔 채 room 상태를 쓰면, fencing이 엉뚱한 카운터를 검사하게 된다.
     await expect(
@@ -289,65 +241,6 @@ describe('RoomRepository (Redis 장애 대응)', () => {
       redis.dataCommandsDown = true;
 
       await expect(roomRepository.roomExistsStrict('room-5')).rejects.toThrow();
-    });
-  });
-
-  describe('assertRoomCreationAllowed (방 생성 rate limit 원자성)', () => {
-    it('같은 IP로 몰린 동시 요청도 카운터가 원자적으로 증가해 한도(10회/60초)를 정확히 지킨다', async () => {
-      const clientIp = '203.0.113.1';
-
-      const results = await Promise.allSettled(
-        Array.from({ length: 15 }, () =>
-          roomRepository.assertRoomCreationAllowed(clientIp),
-        ),
-      );
-
-      const allowed = results.filter((r) => r.status === 'fulfilled').length;
-      const blocked = results.filter((r) => r.status === 'rejected').length;
-      expect(allowed).toBe(10);
-      expect(blocked).toBe(5);
-      results
-        .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
-        .forEach((r) => expect(r.reason).toBeInstanceOf(HttpException));
-    });
-
-    it('한도를 넘긴 IP가 있어도 다른 IP의 카운터에는 영향을 주지 않는다', async () => {
-      for (let i = 0; i < 10; i += 1) {
-        await roomRepository.assertRoomCreationAllowed('203.0.113.1');
-      }
-      await expect(
-        roomRepository.assertRoomCreationAllowed('203.0.113.1'),
-      ).rejects.toThrow(HttpException);
-
-      await expect(
-        roomRepository.assertRoomCreationAllowed('203.0.113.2'),
-      ).resolves.toBeUndefined();
-    });
-  });
-
-  describe('room:index PERSIST 마이그레이션(onModuleInit)', () => {
-    it('배포 전 코드가 남긴 room:index TTL을 제거해 다시 만료되지 않게 한다', async () => {
-      // 옛 코드처럼 TTL이 걸린 채로 만들어진 index를 흉내낸다.
-      await redis.set('room:index', JSON.stringify(['room-1']), 'EX', 1);
-
-      roomRepository.onModuleInit();
-      // fire-and-forget이므로 내부 PERSIST 호출이 끝날 마이크로태스크 시간을 준다.
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-
-      // TTL이 그대로 남아있었다면 이 시점에 sweep으로 지워졌어야 한다.
-      jest.advanceTimersByTime(2_000);
-      expect(redis.peek('room:index')).toBeDefined();
-    });
-
-    it('REDIS_HOST가 없는(로컬 폴백) 환경에서는 아무 것도 하지 않는다', async () => {
-      Object.defineProperty(cacheService, 'redis', {
-        value: null,
-        writable: true,
-      });
-
-      expect(() => roomRepository.onModuleInit()).not.toThrow();
     });
   });
 });

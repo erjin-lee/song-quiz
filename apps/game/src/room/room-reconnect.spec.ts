@@ -1,6 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CacheService } from '../cache/cache.service';
+import { ChatHistoryRepository } from './chat-history.repository';
 import { QuizClient } from './clients/quiz.client';
+import { RoomAbuseGuardRepository } from './room-abuse-guard.repository';
+import { RoomFencedStateStore } from './room-fenced-state.store';
+import { RoomIndexReconciler } from './room-index-reconciler.service';
+import { RoomIndexRepository } from './room-index.repository';
 import { RoomLockService } from './room-lock.service';
 import { RoomRoundService } from './room-round.service';
 import { RoomRepository } from './room.repository';
@@ -41,6 +46,10 @@ describe('RoomService', () => {
   let roomLockService: RoomLockService;
   let roomTimerService: RoomTimerService;
   let roomRepository: RoomRepository;
+  let roomIndexRepository: RoomIndexRepository;
+  let roomIndexReconciler: RoomIndexReconciler;
+  let chatHistoryRepository: ChatHistoryRepository;
+  let roomAbuseGuard: RoomAbuseGuardRepository;
   let roomRoundService: RoomRoundService;
 
   const quizClientMock = {
@@ -79,6 +88,11 @@ describe('RoomService', () => {
       providers: [
         RoomService,
         RoomRepository,
+        RoomFencedStateStore,
+        RoomIndexRepository,
+        RoomIndexReconciler,
+        ChatHistoryRepository,
+        RoomAbuseGuardRepository,
         RoomRoundService,
         CacheService,
         RoomLockService,
@@ -92,6 +106,14 @@ describe('RoomService', () => {
     roomLockService = app.get<RoomLockService>(RoomLockService);
     roomTimerService = app.get<RoomTimerService>(RoomTimerService);
     roomRepository = app.get<RoomRepository>(RoomRepository);
+    roomIndexRepository = app.get<RoomIndexRepository>(RoomIndexRepository);
+    roomIndexReconciler = app.get<RoomIndexReconciler>(RoomIndexReconciler);
+    chatHistoryRepository = app.get<ChatHistoryRepository>(
+      ChatHistoryRepository,
+    );
+    roomAbuseGuard = app.get<RoomAbuseGuardRepository>(
+      RoomAbuseGuardRepository,
+    );
     roomRoundService = app.get<RoomRoundService>(RoomRoundService);
   });
 
@@ -168,6 +190,10 @@ describe('RoomService', () => {
       // RoomService 인스턴스에서 계산해도 동일해야 한다.
       const anotherInstance = new RoomService(
         roomRepository,
+        roomIndexRepository,
+        roomIndexReconciler,
+        chatHistoryRepository,
+        roomAbuseGuard,
         roomRoundService,
         roomLockService,
         roomTimerService,
