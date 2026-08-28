@@ -9,12 +9,20 @@ export interface SendMailInput {
 
 @Injectable()
 export class MailService {
+  // SES_ACCESS_KEY/SES_SECRET_KEY가 둘 다 있을 때만 명시적 자격증명을 넘긴다.
+  // credentials를 아예 생략해야 AWS SDK 기본 provider chain(EC2 instance role,
+  // ECS task role 등)이 동작한다 - 빈 문자열이라도 credentials를 넘기면 SDK가
+  // 그 값을 그대로 쓰려다 인증 오류를 낸다(IAM Role 기반 인증을 덮어써 버림).
   private readonly client = new SESClient({
     region: process.env.SES_REGION,
-    credentials: {
-      accessKeyId: process.env.SES_ACCESS_KEY ?? '',
-      secretAccessKey: process.env.SES_SECRET_KEY ?? '',
-    },
+    ...(process.env.SES_ACCESS_KEY && process.env.SES_SECRET_KEY
+      ? {
+          credentials: {
+            accessKeyId: process.env.SES_ACCESS_KEY,
+            secretAccessKey: process.env.SES_SECRET_KEY,
+          },
+        }
+      : {}),
   });
 
   async send({ to, subject, html }: SendMailInput): Promise<void> {

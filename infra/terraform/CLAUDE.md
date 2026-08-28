@@ -196,11 +196,19 @@ Avoid unnecessary variables for values that are truly implementation details.
     │                        # 비용 임계치 이메일 알림) + Cost Anomaly Detection(계정 전체 서비스
     │                        # 비용 1개 Monitor). Lambda가 없는 순수 AWS Billing 리소스라 다른
     │                        # 모듈 output을 참조하지 않는 독립 모듈이다 (2026-08-28 도입)
-    └── cost-reporter/      # 매일 EventBridge Scheduler(10:00 Asia/Seoul) -> Lambda
-                             # (apps/lambda/cost-reporter)가 Cost Explorer 비용을 조회해 Slack
-                             # Incoming Webhook으로 전달한다 - notification과 동일한 Webhook을
-                             # 재사용하지만 EventBridge Rule이 아니라 Scheduler로 트리거되는
-                             # 점이 다르다 (2026-08-28 도입)
+    ├── cost-reporter/      # 매일 EventBridge Scheduler(10:00 Asia/Seoul) -> Lambda
+    │                        # (apps/lambda/cost-reporter)가 Cost Explorer 비용을 조회해 Slack
+    │                        # Incoming Webhook으로 전달한다 - notification과 동일한 Webhook을
+    │                        # 재사용하지만 EventBridge Rule이 아니라 Scheduler로 트리거되는
+    │                        # 점이 다르다 (2026-08-28 도입)
+    └── ecr/                # apps/api, apps/game 컨테이너 이미지를 저장할 ECR 리포지토리 2개
+                             # + 수명주기 정책. ECS Fargate 이관 1단계
+                             # (docs/infra/ecs-fargate-migration-plan.md) 산출물 - 다른 모듈의
+                             # output을 참조하지 않는 독립 모듈이다. CI가 이 리포지토리에 이미지를
+                             # push할 때 assume하는 IAM Role은 environments/bootstrap/ecr-push.tf에
+                             # 별도로 있다(다른 root state라 module output을 공유할 수 없어
+                             # project_name으로 ARN을 직접 구성 - ci_deploy_metadata와 동일한 이유)
+                             # (2026-08-28 도입)
 ```
 
 새 환경(예: staging)이 필요해지면 `environments/<env>/`를 추가하고 같은 모듈들을
