@@ -12,9 +12,10 @@
 apps/*/logs
 logs
 
-.env
-.env.local
-.env.*.local
+# 슬래시 없는 패턴은 루트 레벨에서만 매치된다(.gitignore와 달리 재귀적이지 않음 -
+# Docker 공식 문서, build context 페이지 참고). apps/api/.env처럼 중첩된 파일도
+# 제외하려면 **/를 붙여야 한다.
+**/.env*
 
 # terraform provider 바이너리/캐시가 커서 빌드 컨텍스트를 불필요하게 키운다.
 infra

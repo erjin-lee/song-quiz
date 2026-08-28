@@ -2,7 +2,7 @@
 #
 #   docker build -f apps/game/Dockerfile -t song-quiz-game .
 
-FROM node:20-slim AS build
+FROM node:24-slim AS build
 WORKDIR /app
 
 COPY . .
@@ -13,7 +13,7 @@ RUN corepack enable \
   && yarn workspace tracing build \
   && yarn workspace game build
 
-FROM node:20-slim AS runtime
+FROM node:24-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 

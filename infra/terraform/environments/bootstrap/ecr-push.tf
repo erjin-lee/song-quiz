@@ -67,6 +67,9 @@ resource "aws_iam_role_policy" "ci_ecr_push" {
           "ecr:CompleteLayerUpload",
           "ecr:PutImage",
           "ecr:BatchGetImage",
+          # publish-ecr.yml이 push 전에 태그 존재 여부를 확인해 IMMUTABLE 리포지토리에
+          # 이미 있는 태그를 재push(실패)하지 않도록 건너뛰는 데 쓴다.
+          "ecr:DescribeImages",
         ]
         Resource = [
           "arn:aws:ecr:${var.aws_region}:${data.aws_caller_identity.current.account_id}:repository/${var.project_name}-api",

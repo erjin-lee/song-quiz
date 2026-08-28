@@ -40,12 +40,35 @@ jobs:
 
       - name: Set image tag
         id: image
-        run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+        run: echo "tag=sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      # ECR 리포지토리가 IMMUTABLE이라 이미 존재하는 태그를 다시 push하면
+      # ImageTagAlreadyExistsException으로 실패한다 - 같은 커밋으로 워크플로우를
+      # 재실행하거나(예: api/game 중 한쪽만 실패해서 전체를 다시 돌리는 경우) 이미
+      # 성공한 쪽까지 실패 처리되지 않도록, push 전에 태그 존재 여부를 먼저 확인해
+      # 이미 있으면 빌드/푸시를 건너뛴다.
+      - name: Check if image tag already exists
+        id: check
+        env:
+          REPOSITORY: deploy-terraform-${{ matrix.service }}
+          TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          if aws ecr describe-images \
+            --repository-name "$REPOSITORY" \
+            --image-ids imageTag="$TAG" \
+            >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Image $REPOSITORY:$TAG already exists - skipping build/push."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up Docker Buildx
+        if: steps.check.outputs.skip != 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push
+        if: steps.check.outputs.skip != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .

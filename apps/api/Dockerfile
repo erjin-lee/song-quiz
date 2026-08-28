@@ -7,11 +7,11 @@
 # 모노레포 전체를 COPY하는 이유: yarn workspaces focus가 대상 워크스페이스(api)뿐 아니라
 # 그 워크스페이스가 의존하는 다른 워크스페이스(logger, tracing)의 package.json도
 # 참조해야 의존성 그래프를 올바르게 계산한다 - 일부만 골라 복사하면 immutable install이
-# 깨진다. glibc 기반(node:20-slim)을 쓰는 이유: bcrypt(네이티브 addon)가 musl(alpine)용
+# 깨진다. glibc 기반(node:24-slim, 2026-08 기준 Latest LTS)을 쓰는 이유: bcrypt(네이티브 addon)가 musl(alpine)용
 # 프리빌드 바이너리를 제공하지 않아 alpine에서는 빌드 툴체인을 추가로 설치해야 한다 -
 # slim이 이미지도 크게 무겁지 않으면서 이 문제를 피해간다.
 
-FROM node:20-slim AS build
+FROM node:24-slim AS build
 WORKDIR /app
 
 COPY . .
@@ -24,7 +24,7 @@ RUN corepack enable \
   && yarn workspace tracing build \
   && yarn workspace api build
 
-FROM node:20-slim AS runtime
+FROM node:24-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
