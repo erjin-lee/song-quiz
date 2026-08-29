@@ -364,6 +364,16 @@ module "ecs" {
   game_environment_variables = local.game_environment_variables
   game_secret_arns           = local.game_secret_arns
 
+  # ECS Fargate 이관 5단계 - Auto Scaling
+  api_autoscaling_min_capacity   = var.api_autoscaling_min_capacity
+  api_autoscaling_max_capacity   = var.api_autoscaling_max_capacity
+  api_autoscaling_cpu_target     = var.api_autoscaling_cpu_target
+  api_autoscaling_memory_target  = var.api_autoscaling_memory_target
+  game_autoscaling_min_capacity  = var.game_autoscaling_min_capacity
+  game_autoscaling_max_capacity  = var.game_autoscaling_max_capacity
+  game_autoscaling_cpu_target    = var.game_autoscaling_cpu_target
+  game_autoscaling_memory_target = var.game_autoscaling_memory_target
+
   # aws_ecs_service.api/game은 api_target_group_arn/game_target_group_arn(위)을 통해
   # module.load_balancer의 aws_lb_target_group.app_ecs/game_ecs에는 이미 참조 기반
   # 의존성이 있지만, 그 타겟그룹을 실제로 "리스너(규칙)에 연결"하는 aws_lb_listener.https/

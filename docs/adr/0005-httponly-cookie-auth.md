@@ -30,7 +30,7 @@ ADR-0002는 로그인 JWT를 `localStorage`에 저장하고 모든 REST 요청�
 ## 결과 및 트레이드오프
 
 - `LoginResponseDto`(`POST /auth/signup`, `/auth/login` 응답)에서 `accessToken` 필드가 제거됐다 — API 응답 계약 변경이다. 이 시점 기준 유일한 소비자는 `apps/web`이라 영향은 한정적이다.
-- 로그인 세션이 web/api/game 간 실제로 공유되려면 배포 환경에 `COOKIE_DOMAIN`(예: `.noraemat.site`)이 설정돼 있어야 한다. 이 값이 실제 배포 파이프라인 어디서 주입되는지는 리포지토리 안에서 확인할 수 없었다(`CORS_ORIGIN`도 마찬가지) — 배포 담당자가 EC2/PM2 환경변수에 추가해야 한다.
+- 로그인 세션이 web/api/game 간 실제로 공유되려면 배포 환경에 `COOKIE_DOMAIN`(예: `.noraemat.site`)이 설정돼 있어야 한다. ECS Fargate 이관(`docs/infra/ecs-fargate-migration-plan.md`) 이후로는 이 값이 `infra/terraform/environments/prod/main.tf`의 `api_environment_variables`(`COOKIE_DOMAIN = ".${var.domain_name}"`, `CORS_ORIGIN = "https://${var.domain_name}"`)/`game_environment_variables`(`CORS_ORIGIN`)에서 Terraform으로 관리되고, ECS Task Definition의 평문 환경변수로 주입된다 — 더 이상 EC2/PM2 환경변수를 배포 담당자가 수동으로 맞출 필요가 없다.
 - `apps/admin`은 이번 전환 대상이 아니라서 여전히 ADR-0002의 트레이드오프(XSS 시 토큰 탈취 가능)를 그대로 안고 있다.
 
 ## 향후 재검토 조건

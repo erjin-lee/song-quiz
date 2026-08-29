@@ -1,6 +1,6 @@
 # 비용 절감을 위한 ECS Fargate 이관 계획
 
-- 상태: In Progress (1~4단계 Terraform/워크플로우 구성 완료, `terraform apply` 및 트래픽 컷오버는 사용자가 진행 예정 - 각 단계 "진행 상태" 참고)
+- 상태: In Progress (1~5단계 Terraform 구성 및 `terraform apply` 완료 - `api_traffic_target`/`game_traffic_target` 모두 `"ecs"`로 전환되어 실트래픽이 ECS Fargate로 서비스 중이고, Auto Scaling도 적용됨. NAT Gateway 제거 완료. `app_a` EC2는 완전 제거하지 않고 정지 상태로 유지하기로 결정(사용자 결정, 2026-08-29), Bastion도 그대로 유지하기로 결정. 남은 건 부하 기반 실동작 검증과 `deploy-game.yml` CI 경로 자체 검증 - 각 단계 "진행 상태" 참고)
 - 범위: `apps/api`, `apps/game`의 컴퓨트 계층을 EC2(`app_a`) 단일 인스턴스에서 ECR + ECS Fargate로 전환한다. RDS/ElastiCache/S3+CloudFront(web)/SES/DNS는 이번 이관 범위 밖이며 그대로 둔다(RDS/ElastiCache는 private subnet 유지).
 - 관련 코드/설정: `infra/terraform/modules/{network,security,compute,load_balancer,iam,logging,monitoring,database,cache}`, `.github/workflows/deploy-api.yml`, `.github/workflows/deploy-game.yml`, [`ARCHITECTURE.md`](../../ARCHITECTURE.md) Observability 섹션
 
@@ -373,6 +373,23 @@ private-app NAT route
 
 NAT 제거와 Game ECS 전환을 하나의 Terraform 변경으로 처리하지 않는다.
 
+- 진행 상태(2026-08-29): NAT Gateway/EIP/private-app NAT route를 별도 Terraform
+  변경으로 제거했다(`modules/network/main.tf`) - `terraform plan`으로 정확히 이
+  3개 리소스만 destroy되는 것을 확인한 뒤 `terraform apply` 완료, 적용 후 실제
+  AWS에서 NAT Gateway `deleted`/EIP 해제/private-app 라우트 테이블에 로컬 VPC
+  라우트만 남은 것과 API/Game ECS 서비스가 영향 없이 정상(`ACTIVE`,
+  `runningCount == desiredCount`)인 것을 확인했다.
+  - 위 조건 중 "`app_a` EC2 제거 완료"는 문자 그대로 충족하지 않았다 - `app_a`는
+    제거가 아니라 **정지**(`stop-instances`, Terraform 리소스는 그대로 존재)만
+    했다. 대신 코드(`private_app_subnet_a_id`를 참조하는 곳이 `modules/compute`의
+    `app_a` 하나뿐)와 실제 AWS(private-app 서브넷의 ENI가 `app_a` 하나뿐이고 정지
+    상태, VPC 연결된 Lambda 없음)로 "NAT를 실제로 쓰는 workload가 없다"는 조건의
+    본질(나머지 세 항목)은 확인했다 - 정지된 인스턴스는 아웃바운드 트래픽을 만들지
+    않으므로 제거와 동일한 효과라고 판단했다.
+  - 트레이드오프: `app_a`를 나중에 다시 `start-instances`로 켜면, 로컬 VPC 통신
+    (Redis 등)은 되지만 인터넷 아웃바운드는 NAT을 다시 만들기 전까지 안 된다.
+    `app_a` Terraform 리소스 자체의 완전 제거는 아직 별도 작업으로 남아 있다.
+
 ## Bastion 처리
 
 Bastion은 이번 ECS 이관과 동시에 제거하지 않는다.
@@ -567,7 +584,7 @@ Task 수 증가에 따라 RDS/Redis connection 수가 증가하므로 Task별 co
       고쳤다. metric도 EC2 app 타겟그룹의 `API.*`와 ECS app_ecs 타겟그룹의 `ECS.API.*`를
       나란히 조회하도록 확장했다(트래픽이 실제로 어느 타겟그룹에 있는지와 무관하게
       관찰 가능). 관련 테스트 3개 추가, 전체 93개 통과.
-    - 미완료(다음 작업, 사용자가 직접 진행): 실제 `terraform apply`(bootstrap + prod, SSM
+    - 완료(다음 작업, 사용자가 직접 진행): 실제 `terraform apply`(bootstrap + prod, SSM
       시크릿 값 입력 포함) 및 `CI_ECS_DEPLOY_ROLE_ARN` 리포지토리 변수 등록, `deploy-api.yml`
       워크플로우 실제 실행 검증(ECR push -> Task Definition 리비전 -> 서비스 갱신 -> stable),
       `aws-otel-collector` 사이드카가 실제로 X-Ray에 trace를 전달하는지 실제 trace로 검증,
@@ -606,8 +623,8 @@ Task 수 증가에 따라 RDS/Redis connection 수가 증가하므로 Task별 co
 - 진행 상태(2026-08-29): 사용자가 별도로 multi-instance 부하 테스트를 완료했고, Socket.IO
   transport는 WebSocket-only로 확인되어 **ALB sticky session이 불필요**하다고 결론냈다
   (4단계의 game_ecs 타겟그룹은 stickiness 없이 구성한다). 상세 결과는 이 저장소 밖에서
-  진행되어 여기에 로그/리포트로 남아 있지 않다 - 관련 ADR("Game multi-instance 검증
-  관련 ADR", 아래 "함께 갱신해야 할 문서" 참고)은 아직 작성되지 않았다.
+  진행되어 여기에 로그/리포트로 남아 있지 않다 - 결정과 근거, 이 전제가 깨지는 조건은
+  [ADR-0006](../adr/0006-game-multi-instance-no-sticky-session.md)에 기록했다.
 
 ### 4단계 — Game ECS 전환
 
@@ -657,12 +674,35 @@ Task 수 증가에 따라 RDS/Redis connection 수가 증가하므로 Task별 co
     - 결정 사항: `game_traffic_target` 기본값은 `"ec2"`로 유지한다 - 이 문서의 체크
       단계가 이 저장소 안에서 검증 가능한 형태(로그/리포트)로 남아 있지 않으므로, 실제
       트래픽 컷오버는 사용자가 별도로 `"ecs"`로 전환하는 시점까지 미룬다.
-    - 미완료(다음 작업, 사용자가 직접 진행): 실제 `terraform apply`(bootstrap + prod),
-      `CI_ECS_DEPLOY_GAME_ROLE_ARN` 리포지토리 변수 등록, `deploy-game.yml` 실제 실행
-      검증(ECR push -> Task Definition 리비전 -> 서비스 갱신 -> stable), `game_traffic_target
-      = "ecs"` 전환, 안정화 기간 관찰 후 `app_a` EC2 제거, NAT 사용 workload 없음 확인 후
-      NAT Gateway 제거, Bastion 필요성 재검토, "Game multi-instance 검증 관련 ADR" 작성
-      (아래 "함께 갱신해야 할 문서" 참고).
+    - 진행 상태(2026-08-29, 추가): `terraform apply`(bootstrap + prod)와
+      `CI_ECS_DEPLOY_GAME_ROLE_ARN` 리포지토리 변수 등록을 완료했다. PR #122를 병합하기
+      전에, 이 커밋의 이미지를 로컬에서 직접 build해 ECR에 push하고(`sha-6ad6735...`
+      태그) ECS 서비스를 강제 재배포해서 Task Definition/IAM(Task Execution Role의 ECR
+      pull, SSM `GetParameters`+KMS `Decrypt`)/`ecs_game` SG(Redis 연결)/`game_ecs`
+      타겟그룹(ALB 등록·헬스체크)이 실제로 동작하는지 검증했다 - Task `RUNNING`/`HEALTHY`,
+      `game_ecs` 타겟그룹 `healthy`, `/health`·`/ready` 200, 앱 부팅 로그(NestJS 라우트
+      매핑)까지 정상 확인했다. 이 검증은 `deploy-game.yml`의 OIDC 경로를 거치지 않고
+      사용자 본인 자격증명으로 수동 push한 것이라, ECS/IAM/네트워크 레이어는 검증됐지만
+      CI 워크플로우 자체(assume-role + 스크립트)는 아직 실제 실행으로 검증되지 않았다.
+      "Game multi-instance 검증 관련 ADR"은 [ADR-0006](../adr/0006-game-multi-instance-no-sticky-session.md)로
+      작성했다.
+    - 진행 상태(2026-08-29, 추가): 사용자가 `api_traffic_target`/`game_traffic_target`을
+      모두 `"ecs"`로 전환했다 - `api.*`/`game.*` 서브도메인 트래픽이 100% ECS Fargate로
+      서비스되는 것을 ALB 리스너/리스너 규칙의 forward weight(둘 다 EC2 쪽 0 / ECS 쪽
+      100)로 직접 확인했다.
+    - 미완료(다음 작업, 사용자가 직접 진행): 지금 서비스 중인 Game Task Definition
+      (`deploy-terraform-game:1`)의 이미지는 여전히 병합 전 검증 때 사용자가 로컬에서
+      직접 build/push한 것이다(`sha-6ad6735...`) - `deploy-game.yml`이 main에서 실제
+      push로 트리거되어 CI 경로(OIDC assume-role 포함)로 정상 완주하는지는 아직 별도로
+      확인되지 않았다.
+    - 결정 사항(2026-08-29): `app_a` EC2는 완전 제거하지 않고 **정지 상태로 유지**하기로
+      했다(사용자 결정) - `stop-instances`만 실행했고 Terraform 리소스(`aws_instance.app_a`,
+      EC2 타겟그룹/attachment, 관련 IAM Role 등)는 그대로 둔다. NAT Gateway/EIP/
+      private-app NAT route는 그럼에도 별도로 제거했다(위 "NAT Gateway 제거 조건" 절
+      참고) - private-app 서브넷의 ENI가 정지된 `app_a` 하나뿐이라 NAT를 실제로 쓰는
+      workload가 없다고 판단했기 때문이다. `app_a`를 다시 켜면 NAT 재생성 전까지 인터넷
+      아웃바운드는 안 된다는 트레이드오프를 사용자가 인지하고 동의했다. Bastion도 **그대로
+      유지**하기로 했다(사용자 결정) - 필요성 재검토는 보류.
 
 ### 5단계 — ECS Auto Scaling
 
@@ -684,6 +724,36 @@ Task 수 증가에 따라 RDS/Redis connection 수가 증가하므로 Task별 co
     - API/Game 모두 scale-out/in 과정에서 오류율이나 reconnect failure가 비정상적으로 증가하지 않는다.
     - Game Task 종료 시 기존 reconnect/fencing/lock 복구 로직이 정상 작동한다.
     - Auto Scaling으로 인해 RDS/Redis가 먼저 병목이 되는 현상이 없는지 확인한다.
+- 진행 상태(2026-08-29): 계획대로 "초기 v1" 범위(CPU/Memory Target Tracking, custom
+  metric 없음)로 Terraform을 구성했다.
+    - 완료: `modules/ecs/autoscaling.tf`(신규) - api/game 각각
+      `aws_appautoscaling_target` + CPU/Memory `aws_appautoscaling_policy`
+      (`TargetTrackingScaling`) 2개씩 총 6개 리소스. `min_capacity`/`max_capacity`/
+      `cpu_target`/`memory_target`을 `environments/prod`까지 변수로 노출했다(api_task_cpu
+      패턴과 동일). scale_in/scale_out cooldown은 AWS 기본값을 그대로 쓴다 - 실제 트래픽
+      패턴을 관찰하기 전에 임의로 좁히면 flapping을 만들 수 있다고 판단했다.
+    - `aws_ecs_service.api`/`aws_ecs_service.game`(`modules/ecs/main.tf`, `game.tf`)에
+      `lifecycle { ignore_changes = [desired_count] }`를 추가했다 - Application Auto
+      Scaling이 조정한 desired_count를 다음 `terraform apply`가 고정값으로 되돌리는
+      것을 막기 위함이다(apps/lambda의 CI 배포 vs `terraform apply` 충돌과 같은 종류의
+      문제, `apps/lambda/CLAUDE.md` 참고).
+    - `max_capacity`는 api/game 모두 3으로 보수적으로 시작한다 - api는 Task당 TypeORM
+      기본 connection pool(10)을 그대로 쓰므로 3 Task면 최대 30 connection, RDS
+      `db.t3.micro`의 `max_connections`(약 85)에 안전하게 여유가 있다. RDS pool
+      크기 자체는 이번 단계에서 바꾸지 않았다.
+    - `terraform fmt`/`validate` 통과. 실제 원격 state에 재연결해서 `terraform plan`도
+      실행해 확인했다 - **6 to add, 0 to change, 0 to destroy**(기존 리소스 교체/삭제
+      없음).
+    - `terraform apply` 완료(2026-08-29, 사용자 실행). 적용 직후 AWS를 직접 조회해
+      확인했다 - `aws_appautoscaling_target` 2개(api/game 각각 min=1/max=3),
+      `aws_appautoscaling_policy` 4개(api-cpu 70%, api-memory 75%, game-cpu 70%,
+      game-memory 75%) 모두 생성됐고, api/game ECS 서비스 둘 다 `ACTIVE` 상태로
+      `runningCount == desiredCount`를 유지해 적용 과정에서 기존 태스크에 영향이
+      없었다.
+    - 미완료(다음 작업, 사용자가 직접 진행): 실제 부하로 scale-out/in 동작 검증, scale-in
+      시 Game reconnect/fencing/lock 복구 검증, RDS/Redis 병목 여부 관찰. Game이
+      CPU/Memory만으로 충분한 scaling signal인지 관찰한 뒤 부족하면 후속 단계에서
+      custom metric(active connection/room 수)을 검토한다.
 
 
 
@@ -699,7 +769,7 @@ Task 수 증가에 따라 RDS/Redis connection 수가 증가하므로 Task별 co
     - 신규 `ecr`/`ecs` 모듈 추가.
     - `compute`/`security`/`load_balancer`의 EC2/ECS 병행 기간 설명.
     - ECS Task Execution Role/Task Role 역할 구분.
-- Game multi-instance 검증 관련 ADR
+- Game multi-instance 검증 관련 ADR - [ADR-0006](../adr/0006-game-multi-instance-no-sticky-session.md)로 작성 완료(2026-08-29).
     - Socket.IO transport와 sticky session 필요 조건.
     - Redis Adapter가 해결하는 문제와 session affinity가 해결하는 문제를 구분.
 - 이관 완료 후 [`docs/adr/`](../adr/README.md)에 "왜 EC2에서 ECS Fargate로 전환했는지" ADR을 새로 작성한다.
@@ -718,32 +788,52 @@ Task 수 증가에 따라 RDS/Redis connection 수가 증가하므로 Task별 co
     - public Fargate Task의 public IP는 Task 재생성/배포 시 변경될 수 있다.
     - 고정 egress IP가 필요한 외부 연동이 존재하면 public Fargate 구조만으로는 해결할 수 없으며 NAT Gateway EIP 또는 별도 egress 구조를 다시 검토해야 한다.
 
-- **CI/CD 파이프라인 재작성**
-    - 현재 `deploy-api.yml`/`deploy-game.yml`은 EC2 SSH + PM2 배포 방식이다.
-    - 1단계에서는 ECR build/push만 별도 workflow로 추가하고 Production 배포에는 연결하지 않는다.
-    - 각 서비스 ECS 전환 단계에서 ECR push → Task Definition revision → ECS Service deploy 흐름으로 변경한다.
+- **CI/CD 파이프라인 재작성** - 해결됨(2026-08-29)
+    - `deploy-api.yml`(3단계)/`deploy-game.yml`(4단계) 모두 EC2 SSH + PM2 배포에서
+      ECR push → Task Definition revision → ECS Service deploy 흐름으로 교체했다.
+    - 단, `deploy-game.yml`이 main에서 실제 push로 트리거되어 CI 경로(OIDC
+      assume-role 포함)로 정상 완주하는지는 아직 실행 확인이 안 됐다(4단계 "진행
+      상태" 참고) - 지금 서비스 중인 이미지는 병합 전 사용자가 로컬에서 직접
+      build/push한 것이다.
 
-- **RDS/Redis connection pool**
-    - ECS Task가 scale-out될수록 프로세스별 connection pool도 함께 증가한다.
-    - Auto Scaling 도입 전에 RDS `max_connections`, MySQL pool 크기, Redis connection 수를 검토한다.
+- **RDS/Redis connection pool** - 해결됨(2026-08-29, 5단계)
+    - `modules/ecs/autoscaling.tf`의 `api_autoscaling_max_capacity`(기본 3)를 RDS
+      `db.t3.micro`의 `max_connections`(약 85)와 Task당 TypeORM 기본 connection
+      pool(10)을 곱한 값이 안전하게 여유를 두도록 정했다(최대 30/85). Redis
+      connection 수는 이번 단계에서 별도로 조정하지 않았다 - 실제 부하 관찰 후
+      필요하면 재검토한다.
 
-- **Socket.IO multi-instance**
-    - Redis Adapter만으로 모든 multi-instance 문제가 해결되는 것은 아니다.
-    - transport 방식, sticky session 필요 여부, reconnect, lock/timer/fencing을 실제 부하 테스트로 검증한다.
+- **Socket.IO multi-instance** - 해결됨(2026-08-29)
+    - transport(WebSocket-only, `apps/web/src/api/socket.ts`)와 sticky session
+      미사용 결정, Redis Adapter가 푸는 문제와 sticky session이 푸는 문제의 구분을
+      [ADR-0006](../adr/0006-game-multi-instance-no-sticky-session.md)에 기록했다.
+      실제 부하 테스트는 사용자가 이 저장소 밖에서 별도로 진행했다(로그/리포트는
+      저장소에 없음).
 
-- **Task 종료/배포 중 연결 처리**
+- **Task 종료/배포 중 연결 처리** - 미해결
     - ECS rolling deployment/scale-in으로 Game Task가 종료될 때 Socket.IO connection이 끊긴다.
     - client reconnect와 room 복구가 정상적으로 동작하는지 검증한다.
     - 필요하면 ECS stop timeout / graceful shutdown 처리도 검토한다.
+    - 5단계 Auto Scaling을 실제 적용은 했지만(2026-08-29) 아직 real scale-in 이벤트로
+      이 시나리오를 관찰하지는 않았다.
 
-- **AIOps metric 의미 변경**
-    - API/Game이 ECS로 전환되면 기존 EC2 CPU/Memory metric은 해당 서비스 runtime 상태를 나타내지 않는다.
-    - 서비스가 ECS로 전환되는 시점에 IncidentPolicy 및 Dashboard의 runtime metric을 ECS 기준으로 교체한다.
+- **AIOps metric 의미 변경** - 부분 해결
+    - API는 3단계에서 `API_TARGET_5XX` IncidentPolicy와 Dashboard를 ECS
+      CPU/MemoryUtilization 기준으로 교체했다.
+    - Game은 4단계 범위에서 제외했다 - `incident-analyzer`의 `GAME_TARGET_5XX`
+      IncidentPolicy와 Dashboard는 여전히 EC2 CPU/Memory 지표를 참조한다
+      (`environments/prod/main.tf`의 `module.aiops`/`module.monitoring`에 전달하는
+      `ec2_instance_id`/`ec2_metric_namespace`가 그대로다). `app_a`가 정지된 지금은
+      이 지표가 사실상 계속 비어 있는 상태다 - Game Target5xx 발생 시
+      incident-analyzer가 Infrastructure 컨텍스트 없이(또는 결측으로) 분석하게 된다.
+      후속 작업으로 남아 있다.
 
-- **NAT 제거 가능 여부**
-    - ECS 전환 완료만으로 NAT 제거 조건이 충족된다고 가정하지 않는다.
-    - NAT 삭제 전에 실제 NAT를 사용하는 private workload가 남아 있는지 별도로 확인한다.
+- **NAT 제거 가능 여부** - 해결됨(2026-08-29)
+    - "NAT Gateway 제거 조건" 절 참고 - `app_a`가 정지(제거 아님) 상태에서, 코드/실제
+      AWS 조회로 NAT를 쓰는 workload가 없음을 확인한 뒤 NAT Gateway/EIP/route를
+      제거했다.
 
-- **Bastion 장기 유지 여부**
-    - ECS 전환 후 애플리케이션 서버 SSH 용도는 사라진다.
-    - RDS/Redis 터널링 용도만으로 Bastion을 계속 유지할지, SSM 등 다른 접근 방식으로 전환할지는 후속 작업으로 판단한다.
+- **Bastion 장기 유지 여부** - 결정됨(2026-08-29, 사용자 결정)
+    - 애플리케이션 서버 SSH 용도(구 EC2 배포)는 사라졌지만, RDS/Redis 터널링 등
+      운영 접근 용도로 **그대로 유지**하기로 했다. SSM 전환 등 대체 방식 검토는
+      보류.

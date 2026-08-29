@@ -29,7 +29,9 @@ mail_from_address       = "REPLACE_WITH_EXISTING_.ENV_VALUE"
 
 # publish-ecr.yml로 push한 이미지의 git commit SHA(전체 40자). 배포할 때마다 갱신한다.
 api_image_git_sha = "REPLACE_WITH_PUSHED_IMAGE_SHA"
+game_image_git_sha = "REPLACE_WITH_PUSHED_IMAGE_SHA"
 
 # ECS 서비스가 healthy한 것을 확인하기 전까지는 "ec2"로 둔다. 확인 후 "ecs"로 바꾸면
 # API 트래픽이 전환되고, 문제가 생기면 다시 "ec2"로 돌리면 즉시 롤백된다.
 api_traffic_target = "ec2"
+game_traffic_target = "ec2"

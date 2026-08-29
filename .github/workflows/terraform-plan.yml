@@ -117,6 +117,10 @@ jobs:
           TF_VAR_admin_user: "plan-placeholder"
           TF_VAR_mail_from_address: "plan-placeholder@example.com"
           TF_VAR_api_image_git_sha: "0000000000000000000000000000000000000000"
+          # ECS Fargate 이관 4단계 - game_image_git_sha도 api_image_git_sha와 동일한 이유로
+          # placeholder를 쓴다(실제 값이 아니어도 plan 결과에 영향 없음 - image tag 문자열이
+          # 다를 뿐, ECR에 그 이미지가 실제로 있는지는 plan이 검증하지 않는다).
+          TF_VAR_game_image_git_sha: "0000000000000000000000000000000000000000"
         # -refresh=false: apps/api SSM SecureString(secrets.tf)의 KMS 키는 ECS Task
         # Execution Role에게만 kms:Decrypt를 허용한다(finding: 시크릿 KMS 분리 참고) -
         # ci_terraform_plan(ReadOnlyAccess)은 의도적으로 그 권한이 없다. 기본 refresh

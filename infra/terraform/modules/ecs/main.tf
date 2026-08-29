@@ -176,6 +176,16 @@ resource "aws_ecs_service" "api" {
   deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
 
+  # ECS Fargate 이관 5단계(docs/infra/ecs-fargate-migration-plan.md, autoscaling.tf) -
+  # Application Auto Scaling이 desired_count를 직접 조정한다. 이 필드를 계속 var.api_desired_count로
+  # 관리하면 Auto Scaling이 늘려놓은 태스크 수를 다음 terraform apply가 그대로 되돌려버린다
+  # (apps/lambda의 CI 배포 vs terraform apply 충돌과 같은 종류의 문제 - apps/lambda/CLAUDE.md
+  # 참고). var.api_desired_count는 이제 aws_appautoscaling_target의 최초 생성 시 initial
+  # capacity로만 쓰인다.
+  lifecycle {
+    ignore_changes = [desired_count]
+  }
+
   tags = {
     Name    = "${var.project_name}-api"
     Service = "api"

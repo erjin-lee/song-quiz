@@ -72,7 +72,7 @@
 | Backend | `NestJS` `TypeScript` `Socket.IO` |
 | Frontend | `React` |
 | Data | `MySQL` `Redis` |
-| Infra | `AWS EC2` `RDS` `ElastiCache` `ALB` `CloudFront` `S3` |
+| Infra | `AWS ECS Fargate` `ECR` `RDS` `ElastiCache` `ALB` `CloudFront` `S3` |
 | IaC / CI | `Terraform` `GitHub Actions` |
 | Observability | `OpenTelemetry` `CloudWatch` `X-Ray` |
 | AI | `OpenAI API` |
@@ -164,7 +164,7 @@ Client
 
 Game Service가 API Service의 Entity나 Repository를 직접 참조하지 않도록 경계를 설정하고, 게임 시작 시 필요한 데이터를 API로부터 **Snapshot 형태로 전달**받도록 구성했습니다.
 
-이를 통해 서비스 간 책임을 명확하게 분리하면서도, 현재 트래픽 규모에서는 API와 Game 프로세스를 하나의 EC2에 운영해 인프라 비용은 최소화했습니다.
+이를 통해 서비스 간 책임을 명확하게 분리했습니다. 초기에는 트래픽 규모가 크지 않아 API와 Game 프로세스를 하나의 EC2에 함께 운영해 인프라 비용을 최소화했지만, 이후 두 서비스를 각각 독립적으로 스케일링/배포할 수 있도록 컴퓨트 계층까지 ECS Fargate로 전환했습니다(Part 1-4 참고).
 
 ### 2. Redis를 활용한 실시간 게임 상태 관리
 
@@ -205,34 +205,53 @@ infra/terraform/
    ├─ ses
    ├─ database
    ├─ cache
+   ├─ ecr
+   ├─ ecs
    ├─ monitoring
    ├─ notification
-   └─ aiops
+   ├─ aiops
+   ├─ finops
+   └─ cost-reporter
 ```
 
-VPC, EC2, ALB, RDS, ElastiCache, CloudFront, IAM, CloudWatch 등의 주요 AWS 리소스를 코드로 관리하고 있습니다.
+VPC, ECS Fargate, ECR, ALB, RDS, ElastiCache, CloudFront, IAM, CloudWatch 등의 주요 AWS 리소스를 코드로 관리하고 있습니다.
 
 Terraform State는 S3 Remote State로 관리하고 GitHub Actions에서 OIDC를 이용해 `terraform plan`을 수행하도록 구성했습니다.
 
 > 장기 Access Key를 CI에 저장하지 않고 GitHub OIDC와 최소 권한 IAM Role을 사용했습니다.
 
-### 4. API / Game 독립 배포 구조
+### 4. API / Game 독립 배포 구조, EC2 → ECS Fargate 전환
 
-API와 Game은 애플리케이션 레벨에서는 독립적인 서비스로 구성했습니다.
-
-```text
-ALB
-├─ API Target Group
-│    └─ API Process
-└─ Game Target Group
-     └─ Game Process
-```
-
-현재 프로젝트 규모에서는 비용 절감을 위해 동일 EC2에서 실행하지만 다음은 각각 독립적으로 관리됩니다.
+API와 Game은 애플리케이션 레벨에서는 처음부터 독립적인 서비스로 구성했습니다.
 
 `Process` · `Domain / Routing` · `Target Group` · `Health Check` · `Deployment` · `Logging`
 
-향후 트래픽 증가 시 서비스별 EC2/ECS 등으로 분리할 수 있도록 애플리케이션 경계를 먼저 분리했습니다.
+컴퓨트 계층은 초기에는 비용 절감을 위해 두 서비스를 동일 EC2에서 함께 운영했지만, 이후 서비스별로 독립적인 배포/스케일링 단위를 갖도록 ECS Fargate로 전환했습니다.
+
+기존 EC2 Target Group을 그대로 ECS용으로 바꾸지 않고, ECS 전용 Target Group을 새로 만들어 두 Target Group을 한동안 병행 운영했습니다.
+
+```text
+ALB
+├─ app TG(instance)      → EC2 API   (rollback 대비 병행 유지)
+├─ api-ecs TG(ip)        → ECS API
+├─ game TG(instance)     → EC2 Game  (rollback 대비 병행 유지)
+└─ game-ecs TG(ip)       → ECS Game
+```
+
+Listener(Rule)의 forward weight만 EC2 0% / ECS 100%로 바꾸면 트래픽 전환이 순간적인 in-place 업데이트가 되고, 문제가 생기면 weight를 되돌리는 것만으로 즉시 롤백할 수 있습니다. API → Game 순서로 단계적으로 전환했고, 지금은 두 서비스 모두 트래픽의 100%가 ECS Fargate로 서비스되고 있습니다.
+
+ECS Task는 NAT Gateway 없이 public subnet + public IP로 아웃바운드(ECR pull, CloudWatch Logs 등)를 확보하면서, inbound는 Security Group으로 ALB에서만 허용해 컨테이너 포트가 인터넷에 직접 노출되지 않도록 구성했습니다. 트래픽 전환이 끝난 뒤에는 NAT Gateway를 사용하는 workload가 더 이상 없음을 확인하고 NAT Gateway/EIP도 제거해 고정 네트워크 비용을 줄였습니다.
+
+각 서비스의 ECS Task Definition/Service에는 Application Auto Scaling(CPU/Memory Target Tracking)을 붙여, 부하에 따라 Task 수가 자동으로 조정되도록 했습니다.
+
+배포도 함께 바뀌었습니다.
+
+```text
+GitHub Actions → OIDC AssumeRole → Docker build → ECR push(commit SHA 태그)
+→ ECS Task Definition 리비전 등록 → ECS Service 갱신 → deployment stable 확인
+```
+
+Image tag는 `latest`가 아니라 Git commit SHA를 기본으로 사용해서, 어떤 Task Definition revision이 실제로 어느 커밋을 배포한 것인지 항상 추적할 수 있게 했습니다.
 
 ---
 
@@ -265,13 +284,13 @@ Game → API 내부 호출에서도 requestId를 전달하기 때문에 CloudWat
 #### Infrastructure Metrics
 
 ```text
-EC2                RDS                          Redis
+ECS(API/Game)      RDS                          Redis
 ├─ CPU             ├─ CPU                       ├─ Memory Usage
-├─ Memory          └─ Database Connections      ├─ Connections
-└─ Disk                                         └─ Evictions
+└─ Memory          └─ Database Connections      ├─ Connections
+                                                 └─ Evictions
 ```
 
-EC2 Memory/Disk는 CloudWatch Agent를 통해 Custom Metric으로 수집합니다.
+두 서비스 모두 ECS Fargate로 전환한 뒤에는 `AWS/ECS`의 Service CPU/MemoryUtilization을 자원 지표로 사용합니다(EC2 시절에는 CloudWatch Agent로 EC2 Memory/Disk까지 Custom Metric으로 수집했습니다).
 
 #### Application Metrics
 
@@ -288,7 +307,7 @@ EC2 Memory/Disk는 CloudWatch Agent를 통해 Custom Metric으로 수집합니�
 운영 상태를 한 화면에서 확인할 수 있도록 Production Dashboard를 Terraform으로 구성했습니다.
 
 ```text
-API / Game Traffic          EC2 CPU / Memory / Disk
+API / Game Traffic          ECS API/Game CPU / Memory
 API / Game Latency          RDS CPU / Connections
 API / Game 5xx              Redis Memory / Connections / Evictions
 
@@ -309,11 +328,13 @@ Game  →  HTTP / undici  →  API  →  mysql2
 
 Game → API 호출에는 W3C `traceparent`를 사용하여 Trace Context를 전파합니다.
 
-각 서비스에서 생성된 Trace는 다음 경로로 AWS에 전달됩니다.
+API는 다음 경로로 Trace를 AWS에 전달합니다.
 
 ```text
-API / Game  →  OTLP/HTTP  →  CloudWatch Agent  →  AWS X-Ray / CloudWatch Traces
+API  →  OTLP/HTTP(localhost)  →  aws-otel-collector 사이드카(같은 ECS Task)  →  AWS X-Ray / CloudWatch Traces
 ```
+
+EC2였을 때는 host-level CloudWatch Agent가 이 역할을 했지만, ECS Fargate는 host-level agent를 둘 수 없어 같은 Task 안에 Collector 컨테이너를 사이드카로 띄우는 방식으로 바꿨습니다. Game은 아직 이 사이드카를 두지 않아 Trace Export가 비활성 상태입니다 — Game ECS 전환은 최소 관측(Logs/Metric/Alarm)까지만 먼저 마쳤고, 트레이싱은 후속 작업으로 남겨뒀습니다.
 
 Structured Log에서도 현재 OpenTelemetry Span의 `traceId`를 기록하여
 
@@ -334,9 +355,9 @@ Metric  →  Trace  →  traceId  →  CloudWatch Log
 **대표 Alarm**
 
 ```text
-API / Game Unhealthy Host      EC2 High CPU
-API / Game Target 5xx          EC2 High Memory
-QuizSnapshotFailure            EC2 High Disk
+API / Game Unhealthy Host      ECS API/Game High CPU
+API / Game No Healthy Hosts    ECS API/Game High Memory
+API / Game Target 5xx          QuizSnapshotFailure
 ```
 
 Alarm 상태 변화는 다음 구조로 Slack에 전달합니다.
@@ -580,11 +601,13 @@ Infrastructure
 | API / 실시간 게임 결합 | API / Game 분리 | 서로 다른 상태/트래픽/책임 분리 |
 | 서비스 간 데이터 접근 | Internal HTTP Snapshot | Repository 직접 공유 방지 |
 | 실시간 상태 | Redis | 빠른 상태 공유 및 동시성 제어 |
-| 이벤트 시스템 | Kafka 미도입 | 현재 규모에서는 HTTP + Redis + SQS가 단순하고 충분 |
-| 서버 배치 | 동일 EC2 | 서비스 경계는 분리하되 비용 최소화 |
+| 서버 배치 | 동일 EC2 → ECS Fargate | 초기엔 비용 최소화, 이후 독립 스케일링/배포로 전환 |
+| 컨테이너 아웃바운드 | Public Subnet + Public IP | NAT Gateway 없이 ECR/CloudWatch Logs 접근, inbound는 SG로 ALB만 허용 |
+| 트래픽 컷오버 | ALB weighted forward | 기존/신규 Target Group 병행, weight 조정만으로 즉시 롤백 가능 |
+| Auto Scaling | ECS Target Tracking(CPU/Memory) | 단순한 v1로 시작, custom metric은 관찰 후 검토 |
 | Infrastructure | Terraform | 재현 가능한 AWS 구성 |
 | Trace | OpenTelemetry | Vendor-neutral instrumentation |
-| Trace Export | CloudWatch Agent → X-Ray | 기존 AWS 운영 도구 통합 |
+| Trace Export(API) | aws-otel-collector 사이드카 → X-Ray | ECS Fargate에는 host-level agent가 없어 같은 Task에 Collector를 둠 |
 | 알림 | EventBridge → Lambda → Slack | 향후 AIOps 확장 가능 |
 | AI 분석 | 별도 Incident Analyzer | 기본 장애 알림과 AI 실패 격리 |
 | AI 입력 | 정규화된 IncidentContext | 비용·노이즈·Hallucination 감소 |

@@ -12,7 +12,7 @@ CloudWatch Alarm 상태 변화/스케줄에 반응하는 운영 자동화 Lambda
 
 # 코드 배포 (CI 자동)
 
-`deploy-api.yml`/`deploy-game.yml`(EC2에 SSH로 git pull + PM2 reload)과 같은 패턴을 Lambda에도 적용한다 — `.github/workflows/deploy-alarm-notifier.yml`/`deploy-incident-analyzer.yml`/`deploy-cost-reporter.yml`이 `apps/lambda/<name>/**` 변경을 감지해 `main` merge 시 `aws lambda update-function-code`로 코드만 바로 배포한다. Terraform은 그 외 모든 것(환경변수, IAM, timeout 등)을 계속 관리하며, 세 `aws_lambda_function` 리소스의 `lifecycle.ignore_changes = [filename, source_code_hash]`가 CI 배포와 `terraform apply`가 서로 코드를 되돌리지 않도록 막는다.
+`deploy-api.yml`/`deploy-game.yml`("main merge 시 CI가 자동으로 코드를 배포한다"는 원칙 — ECS Fargate 이관 이후로는 EC2 SSH+PM2가 아니라 ECR push + ECS Task Definition 갱신)과 같은 패턴을 Lambda에도 적용한다 — `.github/workflows/deploy-alarm-notifier.yml`/`deploy-incident-analyzer.yml`/`deploy-cost-reporter.yml`이 `apps/lambda/<name>/**` 변경을 감지해 `main` merge 시 `aws lambda update-function-code`로 코드만 바로 배포한다. Terraform은 그 외 모든 것(환경변수, IAM, timeout 등)을 계속 관리하며, 세 `aws_lambda_function` 리소스의 `lifecycle.ignore_changes = [filename, source_code_hash]`가 CI 배포와 `terraform apply`가 서로 코드를 되돌리지 않도록 막는다.
 
 **이 분리 구조가 안전하려면 지킬 규칙 하나가 있다**: 코드 배포(CI, 자동/즉시)와 인프라 배포(`terraform apply`, 로컬/수동)의 타이밍이 서로 어긋날 수 있다는 전제를 깔고 코드를 짜야 한다. 즉, 새 환경변수나 새 IAM 권한을 요구하는 코드를 추가할 때는:
 

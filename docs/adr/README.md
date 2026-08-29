@@ -27,3 +27,4 @@
 | [0003](0003-manual-dto-type-mirroring.md) | apps/api DTO의 수동 타입 미러링 | Accepted (재검토 중 — 공유 타입 패키지 검토) |
 | [0004](0004-game-service-split.md) | Room을 별도 서비스(apps/game)로 분리 | Accepted |
 | [0005](0005-httponly-cookie-auth.md) | 로그인 JWT를 httpOnly 쿠키로 전환(web/api/game, admin 제외) | Accepted |
+| [0006](0006-game-multi-instance-no-sticky-session.md) | Game multi-instance 환경에서 ALB sticky session을 쓰지 않는다 | Accepted |
