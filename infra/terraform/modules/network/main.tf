@@ -125,48 +125,23 @@ resource "aws_route_table_association" "public_c" {
   route_table_id = aws_route_table.public.id
 }
 
-# 2024-02 AWS 정책 변경으로 모든 퍼블릭 IPv4(EIP 포함, 연결 여부 무관)에 시간당 요금이
-# 붙는다 - NAT Gateway와 마찬가지로 공용 아웃바운드 경로의 일부라 Service = "shared".
-resource "aws_eip" "nat" {
-  domain = "vpc"
-
-  tags = {
-    Name    = "${var.project_name}-nat"
-    Service = "shared"
-  }
-
-  depends_on = [aws_internet_gateway.main]
-}
-
-# public_a에 배치 - NAT 자신도 IGW를 거쳐 인터넷과 통신해야 한다.
-# NAT Gateway는 시간당 요금 + 데이터 처리 요금이 실제로 청구되는 리소스라(다른 네트워크
-# 리소스는 대부분 무료) Cost Explorer에서 api/game 어느 한쪽 것으로 나눌 수 없는 공용
-# 아웃바운드 경로라 Service = "shared"로 태그한다.
-resource "aws_nat_gateway" "main" {
-  allocation_id = aws_eip.nat.id
-  subnet_id     = aws_subnet.public_a.id
-
-  tags = {
-    Name    = "${var.project_name}-nat"
-    Service = "shared"
-  }
-
-  depends_on = [aws_internet_gateway.main]
-}
-
+# NAT Gateway/EIP는 ECS Fargate 이관 완료 후 제거했다(2026-08-29,
+# docs/infra/ecs-fargate-migration-plan.md "NAT Gateway 제거 조건" 참고) - private-app
+# 서브넷의 유일한 입주자였던 app_a EC2가 정지됐고(제거는 별도 진행), api/game 모두
+# ECS Fargate(public subnet + public IP, NAT 불필요)로 전환되어 private-app 서브넷에서
+# NAT로 나가는 아웃바운드 트래픽이 더 이상 없음을 코드(private_app_subnet_a_id를
+# 참조하는 곳이 compute 모듈의 app_a 하나뿐)와 실제 AWS(private-app 서브넷의 ENI가
+# app_a 하나뿐, VPC 연결된 Lambda 없음)로 확인한 뒤 제거했다.
+#
+# private_app 라우트 테이블/서브넷 자체는 남겨둔다 - app_a 인스턴스(정지 상태, Terraform
+# 리소스는 아직 존재)가 여전히 이 서브넷에 있고, 인스턴스를 다시 켜면 로컬 VPC 통신은
+# 그대로 되지만 인터넷 아웃바운드는 NAT을 다시 만들기 전까지 안 된다 - 의도된 트레이드오프다.
 resource "aws_route_table" "private_app" {
   vpc_id = aws_vpc.main.id
 
   tags = {
     Name = "${var.project_name}-private-app"
   }
-}
-
-# private_app에서 나가는 모든 트래픽을 NAT Gateway로 보낸다.
-resource "aws_route" "private_app_nat_access" {
-  route_table_id         = aws_route_table.private_app.id
-  destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id         = aws_nat_gateway.main.id
 }
 
 resource "aws_route_table_association" "private_app_a" {

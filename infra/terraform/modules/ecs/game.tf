@@ -95,6 +95,12 @@ resource "aws_ecs_service" "game" {
   deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
 
+  # main.tf의 aws_ecs_service.api와 동일한 이유(5단계, autoscaling.tf) - Application
+  # Auto Scaling이 조정한 desired_count를 terraform apply가 되돌리지 않게 한다.
+  lifecycle {
+    ignore_changes = [desired_count]
+  }
+
   tags = {
     Name    = "${var.project_name}-game"
     Service = "game"

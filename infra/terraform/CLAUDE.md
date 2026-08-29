@@ -174,7 +174,10 @@ Avoid unnecessary variables for values that are truly implementation details.
 │       └── cloudwatch-agent/  # app_a에 수동 설치한 CloudWatch Agent 설정의 source of truth
 │                               # (Terraform 리소스 아님 - EC2에 수동 복사/적용)
 └── modules/
-    ├── network/           # VPC, 서브넷, 라우팅
+    ├── network/           # VPC, 서브넷, 라우팅 - NAT Gateway/EIP/private-app NAT route는
+                             # ECS Fargate 이관 완료 후 제거했다(2026-08-29, ECS Fargate
+                             # 이관 계획 문서 "NAT Gateway 제거 조건" 참고). private-app
+                             # 서브넷/라우트 테이블 자체는 app_a(정지 상태) 때문에 남아있다.
     ├── security/          # public/app/db 보안 그룹 + ecs_api 보안 그룹(ECS Fargate
     │                       # 이관 2단계, 2026-08-28) + ecs_game 보안 그룹(4단계, 2026-08-29)
     ├── iam/                # app 인스턴스 역할/정책 + apps/api ECS Task Execution/Task
@@ -256,6 +259,18 @@ Avoid unnecessary variables for values that are truly implementation details.
                              # environments/bootstrap/ecs-deploy-game.tf(별도 OIDC Role -
                              # "Deploy Game" workflow 전용, ecs-deploy.tf의 api 전용 Role과는
                              # workflow 조건이 달라 재사용할 수 없다).
+                             #
+                             # autoscaling.tf는 5단계(Auto Scaling, 2026-08-29)에서 추가했다 -
+                             # api/game 각각 aws_appautoscaling_target + CPU/Memory
+                             # aws_appautoscaling_policy(TargetTrackingScaling) 2개씩. api/game
+                             # 두 aws_ecs_service 리소스(main.tf/game.tf)에는
+                             # lifecycle.ignore_changes = [desired_count]를 추가해서, Auto
+                             # Scaling이 조정한 태스크 수를 다음 terraform apply가 고정값으로
+                             # 되돌리지 않게 했다(apps/lambda의 CI 배포와 동일한 종류의 충돌
+                             # 방지 - apps/lambda/CLAUDE.md 참고). max_capacity는 api/game 모두
+                             # 3으로 시작한다 - api는 Task당 TypeORM 기본 connection pool(10)을
+                             # 그대로 쓰므로 RDS db.t3.micro의 max_connections(약 85)에 여유를
+                             # 두기 위함이다.
 ```
 
 새 환경(예: staging)이 필요해지면 `environments/<env>/`를 추가하고 같은 모듈들을

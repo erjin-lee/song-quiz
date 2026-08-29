@@ -73,11 +73,6 @@ output "cache_endpoint" {
   value       = module.cache.endpoint
 }
 
-output "nat_gateway_public_ip" {
-  description = "NAT Gateway의 퍼블릭 IP"
-  value       = module.network.nat_gateway_public_ip
-}
-
 output "api_domain" {
   description = "ALB에 연결된 API 도메인"
   value       = module.dns.api_domain

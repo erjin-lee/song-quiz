@@ -301,3 +301,53 @@ variable "game_desired_count" {
   type        = number
   default     = 1
 }
+
+# --- ECS Fargate 이관 5단계 (docs/infra/ecs-fargate-migration-plan.md) - Auto Scaling ---
+
+variable "api_autoscaling_min_capacity" {
+  description = "apps/api ECS 서비스 Auto Scaling 최소 태스크 수"
+  type        = number
+  default     = 1
+}
+
+variable "api_autoscaling_max_capacity" {
+  description = "apps/api ECS 서비스 Auto Scaling 최대 태스크 수 - RDS max_connections 여유를 보고 보수적으로 설정 (infra/terraform/modules/ecs/variables.tf 참고)"
+  type        = number
+  default     = 3
+}
+
+variable "api_autoscaling_cpu_target" {
+  description = "apps/api ECS 서비스 CPU Target Tracking 목표값(%)"
+  type        = number
+  default     = 70
+}
+
+variable "api_autoscaling_memory_target" {
+  description = "apps/api ECS 서비스 Memory Target Tracking 목표값(%)"
+  type        = number
+  default     = 75
+}
+
+variable "game_autoscaling_min_capacity" {
+  description = "apps/game ECS 서비스 Auto Scaling 최소 태스크 수"
+  type        = number
+  default     = 1
+}
+
+variable "game_autoscaling_max_capacity" {
+  description = "apps/game ECS 서비스 Auto Scaling 최대 태스크 수 - WebSocket connection 재분배 한계를 고려해 보수적으로 설정"
+  type        = number
+  default     = 3
+}
+
+variable "game_autoscaling_cpu_target" {
+  description = "apps/game ECS 서비스 CPU Target Tracking 목표값(%)"
+  type        = number
+  default     = 70
+}
+
+variable "game_autoscaling_memory_target" {
+  description = "apps/game ECS 서비스 Memory Target Tracking 목표값(%)"
+  type        = number
+  default     = 75
+}

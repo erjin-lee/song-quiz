@@ -181,3 +181,53 @@ variable "game_secret_arns" {
   description = "apps/game 컨테이너에 SSM Parameter Store에서 복호화해 주입할 환경변수 (name => Parameter ARN)"
   type        = map(string)
 }
+
+# --- ECS Fargate 이관 5단계 - Auto Scaling (autoscaling.tf) ---
+
+variable "api_autoscaling_min_capacity" {
+  description = "apps/api ECS 서비스 Auto Scaling 최소 태스크 수"
+  type        = number
+  default     = 1
+}
+
+variable "api_autoscaling_max_capacity" {
+  description = "apps/api ECS 서비스 Auto Scaling 최대 태스크 수 - Task당 TypeORM 기본 connection pool(10)을 곱한 값이 RDS max_connections(db.t3.micro 기준 약 85)에 근접하지 않도록 보수적으로 설정한다"
+  type        = number
+  default     = 3
+}
+
+variable "api_autoscaling_cpu_target" {
+  description = "apps/api ECS 서비스 CPU Target Tracking 목표값(%)"
+  type        = number
+  default     = 70
+}
+
+variable "api_autoscaling_memory_target" {
+  description = "apps/api ECS 서비스 Memory Target Tracking 목표값(%)"
+  type        = number
+  default     = 75
+}
+
+variable "game_autoscaling_min_capacity" {
+  description = "apps/game ECS 서비스 Auto Scaling 최소 태스크 수"
+  type        = number
+  default     = 1
+}
+
+variable "game_autoscaling_max_capacity" {
+  description = "apps/game ECS 서비스 Auto Scaling 최대 태스크 수 - WebSocket connection이 새 Task로 자동 재분배되지 않는다는 한계(계획 문서 참고)를 고려해 api와 동일하게 보수적으로 시작한다"
+  type        = number
+  default     = 3
+}
+
+variable "game_autoscaling_cpu_target" {
+  description = "apps/game ECS 서비스 CPU Target Tracking 목표값(%)"
+  type        = number
+  default     = 70
+}
+
+variable "game_autoscaling_memory_target" {
+  description = "apps/game ECS 서비스 Memory Target Tracking 목표값(%)"
+  type        = number
+  default     = 75
+}

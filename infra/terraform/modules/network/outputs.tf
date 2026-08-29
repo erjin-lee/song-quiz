@@ -37,8 +37,3 @@ output "internet_gateway_id" {
   description = "VPC에 연결된 Internet Gateway ID"
   value       = aws_internet_gateway.main.id
 }
-
-output "nat_gateway_public_ip" {
-  description = "NAT Gateway의 퍼블릭 IP"
-  value       = aws_eip.nat.public_ip
-}
