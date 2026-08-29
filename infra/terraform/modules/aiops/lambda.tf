@@ -67,6 +67,8 @@ resource "aws_lambda_function" "incident_analyzer" {
       EC2_INSTANCE_ID                  = var.ec2_instance_id
       EC2_METRIC_NAMESPACE             = var.ec2_metric_namespace
       CACHE_CLUSTER_ID                 = var.cache_cluster_id
+      ECS_CLUSTER_NAME                 = var.ecs_cluster_name
+      ECS_API_SERVICE_NAME             = var.ecs_api_service_name
       SLACK_WEBHOOK_PARAMETER_NAME     = var.slack_webhook_parameter_name
       OPENAI_API_KEY_PARAMETER_NAME    = var.openai_api_key_parameter_name
       OPENAI_MODEL                     = var.openai_model

@@ -527,6 +527,40 @@ Task 수 증가에 따라 RDS/Redis connection 수가 증가하므로 Task별 co
     - API 관련 Dashboard/Alarm/AIOps가 ECS API의 실제 운영 상태를 반영한다.
     - API 5xx 장애를 발생시켰을 때 ECS metric/log/trace/deployment context가 incident-analyzer에 정상 수집된다.
     - 최소 1~2주 정도 안정적으로 운영해서 다음 단계(Game multi-instance 검증)를 진행할 수 있다는 확신을 얻는다.
+- 진행 상태(2026-08-29):
+    - 완료: `modules/ecs`(api Task Definition에 `aws-otel-collector` 사이드카 추가 -
+      `essential=false`, `AOT_CONFIG_CONTENT` 환경변수로 OTLP receiver -> awsxray exporter
+      설정 주입, api 컨테이너는 `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318`로
+      전송), `modules/iam`(`ecs_api_task` Role에 EC2 `app_xray_write`와 동일한
+      `xray:PutTraceSegments`/`PutTelemetryRecords` 추가), `modules/monitoring`(Dashboard
+      "EC2 Resources" 위젯을 "API Resources (ECS)"/"Game Resources (EC2)"로 분리, EC2 Warning
+      알람 설명에 "API 이관 이후 Game 전용 지표" 문구 보강), `apps/lambda/incident-analyzer`
+      (`API_TARGET_5XX` IncidentPolicy의 `EC2.CPUUtilization`/`EC2.MemoryUsedPercent`를
+      `ECS.API.CPUUtilization`/`ECS.API.MemoryUtilization`로 교체, `ECS_CLUSTER_NAME`/
+      `ECS_API_SERVICE_NAME`을 이 IncidentType 전용 필수 환경변수로 추가), `modules/aiops`
+      (위 두 환경변수를 Lambda에 전달), `.github/workflows/deploy-api.yml`(SSH+PM2 배포를
+      ECR push -> Task Definition 새 리비전 등록 -> `ecs update-service` -> `ecs wait
+      services-stable`로 대체 - 이 waiter가 ALB `/ready` 타겟그룹 헬스체크까지 확인해주므로
+      기존 curl 기반 readiness 폴링을 대체할 수 있었다), `environments/bootstrap/ecs-deploy.tf`
+      (그 workflow 전용 `ci_ecs_deploy` OIDC Role - ECR push(api만) + `ecs:RegisterTaskDefinition`/
+      `UpdateService`/`DescribeServices`/`DescribeTaskDefinition` + 이 Task의 두 Role로만
+      좁힌 `iam:PassRole`). `terraform fmt`/`validate`, `yarn workspace incident-analyzer
+      build`/`test` 모두 통과.
+    - 결정 사항: ECS Task 개수 지표(RunningTaskCount/DesiredTaskCount)에 필요한 Container
+      Insights는 이번 단계에서 켜지 않기로 사용자와 확인했다 - `desired_count=1` 고정(오토
+      스케일링은 6단계)이라 이미 있는 `api_ecs_no_healthy_hosts` Critical 알람으로 "태스크
+      0개"는 충분히 잡히고, FinOps 비용 추적 모듈이 있을 만큼 비용에 민감한 프로젝트라 지금은
+      불필요한 비용으로 판단했다. 필요해지면 6단계(Auto Scaling)에서 다시 판단한다.
+    - 이미 충족: CloudWatch Logs Insights 쿼리(`collect-logs.ts`)는 원래도 log stream 이름이
+      아니라 log group + 최상위 JSON 필드(`event`/`level`/`errorCode` 등)만 사용해, ECS
+      `awslogs-stream-prefix` 형식 변경에 영향받지 않는다 - 별도 코드 변경 없이 확인만 했다.
+    - 미완료(다음 작업, 사용자가 직접 진행): 실제 `terraform apply`(bootstrap + prod, SSM
+      시크릿 값 입력 포함) 및 `CI_ECS_DEPLOY_ROLE_ARN` 리포지토리 변수 등록, `deploy-api.yml`
+      워크플로우 실제 실행 검증(ECR push -> Task Definition 리비전 -> 서비스 갱신 -> stable),
+      `aws-otel-collector` 사이드카가 실제로 X-Ray에 trace를 전달하는지 실제 trace로 검증,
+      가짜 Alarm(`aws cloudwatch set-alarm-state`)으로 incident-analyzer가 ECS metric/log/
+      trace/deployment context를 정상 수집하는지 라이브 검증, `api_traffic_target = "ecs"`
+      전환, 최소 1~2주 안정 운영 관찰.
 
 ### 4단계 — Game multi-instance 부하 테스트
 

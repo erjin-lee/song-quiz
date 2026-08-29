@@ -108,6 +108,19 @@ variable "cache_cluster_id" {
   type        = string
 }
 
+# API Target5xx 분석(3단계, ECS Fargate 이관)의 API 런타임 Metric 조회용 - API가 ECS로
+# 전환된 뒤에는 EC2 CPU/Memory 대신 이 값들로 AWS/ECS CPUUtilization/MemoryUtilization을
+# 조회한다(ecs 모듈 출력, monitoring 모듈이 이미 쓰는 것과 동일한 값).
+variable "ecs_cluster_name" {
+  description = "ECS 클러스터 이름(ecs 모듈 출력) - AWS/ECS Metric의 ClusterName dimension"
+  type        = string
+}
+
+variable "ecs_api_service_name" {
+  description = "apps/api ECS 서비스 이름(ecs 모듈 출력) - AWS/ECS Metric의 ServiceName dimension"
+  type        = string
+}
+
 variable "slack_webhook_parameter_name" {
   description = "Slack Incoming Webhook URL이 저장된 SSM Parameter 이름(SecureString). alarm-notifier(modules/notification)와 같은 채널을 재사용하므로 기본값을 그 모듈의 기본값과 동일하게 둔다(§25) - 별도 AIOps 전용 Webhook을 새로 만들지 않는다."
   type        = string

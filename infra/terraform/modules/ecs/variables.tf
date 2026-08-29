@@ -54,15 +54,33 @@ variable "app_port" {
 }
 
 variable "api_task_cpu" {
-  description = "apps/api 태스크의 Fargate CPU 유닛(1024 = 1 vCPU)"
+  description = "apps/api 태스크의 Fargate CPU 유닛(1024 = 1 vCPU) - 3단계에서 ADOT Collector 사이드카(otel_collector_cpu) 몫까지 포함하도록 256에서 512로 올렸다"
   type        = string
-  default     = "256"
+  default     = "512"
 }
 
 variable "api_task_memory" {
-  description = "apps/api 태스크의 Fargate 메모리(MiB)"
+  description = "apps/api 태스크의 Fargate 메모리(MiB) - 3단계에서 ADOT Collector 사이드카(otel_collector_memory) 몫까지 포함하도록 512에서 1024로 올렸다"
   type        = string
-  default     = "512"
+  default     = "1024"
+}
+
+variable "otel_collector_image" {
+  description = "X-Ray로 트레이스를 내보내는 ADOT(AWS Distro for OpenTelemetry) Collector 사이드카 이미지. 버전을 명시적으로 고정한다(latest 미사용) - 3단계(트레이싱)"
+  type        = string
+  default     = "public.ecr.aws/aws-observability/aws-otel-collector:v0.48.0"
+}
+
+variable "otel_collector_cpu" {
+  description = "ADOT Collector 사이드카에 예약할 CPU 유닛 - api_task_cpu 안에서 나눠 쓴다(3단계)"
+  type        = number
+  default     = 128
+}
+
+variable "otel_collector_memory" {
+  description = "ADOT Collector 사이드카에 예약할 메모리(MiB) - api_task_memory 안에서 나눠 쓴다(3단계)"
+  type        = number
+  default     = 256
 }
 
 variable "api_desired_count" {

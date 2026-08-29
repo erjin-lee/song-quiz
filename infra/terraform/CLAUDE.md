@@ -178,7 +178,8 @@ Avoid unnecessary variables for values that are truly implementation details.
     ├── security/          # public/app/db 보안 그룹 + ecs_api 보안 그룹(ECS Fargate
     │                       # 이관 2단계, 2026-08-28)
     ├── iam/                # app 인스턴스 역할/정책 + apps/api ECS Task Execution/Task
-    │                       # Role(2단계)
+    │                       # Role(2단계) + Task Role의 X-Ray 쓰기 권한(3단계, 2026-08-29 -
+    │                       # ecs 모듈의 aws-otel-collector 사이드카가 이 권한으로 X-Ray에 쓴다)
     ├── compute/           # bastion + app_a 인스턴스
     ├── load_balancer/     # ALB, 타겟그룹, 리스너 + app_ecs 타겟그룹(2단계, ALB
     │                       # default_action은 api_traffic_target 변수로 EC2/ECS 전환)
@@ -191,7 +192,14 @@ Avoid unnecessary variables for values that are truly implementation details.
     ├── logging/            # CloudWatch Log Group(api/game) + Game 실패 이벤트 Metric Filter
     ├── monitoring/         # CloudWatch Dashboard(SongQuiz-Prod) + Alarm 1차 세트(alarms.tf) -
                              # 다른 모듈의 output만 참조, 새 Custom Metric/Metric Filter는 만들지
-                             # 않고 기존 지표를 시각화/알람화만 한다
+                             # 않고 기존 지표를 시각화/알람화만 한다. 3단계(2026-08-29)에서
+                             # Dashboard의 "EC2 Resources" 위젯을 "API Resources (ECS)"/
+                             # "Game Resources (EC2)"로 분리했다 - API가 ECS로 전환된 뒤 EC2
+                             # CPU/Memory는 더 이상 API를 반영하지 않기 때문이다. ECS Task
+                             # 개수 지표(RunningTaskCount 등)는 Container Insights 비용
+                             # 때문에 아직 도입하지 않았다 - desired_count=1 고정(오토스케일링은
+                             # 6단계)이라 이미 있는 api_ecs_no_healthy_hosts 알람으로 충분하다고
+                             # 판단했다.
     ├── notification/       # CloudWatch Alarm(SongQuiz-Prod-*) 상태변화 -> EventBridge -> Lambda
     │                        # (apps/lambda/alarm-notifier) -> Slack Incoming Webhook. monitoring의
     │                        # 개별 Alarm 리소스를 직접 참조하지 않고 alarm 이름 prefix로만 연결된다
@@ -217,7 +225,16 @@ Avoid unnecessary variables for values that are truly implementation details.
                              # (DB_PASSWORD, JWT 시크릿 등)은 이 모듈이 만들지 않는다 -
                              # environments/prod/secrets.tf가 SSM Parameter Store(SecureString)로
                              # 만들고, 이 모듈과 iam 모듈 양쪽에 ARN을 나눠 전달한다(두 모듈이
-                             # 서로 참조하면 순환 참조가 생기기 때문 - secrets.tf 주석 참고)
+                             # 서로 참조하면 순환 참조가 생기기 때문 - secrets.tf 주석 참고).
+                             # 3단계(2026-08-29)에서 api Task Definition에 aws-otel-collector
+                             # 사이드카(essential=false)를 추가했다 - EC2의 CloudWatch Agent가
+                             # 하던 OTLP(localhost:4318) 수신 -> X-Ray export 역할을 같은 Task
+                             # 안에서 대신한다. 이 때문에 api_task_cpu/api_task_memory 기본값도
+                             # 256/512에서 512/1024로 올렸다(사이드카 몫 128 CPU/256MiB 포함).
+                             # CI 배포 자동화(ECR push -> Task Definition 새 리비전 ->
+                             # ecs update-service)는 .github/workflows/deploy-api.yml이 맡고,
+                             # 그 workflow가 assume하는 IAM Role은 (ecr 모듈의 ecr-push.tf와
+                             # 동일한 이유로) environments/bootstrap/ecs-deploy.tf에 별도로 있다.
 ```
 
 새 환경(예: staging)이 필요해지면 `environments/<env>/`를 추가하고 같은 모듈들을

@@ -52,6 +52,10 @@ const DB_INSTANCE_IDENTIFIER = process.env.DB_INSTANCE_IDENTIFIER;
 const EC2_INSTANCE_ID = process.env.EC2_INSTANCE_ID;
 const EC2_METRIC_NAMESPACE = process.env.EC2_METRIC_NAMESPACE;
 const CACHE_CLUSTER_ID = process.env.CACHE_CLUSTER_ID;
+// API_TARGET_5XX(3단계, ECS Fargate 이관)에서만 쓴다 - API_LOG_GROUP_NAME과 동일한 이유로
+// findMissingEnv가 이 IncidentType일 때만 필수로 취급한다.
+const ECS_CLUSTER_NAME = process.env.ECS_CLUSTER_NAME;
+const ECS_API_SERVICE_NAME = process.env.ECS_API_SERVICE_NAME;
 const SLACK_WEBHOOK_PARAMETER_NAME = process.env.SLACK_WEBHOOK_PARAMETER_NAME;
 const OPENAI_API_KEY_PARAMETER_NAME = process.env.OPENAI_API_KEY_PARAMETER_NAME;
 const OPENAI_MODEL = process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL;
@@ -150,6 +154,8 @@ export async function handler(
           ec2InstanceId: EC2_INSTANCE_ID as string,
           ec2MetricNamespace: EC2_METRIC_NAMESPACE as string,
           cacheClusterId: CACHE_CLUSTER_ID as string,
+          ecsClusterName: ECS_CLUSTER_NAME,
+          ecsApiServiceName: ECS_API_SERVICE_NAME,
         },
         incidentType,
       ),

@@ -115,8 +115,11 @@ config로 넘긴다(대상이 아닌 서비스는 parameter 이름 자리에 `un
 자체를 건너뛰게 한다). 세 IncidentType 모두 현재 `deploymentServices: ["api", "game"]`라
 동작상 차이는 없다.
 
-`API_TARGET_5XX`(v1-3)는 `INCIDENT_POLICIES.API_TARGET_5XX.metricNames`에서 아래 16개 metric만 고른다(새 metric
-spec 없이 `GAME_TARGET_5XX`가 이미 쓰는 spec을 그대로 재사용 - room 분산 락 3종 포함):
+`API_TARGET_5XX`(v1-3)는 `INCIDENT_POLICIES.API_TARGET_5XX.metricNames`에서 아래 16개
+metric만 고른다. 3단계(ECS Fargate 이관)에서 API가 ECS로 전환되면서
+`EC2.CPUUtilization`/`EC2.MemoryUsedPercent`(전환 이후로는 Game 프로세스만 반영) 대신
+`ECS.API.CPUUtilization`/`ECS.API.MemoryUtilization`을 새 spec으로 추가해 쓴다 - 나머지는
+`GAME_TARGET_5XX`가 이미 쓰는 spec을 그대로 재사용한다(room 분산 락 3종 포함):
 
 | Metric | Namespace | Dimension |
 |---|---|---|
@@ -131,8 +134,8 @@ spec 없이 `GAME_TARGET_5XX`가 이미 쓰는 spec을 그대로 재사용 - roo
 | Game.StaleFencingWriteRejected | `GAME_METRIC_NAMESPACE` | 없음 |
 | RDS.CPUUtilization | AWS/RDS | DBInstanceIdentifier |
 | RDS.DatabaseConnections | AWS/RDS | DBInstanceIdentifier |
-| EC2.CPUUtilization | AWS/EC2 | InstanceId |
-| EC2.MemoryUsedPercent | `EC2_METRIC_NAMESPACE`(CloudWatch Agent) | InstanceId |
+| ECS.API.CPUUtilization | AWS/ECS | ClusterName, ServiceName |
+| ECS.API.MemoryUtilization | AWS/ECS | ClusterName, ServiceName |
 | Redis.MemoryUsagePercentage | AWS/ElastiCache | CacheClusterId |
 | Redis.CurrConnections | AWS/ElastiCache | CacheClusterId |
 | Redis.Evictions | AWS/ElastiCache | CacheClusterId |
@@ -218,6 +221,8 @@ AWS SDK(`@aws-sdk/client-cloudwatch`, `-cloudwatch-logs`, `-xray`, `-ssm`)와 `o
 | `EC2_INSTANCE_ID` | 예 | - | app_a EC2 인스턴스 ID(`modules/compute` 출력) - `GAME_TARGET_5XX`의 EC2 CPU/Memory 조회용 |
 | `EC2_METRIC_NAMESPACE` | 예 | - | CloudWatch Agent EC2 Memory 지표 namespace(`modules/iam` 출력) |
 | `CACHE_CLUSTER_ID` | 예 | - | ElastiCache 클러스터 ID(`modules/cache` 출력) - `GAME_TARGET_5XX`의 Redis Memory/Connections/Evictions 조회용 |
+| `ECS_CLUSTER_NAME` | `API_TARGET_5XX`일 때만 | - | ECS 클러스터 이름(`modules/ecs` 출력, 3단계) - 없으면 `API_TARGET_5XX`만 config 실패로 skip되고, 다른 두 IncidentType은 영향받지 않는다(`API_LOG_GROUP_NAME`과 동일한 배포 순서 분리 규칙) |
+| `ECS_API_SERVICE_NAME` | `API_TARGET_5XX`일 때만 | - | apps/api ECS 서비스 이름(`modules/ecs` 출력, 3단계) - `ECS_CLUSTER_NAME`과 함께 `AWS/ECS` CPUUtilization/MemoryUtilization 조회에 쓴다 |
 | `SLACK_WEBHOOK_PARAMETER_NAME` | 예 | - | alarm-notifier와 동일한 Slack Webhook SSM Parameter 이름 |
 | `OPENAI_API_KEY_PARAMETER_NAME` | 예 | - | OpenAI API Key SSM SecureString Parameter 이름 |
 | `OPENAI_MODEL` | 아니오 | `gpt-5.6-luna` | OpenAI 모델 이름(비용을 고려해 apps/api의 `gpt-5.6-luna`보다 가벼운 모델을 기본값으로 둔다 - 실제 계정에서 사용 가능한 모델 이름으로 조정 필요) |

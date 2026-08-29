@@ -22,3 +22,8 @@ output "ci_ecr_push_role_arn" {
   description = ".github/workflows/publish-ecr.yml이 ECR에 이미지를 push할 때 assume할 IAM Role ARN - 리포지토리 변수(CI_ECR_PUSH_ROLE_ARN)에 이 값을 등록한다"
   value       = aws_iam_role.ci_ecr_push.arn
 }
+
+output "ci_ecs_deploy_role_arn" {
+  description = "deploy-api.yml(3단계)이 ECR push + ECS Task Definition 등록/Service 갱신을 할 때 assume할 IAM Role ARN - 리포지토리 변수(CI_ECS_DEPLOY_ROLE_ARN)에 이 값을 등록한다"
+  value       = aws_iam_role.ci_ecs_deploy.arn
+}

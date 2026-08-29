@@ -117,8 +117,11 @@ export const INCIDENT_POLICIES: Record<IncidentType, IncidentPolicy> = {
       "Game.StaleFencingWriteRejected",
       "RDS.CPUUtilization",
       "RDS.DatabaseConnections",
-      "EC2.CPUUtilization",
-      "EC2.MemoryUsedPercent",
+      // 3단계(ECS Fargate 이관) - API는 ECS로 전환됐으므로 더 이상 EC2.CPUUtilization/
+      // EC2.MemoryUsedPercent(Game 프로세스만 반영)를 API 원인 분석 근거로 쓰지 않는다.
+      // GAME_TARGET_5XX/QUIZ_SNAPSHOT_FAILURE는 Game이 아직 EC2에 있어 그대로 둔다.
+      "ECS.API.CPUUtilization",
+      "ECS.API.MemoryUtilization",
       "Redis.MemoryUsagePercentage",
       "Redis.CurrConnections",
       "Redis.Evictions",
@@ -126,9 +129,15 @@ export const INCIDENT_POLICIES: Record<IncidentType, IncidentPolicy> = {
     // apps/api Log Group에는 구조화 app 예외 로그와 access 로그(AccessLogMiddleware)가
     // 같은 PM2 stdout으로 섞여 쌓인다(collect-logs.ts의 API_QUERY 참고).
     logSource: "api",
-    // API_TARGET_5XX만 API_LOG_GROUP_NAME이 추가로 필요하다 - terraform apply 전에 CI가
-    // 코드를 먼저 배포해도 다른 두 IncidentType은 영향받지 않는다(apps/lambda/CLAUDE.md).
-    requiredEnv: [...COMMON_REQUIRED_ENV, "API_LOG_GROUP_NAME"],
+    // API_TARGET_5XX만 API_LOG_GROUP_NAME/ECS_CLUSTER_NAME/ECS_API_SERVICE_NAME이 추가로
+    // 필요하다 - terraform apply 전에 CI가 코드를 먼저 배포해도 다른 두 IncidentType은
+    // 영향받지 않는다(apps/lambda/CLAUDE.md).
+    requiredEnv: [
+      ...COMMON_REQUIRED_ENV,
+      "API_LOG_GROUP_NAME",
+      "ECS_CLUSTER_NAME",
+      "ECS_API_SERVICE_NAME",
+    ],
     collectsTraces: true,
     deploymentServices: ["api", "game"],
   },

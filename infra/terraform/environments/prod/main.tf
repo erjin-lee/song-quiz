@@ -210,6 +210,10 @@ module "aiops" {
   ec2_instance_id      = module.compute.app_a_id
   ec2_metric_namespace = module.iam.ec2_metric_namespace
   cache_cluster_id     = module.cache.cluster_id
+  # API Target5xx 분석(3단계)의 API 런타임 Metric 조회용 - monitoring 모듈에 이미 전달하는
+  # 것과 동일한 ecs 모듈 출력을 그대로 재사용한다.
+  ecs_cluster_name     = module.ecs.cluster_name
+  ecs_api_service_name = module.ecs.api_service_name
 }
 
 # 계정 청구(Billing) 단위 리소스(Budget/Cost Anomaly Detection) - EC2/RDS 등 다른 모듈의
@@ -276,6 +280,11 @@ locals {
     # 여기서 비워두면 AWS SDK 기본 provider chain이 ecs_api_task 역할(SES 발신 권한)을
     # 자동으로 쓴다.
     SES_REGION = var.aws_region
+    # 3단계(트레이싱) - 같은 Task 안의 aws-otel-collector 사이드카(modules/ecs)로 OTLP를
+    # 보낸다. awsvpc network mode라 localhost로 접근 가능. 이 값이 없으면
+    # packages/tracing이 production 환경에서 트레이싱을 아예 비활성화한다
+    # (packages/tracing/src/init-tracing.ts의 resolveTraceExporter 참고).
+    OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4318"
   }
 }
 

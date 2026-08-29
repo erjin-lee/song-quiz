@@ -1,5 +1,15 @@
 name: Deploy API
 
+# 3단계(ECS Fargate 이관, docs/infra/ecs-fargate-migration-plan.md) - 기존 SSH+PM2 배포를
+# ECR push -> Task Definition 새 리비전 등록 -> ECS Service 갱신 -> 배포 안정화 확인 ->
+# deployment metadata 기록 흐름으로 교체했다. 클러스터/서비스/리포지토리 이름
+# (deploy-terraform-*)은 infra/terraform 모듈이 project_name으로 만드는 이름과 반드시
+# 같아야 한다(publish-ecr.yml과 동일한 관례).
+#
+# api_traffic_target tfvar가 아직 "ec2"인 동안에도 이 workflow는 ECS Service 자체는
+# 계속 최신 상태로 갱신한다 - 실제 트래픽 전환은 이 workflow가 아니라 별도
+# terraform apply(api_traffic_target = "ecs")로 사용자가 직접 진행한다.
+
 on:
   push:
     branches: [main]
@@ -13,7 +23,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-was
+  group: deploy-api
   cancel-in-progress: false
 
 permissions:
@@ -21,195 +31,148 @@ permissions:
   pull-requests: read
   id-token: write
 
+env:
+  CLUSTER: deploy-terraform-cluster
+  SERVICE: deploy-terraform-api
+  FAMILY: deploy-terraform-api
+  REPOSITORY: deploy-terraform-api
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
-      - name: Set up SSH
-        run: |
-          mkdir -p ~/.ssh
-
-          echo "${{ secrets.BASTION_SSH_KEY }}" > ~/.ssh/bastion_key
-          echo "${{ secrets.WAS_SSH_KEY }}" > ~/.ssh/was_key
-
-          chmod 600 ~/.ssh/bastion_key ~/.ssh/was_key
-
-          cat >> ~/.ssh/config <<EOF
-          Host bastion
-            HostName ${{ secrets.BASTION_HOST }}
-            User ${{ secrets.BASTION_USER }}
-            IdentityFile ~/.ssh/bastion_key
-            StrictHostKeyChecking no
-            UserKnownHostsFile /dev/null
-
-          Host was
-            HostName ${{ secrets.WAS_HOST }}
-            User ${{ secrets.WAS_USER }}
-            IdentityFile ~/.ssh/was_key
-            ProxyJump bastion
-            StrictHostKeyChecking no
-            UserKnownHostsFile /dev/null
-          EOF
-
-          chmod 600 ~/.ssh/config
-
-      - name: Deploy API and verify readiness
-        run: |
-          ssh was bash -s -- \
-            "${{ secrets.WAS_APP_DIR }}" \
-            "${{ vars.API_LOCAL_READY_URL }}" <<'REMOTE'
-          set -euo pipefail
-
-          APP_DIR="$1"
-          HEALTH_URL="$2"
-
-          export NVM_DIR="$HOME/.nvm"
-          [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-
-          cd "$APP_DIR"
-
-          PREVIOUS_SHA="$(git rev-parse HEAD)"
-
-          echo "Previous commit: $PREVIOUS_SHA"
-
-          # 배포 서버에 예상하지 못한 변경이 있다면 배포하지 않는다.
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "WAS working tree is not clean."
-            git status --short
-            exit 1
-          fi
-
-          build_api() {
-            cd "$APP_DIR"
-
-            corepack enable
-
-            YARN_ENABLE_IMMUTABLE_INSTALLS=true yarn workspaces focus api
-
-            yarn workspace logger build
-            yarn workspace tracing build
-            yarn workspace api build
-          }
-
-          reload_api() {
-            local commit_sha="$1"
-
-            cd "$APP_DIR/apps/api"
-
-            COMMIT_SHA="$commit_sha" \
-            pm2 startOrReload ecosystem.config.js --update-env
-          }
-
-          check_readiness() {
-            local expected_sha="$1"
-
-            # 최대 약 60초 동안 readiness 확인
-            for attempt in $(seq 1 12); do
-              echo "Readiness check $attempt/12..."
-
-              if response="$(curl -fsS --max-time 3 "$HEALTH_URL" 2>/dev/null)"; then
-                if parsed="$(
-                  printf '%s' "$response" |
-                  node -e '
-                    let body = "";
-
-                    process.stdin.on("data", chunk => body += chunk);
-
-                    process.stdin.on("end", () => {
-                      try {
-                        const data = JSON.parse(body);
-
-                        process.stdout.write(
-                          `${data.status ?? ""}\t${data.service ?? ""}\t${data.commitSha ?? ""}`
-                        );
-                      } catch {
-                        process.exit(1);
-                      }
-                    });
-                  '
-                )"; then
-                  IFS=$'\t' read -r status service health_sha <<< "$parsed"
-
-                  echo "status=$status service=$service commitSha=$health_sha"
-
-                  # health endpoint가 short SHA를 반환해도 검증할 수 있도록 prefix 비교
-                  if \
-                    [ "$status" = "ok" ] && \
-                    [ "$service" = "api" ] && \
-                    [ -n "$health_sha" ] && \
-                    [[ "$expected_sha" == "$health_sha"* ]]; then
-
-                    echo "API readiness check passed."
-                    return 0
-                  fi
-                fi
-              fi
-
-              sleep 5
-            done
-
-            return 1
-          }
-
-          echo "Pull latest main..."
-
-          git fetch origin main
-          git checkout main
-          git pull --ff-only origin main
-
-          DEPLOYED_SHA="$(git rev-parse HEAD)"
-
-          echo "Deploying commit: $DEPLOYED_SHA"
-
-          build_api
-          reload_api "$DEPLOYED_SHA"
-
-          if check_readiness "$DEPLOYED_SHA"; then
-            echo "API deployment succeeded."
-            exit 0
-          fi
-
-          #
-          # Readiness 실패 → 이전 production commit으로 rollback
-          #
-          echo "API readiness check failed."
-          echo "Rolling back to $PREVIOUS_SHA..."
-
-          cd "$APP_DIR"
-
-          git reset --hard "$PREVIOUS_SHA"
-
-          build_api
-          reload_api "$PREVIOUS_SHA"
-
-          if check_readiness "$PREVIOUS_SHA"; then
-            echo "Rollback succeeded."
-          else
-            echo "CRITICAL: rollback readiness check also failed."
-            exit 2
-          fi
-
-          # rollback은 성공했어도 이번 배포 자체는 실패 처리
-          exit 1
-          REMOTE
-
-      # 위 readiness까지 성공한 경우에만 이후 단계 실행
-      - name: Get deployed commit SHA from WAS
-        id: deployed_sha
-        run: |
-          DEPLOYED_SHA="$(
-            ssh was 'cd "${{ secrets.WAS_APP_DIR }}" && git rev-parse HEAD'
-          )"
-
-          echo "sha=${DEPLOYED_SHA}" >> "$GITHUB_OUTPUT"
-
       - name: Checkout
         uses: actions/checkout@v4
 
-      # readiness까지 검증된 production commit만 metadata로 기록한다.
       - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.CI_ECS_DEPLOY_ROLE_ARN }}
+          aws-region: ap-northeast-2
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tag
+        id: image
+        run: echo "tag=sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      # ECR 리포지토리가 IMMUTABLE이라(publish-ecr.yml과 동일한 이유) 이미 push된 태그를
+      # 다시 push하면 실패한다 - 이 workflow를 같은 커밋으로 재실행하는 경우(예: 앞선
+      # 시도가 ECS 단계에서만 실패한 경우) 이미지는 다시 빌드/푸시하지 않고 건너뛴다.
+      - name: Check if image tag already exists
+        id: check
+        env:
+          TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          set +e
+          error_output="$(aws ecr describe-images \
+            --repository-name "$REPOSITORY" \
+            --image-ids imageTag="$TAG" 2>&1 >/dev/null)"
+          exit_code=$?
+          set -e
+
+          if [ "$exit_code" -eq 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Image $REPOSITORY:$TAG already exists - skipping build/push."
+          elif printf '%s' "$error_output" | grep -q "ImageNotFoundException"; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$error_output" >&2
+            echo "::error::aws ecr describe-images failed for $REPOSITORY:$TAG (not ImageNotFoundException) - stopping instead of assuming the image doesn't exist" >&2
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.skip != 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        if: steps.check.outputs.skip != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.REPOSITORY }}:${{ steps.image.outputs.tag }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      # 현재 Task Definition을 가져와 api 컨테이너의 image만 새 태그로 교체한 새 리비전을
+      # 등록한다(aws-otel-collector 사이드카 컨테이너 정의는 건드리지 않는다) - describe로
+      # 받은 응답에는 register-task-definition이 받지 않는 필드(taskDefinitionArn/revision/
+      # status 등)가 섞여 있어 jq로 필요한 필드만 추린다. 롤백을 위해 현재(교체 전)
+      # Task Definition ARN도 함께 기록해둔다.
+      - name: Register new Task Definition revision
+        id: register-task-def
+        env:
+          IMAGE: ${{ steps.login-ecr.outputs.registry }}/${{ env.REPOSITORY }}:${{ steps.image.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          CURRENT_TASK_DEF_ARN="$(aws ecs describe-services \
+            --cluster "$CLUSTER" --services "$SERVICE" \
+            --query 'services[0].taskDefinition' --output text)"
+          echo "current_task_def_arn=$CURRENT_TASK_DEF_ARN" >> "$GITHUB_OUTPUT"
+
+          aws ecs describe-task-definition \
+            --task-definition "$FAMILY" --query 'taskDefinition' > task-def.json
+
+          jq --arg IMAGE "$IMAGE" '
+            .containerDefinitions = (
+              .containerDefinitions
+              | map(if .name == "api" then .image = $IMAGE else . end)
+            )
+            | {family, taskRoleArn, executionRoleArn, networkMode, containerDefinitions, requiresCompatibilities, cpu, memory}
+          ' task-def.json > new-task-def.json
+
+          NEW_TASK_DEF_ARN="$(aws ecs register-task-definition \
+            --cli-input-json file://new-task-def.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)"
+          echo "new_task_def_arn=$NEW_TASK_DEF_ARN" >> "$GITHUB_OUTPUT"
+
+      - name: Update ECS service
+        env:
+          TASK_DEF_ARN: ${{ steps.register-task-def.outputs.new_task_def_arn }}
+        run: |
+          aws ecs update-service \
+            --cluster "$CLUSTER" --service "$SERVICE" \
+            --task-definition "$TASK_DEF_ARN" >/dev/null
+
+      # ECS deployment가 "stable"이 되려면 새 태스크가 ALB 타겟그룹 헬스체크(/ready - DB/Redis
+      # 연결까지 확인, modules/load_balancer의 app_ecs 타겟그룹 참고)를 통과해야 한다 -
+      # 기존 SSH 배포의 curl 기반 readiness 폴링을 이 waiter 하나로 대체할 수 있는 이유다.
+      # deployment_minimum_healthy_percent=100(modules/ecs)이라 새 태스크가 헬스체크를
+      # 통과하기 전까지는 기존 태스크가 계속 트래픽을 받는다.
+      - name: Wait for ECS deployment to stabilize
+        run: |
+          aws ecs wait services-stable --cluster "$CLUSTER" --service "$SERVICE"
+
+      # 위 어느 단계든 실패하면(주로 deployment stabilize 타임아웃) 교체 전 Task Definition
+      # ARN으로 되돌린다 - 이관 문서 방침대로 장기 rollback은 이전 Task Definition/image
+      # revision으로 수행한다. register-task-def가 아직 실행되지 않은 실패(ECR push 실패 등)는
+      # current_task_def_arn이 비어 있어 이 스텝 자체를 건너뛴다.
+      - name: Roll back to previous Task Definition on failure
+        if: failure() && steps.register-task-def.outputs.current_task_def_arn != ''
+        env:
+          PREVIOUS_TASK_DEF_ARN: ${{ steps.register-task-def.outputs.current_task_def_arn }}
+        run: |
+          set -euo pipefail
+          echo "::error::ECS deployment failed - rolling back $SERVICE to $PREVIOUS_TASK_DEF_ARN"
+          aws ecs update-service \
+            --cluster "$CLUSTER" --service "$SERVICE" \
+            --task-definition "$PREVIOUS_TASK_DEF_ARN" >/dev/null
+          aws ecs wait services-stable --cluster "$CLUSTER" --service "$SERVICE"
+          # 롤백 자체가 성공해도 이번 배포는 실패로 처리한다.
+          exit 1
+
+      # readiness까지 검증된 revision만 metadata로 기록한다 - deploy-game.yml과 동일한
+      # 스크립트(.github/scripts/write-deployment-metadata.sh)를 그대로 재사용한다.
+      - name: Configure AWS credentials for deployment metadata
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.CI_DEPLOY_METADATA_ROLE_ARN }}
@@ -222,4 +185,4 @@ jobs:
           .github/scripts/write-deployment-metadata.sh \
             api \
             /song-quiz/prod/deployment/api \
-            "${{ steps.deployed_sha.outputs.sha }}"
+            "${{ github.sha }}"
