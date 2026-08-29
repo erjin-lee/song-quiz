@@ -1,7 +1,8 @@
 # incident-analyzer
 
 `SongQuiz-Prod-High-Game-QuizSnapshotFailure`/`SongQuiz-Prod-High-Game-Target5xx`/
-`SongQuiz-Prod-High-API-Target5xx`/`SongQuiz-Prod-High-API-ECS-Target5xx` 네 Alarm의
+`SongQuiz-Prod-High-Game-ECS-Target5xx`/`SongQuiz-Prod-High-API-Target5xx`/
+`SongQuiz-Prod-High-API-ECS-Target5xx` 다섯 Alarm의
 `ALARM` 상태 변화를 EventBridge로 받아 최근
 15분의 CloudWatch Metrics/Logs Insights/X-Ray Trace를 모아 `IncidentContext`로 정규화하고,
 OpenAI로 장애 원인 후보를 분석해 Slack으로 전달하는 Lambda다. Terraform 정의는
@@ -37,7 +38,8 @@ IncidentType이 여러 Alarm에 매핑될 수도 있다 - `additionalAlarms`는 
 | Alarm | IncidentType | 비고 |
 |---|---|---|
 | `SongQuiz-Prod-High-Game-QuizSnapshotFailure` | `QUIZ_SNAPSHOT_FAILURE` | 최초 구현(v1) - Metric 10개(아래 참고) |
-| `SongQuiz-Prod-High-Game-Target5xx` | `GAME_TARGET_5XX` | v1-2 추가 - Metric 19개(아래 참고) |
+| `SongQuiz-Prod-High-Game-Target5xx` | `GAME_TARGET_5XX` | v1-2 추가 - EC2 game 타겟그룹의 Target5xx. Metric 22개(아래 참고) |
+| `SongQuiz-Prod-High-Game-ECS-Target5xx` | `GAME_TARGET_5XX` | 4단계 AIOps 보정 추가 - ECS game_ecs 타겟그룹의 Target5xx. `IncidentPolicy.additionalAlarms`로 위 Alarm과 같은 IncidentType으로 취급된다 - `game_traffic_target`이 "ec2"/"ecs" 어느 쪽이든, 또는 전환 도중이든 실제로 트래픽을 받는 타겟그룹의 Alarm이 분석을 트리거한다 |
 | `SongQuiz-Prod-High-API-Target5xx` | `API_TARGET_5XX` | v1-3 추가 - EC2 app 타겟그룹의 Target5xx. Metric 19개, Log Group만 apps/api로 전환(아래 참고) |
 | `SongQuiz-Prod-High-API-ECS-Target5xx` | `API_TARGET_5XX` | 3단계(ECS Fargate 이관) 추가 - ECS app_ecs 타겟그룹의 Target5xx. `IncidentPolicy.additionalAlarms`로 위 Alarm과 같은 IncidentType으로 취급된다 - `api_traffic_target`이 "ec2"/"ecs" 어느 쪽이든, 또는 전환 도중이든 실제로 트래픽을 받는 타겟그룹의 Alarm이 분석을 트리거한다 |
 
@@ -84,14 +86,24 @@ Structured Output schema/Slack 메시지 포맷(`src/openai/schema.ts`,
 | RDS.CPUUtilization | AWS/RDS | DBInstanceIdentifier |
 | RDS.DatabaseConnections | AWS/RDS | DBInstanceIdentifier |
 
-`GAME_TARGET_5XX`가 조회하는 19개 Metric(모두 `infra/terraform/modules/monitoring/dashboard.tf`가
-이미 쓰는 것과 동일한 namespace/dimension을 재사용한다 - 새 Custom Metric은 만들지 않는다):
+`GAME_TARGET_5XX`가 조회하는 22개 Metric(모두 `infra/terraform/modules/monitoring/dashboard.tf`가
+이미 쓰는 것과 동일한 namespace/dimension을 재사용한다 - 새 Custom Metric은 만들지 않는다).
+4단계 AIOps 보정(ECS Fargate 이관)에서 Game이 ECS로 전환되면서 두 가지가 바뀌었다 -
+`EC2.CPUUtilization`/`EC2.MemoryUsedPercent`(app_a가 정지된 뒤로는 값이 사실상 비어
+있었다) 대신 `ECS.Game.CPUUtilization`/`ECS.Game.MemoryUtilization`을 쓰고, EC2 game
+타겟그룹의 `Game.*`(5xx/Latency/RequestCount)와 별개로 ECS game_ecs 타겟그룹의
+`ECS.Game.*`도 함께 조회한다(`API_TARGET_5XX`가 3단계에서 API에 적용한 것과 동일한
+패턴) - `game_traffic_target` 값(또는 weighted 전환 도중)에 따라 어느 타겟그룹이 실제
+트래픽을 받는지 달라지므로, 둘 중 하나만 보면 트래픽이 없는 쪽만 관찰하게 될 수 있다:
 
 | Metric | Namespace | Dimension |
 |---|---|---|
-| Game.HTTPCode_Target_5XX_Count | AWS/ApplicationELB | LoadBalancer, TargetGroup(game) |
-| Game.TargetResponseTime | AWS/ApplicationELB | LoadBalancer, TargetGroup(game) |
-| Game.RequestCount | AWS/ApplicationELB | LoadBalancer, TargetGroup(game) |
+| Game.HTTPCode_Target_5XX_Count | AWS/ApplicationELB | LoadBalancer, TargetGroup(game, EC2) |
+| Game.TargetResponseTime | AWS/ApplicationELB | LoadBalancer, TargetGroup(game, EC2) |
+| Game.RequestCount | AWS/ApplicationELB | LoadBalancer, TargetGroup(game, EC2) |
+| ECS.Game.HTTPCode_Target_5XX_Count | AWS/ApplicationELB | LoadBalancer, TargetGroup(game_ecs) |
+| ECS.Game.TargetResponseTime | AWS/ApplicationELB | LoadBalancer, TargetGroup(game_ecs) |
+| ECS.Game.RequestCount | AWS/ApplicationELB | LoadBalancer, TargetGroup(game_ecs) |
 | API.HTTPCode_Target_5XX_Count | AWS/ApplicationELB | LoadBalancer, TargetGroup(api) |
 | API.TargetResponseTime | AWS/ApplicationELB | LoadBalancer, TargetGroup(api) |
 | API.RequestCount | AWS/ApplicationELB | LoadBalancer, TargetGroup(api) |
@@ -101,8 +113,8 @@ Structured Output schema/Slack 메시지 포맷(`src/openai/schema.ts`,
 | Game.RedisLockRenewFailure | `GAME_METRIC_NAMESPACE` | 없음 |
 | Game.RoomLockLeaseLost | `GAME_METRIC_NAMESPACE` | 없음 |
 | Game.StaleFencingWriteRejected | `GAME_METRIC_NAMESPACE` | 없음 |
-| EC2.CPUUtilization | AWS/EC2 | InstanceId |
-| EC2.MemoryUsedPercent | `EC2_METRIC_NAMESPACE`(CloudWatch Agent) | InstanceId |
+| ECS.Game.CPUUtilization | AWS/ECS | ClusterName, ServiceName |
+| ECS.Game.MemoryUtilization | AWS/ECS | ClusterName, ServiceName |
 | Redis.MemoryUsagePercentage | AWS/ElastiCache | CacheClusterId |
 | Redis.CurrConnections | AWS/ElastiCache | CacheClusterId |
 | Redis.Evictions | AWS/ElastiCache | CacheClusterId |
@@ -219,7 +231,8 @@ AWS SDK(`@aws-sdk/client-cloudwatch`, `-cloudwatch-logs`, `-xray`, `-ssm`)와 `o
 | 이름 | 필수 | 기본값 | 설명 |
 |---|---|---|---|
 | `QUIZ_SNAPSHOT_FAILURE_ALARM_NAME` | 아니오 | `SongQuiz-Prod-High-Game-QuizSnapshotFailure` | `QUIZ_SNAPSHOT_FAILURE` 분석 대상 Alarm 이름(방어적 재검증용) |
-| `GAME_TARGET_5XX_ALARM_NAME` | 아니오 | `SongQuiz-Prod-High-Game-Target5xx` | `GAME_TARGET_5XX` 분석 대상 Alarm 이름(방어적 재검증용) |
+| `GAME_TARGET_5XX_ALARM_NAME` | 아니오 | `SongQuiz-Prod-High-Game-Target5xx` | `GAME_TARGET_5XX` 분석 대상 Alarm 이름(EC2 game 타겟그룹, 방어적 재검증용) |
+| `GAME_ECS_TARGET_5XX_ALARM_NAME` | 아니오 | `SongQuiz-Prod-High-Game-ECS-Target5xx` | `GAME_TARGET_5XX` 분석 대상 Alarm 이름(ECS game_ecs 타겟그룹, 4단계 AIOps 보정) - `additionalAlarms`로 위 Alarm과 같은 IncidentType으로 취급된다 |
 | `API_TARGET_5XX_ALARM_NAME` | 아니오 | `SongQuiz-Prod-High-API-Target5xx` | `API_TARGET_5XX` 분석 대상 Alarm 이름(EC2 app 타겟그룹, 방어적 재검증용) |
 | `API_ECS_TARGET_5XX_ALARM_NAME` | 아니오 | `SongQuiz-Prod-High-API-ECS-Target5xx` | `API_TARGET_5XX` 분석 대상 Alarm 이름(ECS app_ecs 타겟그룹, 3단계) - `additionalAlarms`로 위 Alarm과 같은 IncidentType으로 취급된다 |
 | `GAME_LOG_GROUP_NAME` | 예 | - | Logs Insights를 조회할 apps/game Log Group(`modules/logging` 출력) |
@@ -228,22 +241,21 @@ AWS SDK(`@aws-sdk/client-cloudwatch`, `-cloudwatch-logs`, `-xray`, `-ssm`)와 `o
 | `ALB_ARN_SUFFIX` | 예 | - | ALB arn_suffix(`modules/load_balancer` 출력) |
 | `API_TARGET_GROUP_ARN_SUFFIX` | 예 | - | apps/api EC2 app 타겟그룹 arn_suffix |
 | `API_ECS_TARGET_GROUP_ARN_SUFFIX` | `API_TARGET_5XX`일 때만 | - | apps/api ECS app_ecs 타겟그룹 arn_suffix(`modules/load_balancer` 출력, 3단계) - `API_TARGET_GROUP_ARN_SUFFIX`(EC2)와 별개로 조회해 트래픽이 실제로 어느 타겟그룹에 있는지와 무관하게 관찰할 수 있게 한다 |
-| `GAME_TARGET_GROUP_ARN_SUFFIX` | 예 | - | apps/game 타겟그룹 arn_suffix |
+| `GAME_TARGET_GROUP_ARN_SUFFIX` | 예 | - | apps/game EC2 game 타겟그룹 arn_suffix |
+| `GAME_ECS_TARGET_GROUP_ARN_SUFFIX` | `GAME_TARGET_5XX`일 때만 | - | apps/game ECS game_ecs 타겟그룹 arn_suffix(`modules/load_balancer` 출력, 4단계 AIOps 보정) - `GAME_TARGET_GROUP_ARN_SUFFIX`(EC2)와 별개로 조회해 트래픽이 실제로 어느 타겟그룹에 있는지와 무관하게 관찰할 수 있게 한다 |
 | `DB_INSTANCE_IDENTIFIER` | 예 | - | RDS 인스턴스 식별자(`modules/database` 출력) |
-| `EC2_INSTANCE_ID` | 예 | - | app_a EC2 인스턴스 ID(`modules/compute` 출력) - `GAME_TARGET_5XX`의 EC2 CPU/Memory 조회용 |
-| `EC2_METRIC_NAMESPACE` | 예 | - | CloudWatch Agent EC2 Memory 지표 namespace(`modules/iam` 출력) |
 | `CACHE_CLUSTER_ID` | 예 | - | ElastiCache 클러스터 ID(`modules/cache` 출력) - `GAME_TARGET_5XX`의 Redis Memory/Connections/Evictions 조회용 |
-| `ECS_CLUSTER_NAME` | `API_TARGET_5XX`일 때만 | - | ECS 클러스터 이름(`modules/ecs` 출력, 3단계) - 없으면 `API_TARGET_5XX`만 config 실패로 skip되고, 다른 두 IncidentType은 영향받지 않는다(`API_LOG_GROUP_NAME`과 동일한 배포 순서 분리 규칙) |
+| `ECS_CLUSTER_NAME` | `API_TARGET_5XX`/`GAME_TARGET_5XX`일 때만 | - | ECS 클러스터 이름(`modules/ecs` 출력, 3단계/4단계 AIOps 보정 - api/game이 공유) - 없으면 두 IncidentType만 config 실패로 skip되고, `QUIZ_SNAPSHOT_FAILURE`는 영향받지 않는다(`API_LOG_GROUP_NAME`과 동일한 배포 순서 분리 규칙) |
 | `ECS_API_SERVICE_NAME` | `API_TARGET_5XX`일 때만 | - | apps/api ECS 서비스 이름(`modules/ecs` 출력, 3단계) - `ECS_CLUSTER_NAME`과 함께 `AWS/ECS` CPUUtilization/MemoryUtilization 조회에 쓴다 |
+| `ECS_GAME_SERVICE_NAME` | `GAME_TARGET_5XX`일 때만 | - | apps/game ECS 서비스 이름(`modules/ecs` 출력, 4단계 AIOps 보정) - `ECS_CLUSTER_NAME`과 함께 `AWS/ECS` CPUUtilization/MemoryUtilization 조회에 쓴다 |
 | `SLACK_WEBHOOK_PARAMETER_NAME` | 예 | - | alarm-notifier와 동일한 Slack Webhook SSM Parameter 이름 |
 | `OPENAI_API_KEY_PARAMETER_NAME` | 예 | - | OpenAI API Key SSM SecureString Parameter 이름 |
 | `OPENAI_MODEL` | 아니오 | `gpt-5.6-luna` | OpenAI 모델 이름(비용을 고려해 apps/api의 `gpt-5.6-luna`보다 가벼운 모델을 기본값으로 둔다 - 실제 계정에서 사용 가능한 모델 이름으로 조정 필요) |
 | `API_DEPLOYMENT_PARAMETER_NAME` | 아니오 | `/song-quiz/prod/deployment/api` | apps/api Production 배포 metadata SSM Parameter(String) - deploy-api.yml이 기록 |
 | `GAME_DEPLOYMENT_PARAMETER_NAME` | 아니오 | `/song-quiz/prod/deployment/game` | apps/game Production 배포 metadata SSM Parameter(String) - deploy-game.yml이 기록 |
 
-`EC2_INSTANCE_ID`/`EC2_METRIC_NAMESPACE`/`CACHE_CLUSTER_ID`는 `QUIZ_SNAPSHOT_FAILURE`
-분석에서는 쓰지 않지만, 두 IncidentType이 같은 Lambda/환경변수 집합을 공유하므로 필수
-환경변수로 취급한다(`findMissingEnv`).
+`CACHE_CLUSTER_ID`는 `QUIZ_SNAPSHOT_FAILURE` 분석에서는 쓰지 않지만, 세 IncidentType이
+같은 Lambda/환경변수 집합을 공유하므로 필수 환경변수로 취급한다(`findMissingEnv`).
 
 필수 환경 변수(`API_DEPLOYMENT_PARAMETER_NAME`/`GAME_DEPLOYMENT_PARAMETER_NAME` 제외)가
 하나라도 비어 있으면 AWS API를 호출하기 전에 `incident_analysis_failed`(`stage: "config"`)를
@@ -332,6 +344,18 @@ aws cloudwatch set-alarm-state \
   --state-value OK \
   --state-reason "aiops incident analysis test recovery"
 
+# ECS game_ecs 타겟그룹의 Game Target5xx도 별도로 검증한다(4단계 AIOps 보정) - EC2 쪽과
+# 별개 Alarm이라 위 테스트가 통과해도 이쪽이 자동으로 검증되지 않는다.
+aws cloudwatch set-alarm-state \
+  --alarm-name "SongQuiz-Prod-High-Game-ECS-Target5xx" \
+  --state-value ALARM \
+  --state-reason "aiops incident analysis test"
+
+aws cloudwatch set-alarm-state \
+  --alarm-name "SongQuiz-Prod-High-Game-ECS-Target5xx" \
+  --state-value OK \
+  --state-reason "aiops incident analysis test recovery"
+
 # API Target5xx도 동일하게
 aws cloudwatch set-alarm-state \
   --alarm-name "SongQuiz-Prod-High-API-Target5xx" \
@@ -359,7 +383,7 @@ aws cloudwatch set-alarm-state \
 CloudWatch Console > Lambda > `song-quiz-prod-incident-analyzer` > Monitor > Logs에서
 `incident_analysis_started` -> `incident_context_collected` -> `incident_analysis_completed`
 (또는 실패 시 `incident_analysis_failed` + `stage`)를 확인한다. `incident_context_collected`
-로그의 `metricCount`가 QuizSnapshotFailure는 10, Game Target5xx는 19, API Target5xx는 16인지도
+로그의 `metricCount`가 QuizSnapshotFailure는 10, Game Target5xx는 22, API Target5xx는 16인지도
 함께 확인한다.
 
 ### 2) 실제 장애 기반 end-to-end 테스트

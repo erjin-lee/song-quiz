@@ -79,10 +79,18 @@ const REMOVE_FALLBACK_RETRY_MAX_MS = 5_000;
  * 레벨 상태는 로컬 Map만으로는 다른 인스턴스의 소켓을 알 수 없다. 그래서
  * `hasOtherActiveSocket`은 `fetchSockets()`(어댑터가 인스턴스 간에도 집계해줌)로,
  * 재접속 유예는 RoomTimerService(Redis 기반, 인스턴스 간 취소 가능)로 처리한다.
+ *
+ * `transports: ['websocket']`로 HTTP long-polling을 거부한다 - ECS `game_ecs` ALB
+ * 타겟그룹이 sticky session 없이 여러 Task로 라운드로빈 분산하므로(ADR-0006), long-polling
+ * 연결의 연속된 요청이 서로 다른 Task로 갈리면 연결이 끊긴다. 지금까지는 `apps/web`
+ * 클라이언트(`src/api/socket.ts`)가 이미 `transports: ['websocket']`만 요청해 실질적인
+ * 문제가 없었지만, 그 불변식이 클라이언트 설정 하나에만 암묵적으로 의존했다 - 새 클라이언트가
+ * 실수로 polling을 허용해도 서버가 거부하도록 여기서도 명시적으로 강제한다.
  */
 @WebSocketGateway({
   namespace: '/rooms',
   cors: { origin: 'http://localhost:5173' },
+  transports: ['websocket'],
 })
 @UseInterceptors(SocketRequestContextInterceptor)
 export class RoomGateway implements OnGatewayDisconnect {

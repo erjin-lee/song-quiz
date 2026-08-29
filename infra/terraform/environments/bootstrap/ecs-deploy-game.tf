@@ -3,14 +3,21 @@
 #
 # ecs-deploy.tf(ci_ecs_deploy, apps/api 전용)를 재사용하지 않는다 - 그 role의 OIDC 조건이
 # workflow="Deploy API"로 좁혀져 있어 "Deploy Game" workflow는 애초에 assume이 거부된다.
-# apps/game은 Task Role이 없으므로(iam 모듈 ecs.tf 주석 참고) PassRole 대상도 Task
-# Execution Role 하나뿐이다.
+#
+# 4단계 당시에는 apps/game에 Task Role이 없어 PassRole 대상이 Task Execution Role
+# 하나뿐이었다. Game tracing 추가(4단계 AIOps 보정 이후 후속 작업)에서 aws-otel-collector
+# 사이드카가 X-Ray에 쓸 Task Role(ecs_game_task, modules/iam/ecs.tf)이 새로 생겨 Game
+# Task Definition의 taskRoleArn에도 값이 채워졌다 - ecs-deploy.tf(api)와 동일한 이유로
+# PassRole 대상에 이 Role도 추가해야 register-task-definition이 taskRoleArn을 넘길 때
+# AccessDenied가 나지 않는다.
 locals {
   ecs_game_cluster_name            = "${var.project_name}-cluster"
   ecs_game_service_name            = "${var.project_name}-game"
   ecs_game_task_execution_role     = "${var.project_name}-ecs-game-task-execution"
+  ecs_game_task_role               = "${var.project_name}-ecs-game-task"
   ecs_game_service_arn             = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${local.ecs_game_cluster_name}/${local.ecs_game_service_name}"
   ecs_game_task_execution_role_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.ecs_game_task_execution_role}"
+  ecs_game_task_role_arn           = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.ecs_game_task_role}"
 }
 
 resource "aws_iam_role" "ci_ecs_deploy_game" {
@@ -96,9 +103,12 @@ resource "aws_iam_role_policy" "ci_ecs_deploy_game_ecs" {
         Resource = local.ecs_game_service_arn
       },
       {
+        # ecs-deploy.tf(api)와 동일한 이유 - 이 role이 다른 임의의 role을 ECS Task에
+        # 넘기지 못하도록 PassRole 대상을 이 Task가 실제로 쓰는 두 Role로 좁히고
+        # iam:PassedToService 조건까지 더한다.
         Effect   = "Allow"
         Action   = "iam:PassRole"
-        Resource = [local.ecs_game_task_execution_role_arn]
+        Resource = [local.ecs_game_task_execution_role_arn, local.ecs_game_task_role_arn]
         Condition = {
           StringEquals = {
             "iam:PassedToService" = "ecs-tasks.amazonaws.com"

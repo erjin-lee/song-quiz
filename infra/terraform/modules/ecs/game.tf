@@ -1,10 +1,10 @@
 # apps/game ECS Fargate 태스크 정의/서비스. ECS Fargate 이관 4단계
 # (docs/infra/ecs-fargate-migration-plan.md) - 2단계에서 만든 apps/api 패턴(main.tf)을
-# 그대로 따르되, 이번 단계 범위에서는 aws-otel-collector 사이드카(3단계에서 api에 추가한
-# 트레이싱용 사이드카)를 넣지 않는다 - 계획 문서 4단계 항목이 "최소 로그/metric/alarm"만
-# 요구하고, game은 아직 OTEL_EXPORTER_OTLP_ENDPOINT를 설정하지 않으므로
-# packages/tracing이 production에서 트레이싱 자체를 비활성화한다(3단계 api_environment_variables
-# 주석과 동일한 동작). 필요해지면 이후 단계에서 api와 동일하게 사이드카를 추가한다.
+# 그대로 따른다. 4단계 당시에는 계획 문서 항목이 "최소 로그/metric/alarm"만 요구해
+# aws-otel-collector 사이드카(3단계에서 api에 추가한 트레이싱용 사이드카)를 넣지 않았지만,
+# Game tracing 추가(4단계 AIOps 보정 이후 후속 작업)에서 api와 동일한 사이드카를 추가했다 -
+# 아래 container_definitions의 두 번째 컨테이너, local.otel_collector_config는 main.tf에
+# 정의된 것을 그대로 재사용한다(module 내 local은 파일 경계와 무관하다).
 resource "aws_ecs_task_definition" "game" {
   family                   = "${var.project_name}-game"
   requires_compatibilities = ["FARGATE"]
@@ -59,6 +59,30 @@ resource "aws_ecs_task_definition" "game" {
         timeout     = 5
         retries     = 3
         startPeriod = 30
+      }
+    },
+    {
+      name  = "aws-otel-collector"
+      image = var.otel_collector_image
+      # essential=false - main.tf의 api 사이드카와 동일한 이유. 트레이싱은 부가 관측
+      # 기능이지 서비스 가용성 요건이 아니다.
+      essential = false
+      cpu       = var.otel_collector_cpu
+      memory    = var.otel_collector_memory
+
+      command = ["--config=env:AOT_CONFIG_CONTENT"]
+
+      environment = [
+        { name = "AOT_CONFIG_CONTENT", value = local.otel_collector_config }
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = var.game_log_group_name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "ecs-otel"
+        }
       }
     }
   ])

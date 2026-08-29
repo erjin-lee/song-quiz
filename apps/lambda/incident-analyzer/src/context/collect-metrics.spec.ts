@@ -14,12 +14,12 @@ const CONFIG: CollectMetricsConfig = {
   apiTargetGroupArnSuffix: "targetgroup/deploy-terraform-api/def",
   gameTargetGroupArnSuffix: "targetgroup/deploy-terraform-game/ghi",
   dbInstanceIdentifier: "deploy-terraform-db",
-  ec2InstanceId: "i-088da98215dd782e4",
-  ec2MetricNamespace: "SongQuiz/EC2",
   cacheClusterId: "deploy-terraform-cache",
   ecsClusterName: "song-quiz-cluster",
   ecsApiServiceName: "song-quiz-api",
   apiEcsTargetGroupArnSuffix: "targetgroup/deploy-terraform-app-ecs/jkl",
+  ecsGameServiceName: "song-quiz-game",
+  gameEcsTargetGroupArnSuffix: "targetgroup/deploy-terraform-game-ecs/mno",
 };
 
 const WINDOW = {
@@ -146,7 +146,7 @@ describe("collectMetrics", () => {
   });
 
   describe("GAME_TARGET_5XX(신규)", () => {
-    it("요청받은 19개 metric을 정확한 이름으로 모두 요청한다", async () => {
+    it("요청받은 22개 metric을 정확한 이름으로 모두 요청한다(4단계 AIOps 보정 - EC2.CPUUtilization/EC2.MemoryUsedPercent 대신 ECS.Game.CPUUtilization/ECS.Game.MemoryUtilization을 쓰고, EC2 game 타겟그룹과 별개로 ECS game_ecs 타겟그룹의 5xx/Latency/RequestCount도 함께 본다)", async () => {
       sendMock.mockResolvedValueOnce({ MetricDataResults: [] });
 
       const result = await collectMetrics(WINDOW, CONFIG, "GAME_TARGET_5XX");
@@ -156,6 +156,9 @@ describe("collectMetrics", () => {
         "Game.HTTPCode_Target_5XX_Count",
         "Game.TargetResponseTime",
         "Game.RequestCount",
+        "ECS.Game.HTTPCode_Target_5XX_Count",
+        "ECS.Game.TargetResponseTime",
+        "ECS.Game.RequestCount",
         "API.HTTPCode_Target_5XX_Count",
         "API.TargetResponseTime",
         "API.RequestCount",
@@ -165,8 +168,8 @@ describe("collectMetrics", () => {
         "Game.RedisLockRenewFailure",
         "Game.RoomLockLeaseLost",
         "Game.StaleFencingWriteRejected",
-        "EC2.CPUUtilization",
-        "EC2.MemoryUsedPercent",
+        "ECS.Game.CPUUtilization",
+        "ECS.Game.MemoryUtilization",
         "Redis.MemoryUsagePercentage",
         "Redis.CurrConnections",
         "Redis.Evictions",
@@ -175,7 +178,7 @@ describe("collectMetrics", () => {
       ]);
     });
 
-    it("EC2/Redis metric을 실제 dashboard.tf와 동일한 namespace/dimension으로 조회한다", async () => {
+    it("ECS game_ecs 타겟그룹의 5xx/Latency/RequestCount를 EC2 game 타겟그룹과 별개 dimension으로 조회한다(4단계 AIOps 보정)", async () => {
       sendMock.mockResolvedValueOnce({ MetricDataResults: [] });
 
       await collectMetrics(WINDOW, CONFIG, "GAME_TARGET_5XX");
@@ -185,16 +188,72 @@ describe("collectMetrics", () => {
         input.MetricDataQueries.map((q: MetricDataQuery) => [q.Id, q]),
       );
 
-      expect(queryByName.get("ec2Cpu")?.MetricStat?.Metric).toEqual({
-        Namespace: "AWS/EC2",
+      expect(queryByName.get("ecsGame5xx")?.MetricStat?.Metric).toEqual({
+        Namespace: "AWS/ApplicationELB",
+        MetricName: "HTTPCode_Target_5XX_Count",
+        Dimensions: [
+          { Name: "LoadBalancer", Value: CONFIG.albArnSuffix },
+          { Name: "TargetGroup", Value: CONFIG.gameEcsTargetGroupArnSuffix },
+        ],
+      });
+      expect(queryByName.get("ecsGameLatency")?.MetricStat?.Metric).toEqual({
+        Namespace: "AWS/ApplicationELB",
+        MetricName: "TargetResponseTime",
+        Dimensions: [
+          { Name: "LoadBalancer", Value: CONFIG.albArnSuffix },
+          { Name: "TargetGroup", Value: CONFIG.gameEcsTargetGroupArnSuffix },
+        ],
+      });
+      expect(
+        queryByName.get("ecsGameRequestCount")?.MetricStat?.Metric,
+      ).toEqual({
+        Namespace: "AWS/ApplicationELB",
+        MetricName: "RequestCount",
+        Dimensions: [
+          { Name: "LoadBalancer", Value: CONFIG.albArnSuffix },
+          { Name: "TargetGroup", Value: CONFIG.gameEcsTargetGroupArnSuffix },
+        ],
+      });
+    });
+
+    it("ECS Game CPU/Memory metric을 실제 ecs 모듈과 동일한 namespace/dimension으로 조회한다(4단계 AIOps 보정)", async () => {
+      sendMock.mockResolvedValueOnce({ MetricDataResults: [] });
+
+      await collectMetrics(WINDOW, CONFIG, "GAME_TARGET_5XX");
+
+      const input = sendMock.mock.calls[0][0].input;
+      const queryByName = new Map<string, MetricDataQuery>(
+        input.MetricDataQueries.map((q: MetricDataQuery) => [q.Id, q]),
+      );
+
+      expect(queryByName.get("ecsGameCpu")?.MetricStat?.Metric).toEqual({
+        Namespace: "AWS/ECS",
         MetricName: "CPUUtilization",
-        Dimensions: [{ Name: "InstanceId", Value: CONFIG.ec2InstanceId }],
+        Dimensions: [
+          { Name: "ClusterName", Value: CONFIG.ecsClusterName },
+          { Name: "ServiceName", Value: CONFIG.ecsGameServiceName },
+        ],
       });
-      expect(queryByName.get("ec2Memory")?.MetricStat?.Metric).toEqual({
-        Namespace: CONFIG.ec2MetricNamespace,
-        MetricName: "mem_used_percent",
-        Dimensions: [{ Name: "InstanceId", Value: CONFIG.ec2InstanceId }],
+      expect(queryByName.get("ecsGameMemory")?.MetricStat?.Metric).toEqual({
+        Namespace: "AWS/ECS",
+        MetricName: "MemoryUtilization",
+        Dimensions: [
+          { Name: "ClusterName", Value: CONFIG.ecsClusterName },
+          { Name: "ServiceName", Value: CONFIG.ecsGameServiceName },
+        ],
       });
+    });
+
+    it("Redis metric을 실제 dashboard.tf와 동일한 namespace/dimension으로 조회한다", async () => {
+      sendMock.mockResolvedValueOnce({ MetricDataResults: [] });
+
+      await collectMetrics(WINDOW, CONFIG, "GAME_TARGET_5XX");
+
+      const input = sendMock.mock.calls[0][0].input;
+      const queryByName = new Map<string, MetricDataQuery>(
+        input.MetricDataQueries.map((q: MetricDataQuery) => [q.Id, q]),
+      );
+
       expect(queryByName.get("redisMemory")?.MetricStat?.Metric).toEqual({
         Namespace: "AWS/ElastiCache",
         MetricName: "DatabaseMemoryUsagePercentage",
@@ -237,6 +296,7 @@ describe("collectMetrics", () => {
 
       const sparse = [
         "Game.RequestCount",
+        "ECS.Game.RequestCount",
         "API.RequestCount",
         "Game.RedisLockFailure",
         "Game.TimerClaimFailure",
@@ -251,8 +311,8 @@ describe("collectMetrics", () => {
       }
 
       const gauges = [
-        "EC2.CPUUtilization",
-        "EC2.MemoryUsedPercent",
+        "ECS.Game.CPUUtilization",
+        "ECS.Game.MemoryUtilization",
         "Redis.MemoryUsagePercentage",
         "Redis.CurrConnections",
       ];
@@ -262,13 +322,13 @@ describe("collectMetrics", () => {
       }
     });
 
-    it("GetMetricData 호출이 실패하면 failed 상태와 함께 19개 metric을 COLLECTION_FAILED로 채운다", async () => {
+    it("GetMetricData 호출이 실패하면 failed 상태와 함께 22개 metric을 COLLECTION_FAILED로 채운다", async () => {
       sendMock.mockRejectedValueOnce(new Error("boom"));
 
       const result = await collectMetrics(WINDOW, CONFIG, "GAME_TARGET_5XX");
 
       expect(result.status).toBe("failed");
-      expect(result.metrics).toHaveLength(19);
+      expect(result.metrics).toHaveLength(22);
       for (const metric of result.metrics) {
         expect(metric.dataState).toBe("COLLECTION_FAILED");
       }

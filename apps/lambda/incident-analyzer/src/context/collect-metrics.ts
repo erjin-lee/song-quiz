@@ -33,8 +33,6 @@ const METRIC_SEMANTICS: Record<string, MetricSemantic> = {
   "Game.StaleFencingWriteRejected": "sparse_count",
   "RDS.CPUUtilization": "gauge",
   "RDS.DatabaseConnections": "gauge",
-  "EC2.CPUUtilization": "gauge",
-  "EC2.MemoryUsedPercent": "gauge",
   "Redis.MemoryUsagePercentage": "gauge",
   "Redis.CurrConnections": "gauge",
   "Redis.Evictions": "sparse_count",
@@ -43,6 +41,13 @@ const METRIC_SEMANTICS: Record<string, MetricSemantic> = {
   "ECS.API.HTTPCode_Target_5XX_Count": "sparse_count",
   "ECS.API.TargetResponseTime": "gauge",
   "ECS.API.RequestCount": "sparse_count",
+  // 4단계 AIOps 보정 - Game도 ECS로 전환된 뒤에는 EC2.CPUUtilization/EC2.MemoryUsedPercent
+  // 대신 이 두 지표를 쓴다(ECS.API.*와 동일한 이유).
+  "ECS.Game.CPUUtilization": "gauge",
+  "ECS.Game.MemoryUtilization": "gauge",
+  "ECS.Game.HTTPCode_Target_5XX_Count": "sparse_count",
+  "ECS.Game.TargetResponseTime": "gauge",
+  "ECS.Game.RequestCount": "sparse_count",
 };
 
 const cloudWatchClient = new CloudWatchClient({});
@@ -67,8 +72,6 @@ export interface CollectMetricsConfig {
   apiTargetGroupArnSuffix: string;
   gameTargetGroupArnSuffix: string;
   dbInstanceIdentifier: string;
-  ec2InstanceId: string;
-  ec2MetricNamespace: string;
   cacheClusterId: string;
   // API_TARGET_5XX(3단계 - ECS Fargate 이관)에서만 쓴다 - apps/lambda/CLAUDE.md 규칙대로,
   // terraform apply 전에 CI가 코드를 먼저 배포해 이 값이 아직 없을 수 있으므로 optional로
@@ -78,6 +81,10 @@ export interface CollectMetricsConfig {
   // ECS app_ecs 타겟그룹의 트래픽/5xx/지연시간 조회용(3단계) - EC2 apiTargetGroupArnSuffix와
   // 별개다. 트래픽 전환 시점과 무관하게 실제 트래픽을 받는 쪽을 조회하기 위해 둘 다 본다.
   apiEcsTargetGroupArnSuffix?: string;
+  // GAME_TARGET_5XX(4단계 AIOps 보정)에서만 쓴다 - ecsClusterName은 api/game이 공유하므로
+  // 그대로 재사용하고, game 서비스 이름/타겟그룹만 별도로 받는다. 같은 이유로 optional이다.
+  ecsGameServiceName?: string;
+  gameEcsTargetGroupArnSuffix?: string;
 }
 
 export interface CollectMetricsResult {
@@ -177,6 +184,33 @@ function buildAllQuerySpecs(config: CollectMetricsConfig): MetricQuerySpec[] {
       stat: "Sum",
       dimensions: albDimensions(config.gameTargetGroupArnSuffix),
     },
+    // ECS game_ecs 타겟그룹 전용(4단계 AIOps 보정) - EC2 game 타겟그룹(위 game5xx/
+    // gameLatency/gameRequestCount)과 나란히 조회한다. ecsApi5xx 등과 동일한 이유로
+    // config.gameEcsTargetGroupArnSuffix가 없어도 spec 자체는 항상 만들어진다.
+    {
+      id: "ecsGame5xx",
+      name: "ECS.Game.HTTPCode_Target_5XX_Count",
+      namespace: "AWS/ApplicationELB",
+      metricName: "HTTPCode_Target_5XX_Count",
+      stat: "Sum",
+      dimensions: albDimensions(config.gameEcsTargetGroupArnSuffix ?? ""),
+    },
+    {
+      id: "ecsGameLatency",
+      name: "ECS.Game.TargetResponseTime",
+      namespace: "AWS/ApplicationELB",
+      metricName: "TargetResponseTime",
+      stat: "Average",
+      dimensions: albDimensions(config.gameEcsTargetGroupArnSuffix ?? ""),
+    },
+    {
+      id: "ecsGameRequestCount",
+      name: "ECS.Game.RequestCount",
+      namespace: "AWS/ApplicationELB",
+      metricName: "RequestCount",
+      stat: "Sum",
+      dimensions: albDimensions(config.gameEcsTargetGroupArnSuffix ?? ""),
+    },
     {
       id: "gameRedisLockFailure",
       name: "Game.RedisLockFailure",
@@ -211,22 +245,6 @@ function buildAllQuerySpecs(config: CollectMetricsConfig): MetricQuerySpec[] {
       namespace: config.gameMetricNamespace,
       metricName: "StaleFencingWriteRejected",
       stat: "Sum",
-    },
-    {
-      id: "ec2Cpu",
-      name: "EC2.CPUUtilization",
-      namespace: "AWS/EC2",
-      metricName: "CPUUtilization",
-      stat: "Average",
-      dimensions: { InstanceId: config.ec2InstanceId },
-    },
-    {
-      id: "ec2Memory",
-      name: "EC2.MemoryUsedPercent",
-      namespace: config.ec2MetricNamespace,
-      metricName: "mem_used_percent",
-      stat: "Average",
-      dimensions: { InstanceId: config.ec2InstanceId },
     },
     {
       id: "redisMemory",
@@ -294,6 +312,31 @@ function buildAllQuerySpecs(config: CollectMetricsConfig): MetricQuerySpec[] {
       dimensions: {
         ClusterName: config.ecsClusterName ?? "",
         ServiceName: config.ecsApiServiceName ?? "",
+      },
+    },
+    // GAME_TARGET_5XX 전용(4단계 AIOps 보정) - ecsApiCpu/ecsApiMemory와 동일한 이유. Game이
+    // ECS로 전환된 뒤에는 정지된 app_a의 EC2 CPU/Memory가 더 이상 Game 부하를 반영하지
+    // 않으므로, Game 원인 분석 근거를 이 두 지표로 교체했다(incident-policy.ts 참고).
+    {
+      id: "ecsGameCpu",
+      name: "ECS.Game.CPUUtilization",
+      namespace: "AWS/ECS",
+      metricName: "CPUUtilization",
+      stat: "Average",
+      dimensions: {
+        ClusterName: config.ecsClusterName ?? "",
+        ServiceName: config.ecsGameServiceName ?? "",
+      },
+    },
+    {
+      id: "ecsGameMemory",
+      name: "ECS.Game.MemoryUtilization",
+      namespace: "AWS/ECS",
+      metricName: "MemoryUtilization",
+      stat: "Average",
+      dimensions: {
+        ClusterName: config.ecsClusterName ?? "",
+        ServiceName: config.ecsGameServiceName ?? "",
       },
     },
   ];

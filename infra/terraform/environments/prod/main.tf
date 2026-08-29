@@ -232,6 +232,11 @@ module "aiops" {
   # 것과 동일한 ecs 모듈 출력을 그대로 재사용한다.
   ecs_cluster_name     = module.ecs.cluster_name
   ecs_api_service_name = module.ecs.api_service_name
+  # Game Target5xx 분석(4단계 AIOps 보정)의 Game ECS 런타임 Metric 조회용 - api와 동일한
+  # 이유로 monitoring 모듈에 이미 전달하는 것과 동일한 ecs/load_balancer 모듈 출력을
+  # 그대로 재사용한다.
+  ecs_game_service_name            = module.ecs.game_service_name
+  game_ecs_target_group_arn_suffix = module.load_balancer.game_ecs_target_group_arn_suffix
 }
 
 # 계정 청구(Billing) 단위 리소스(Budget/Cost Anomaly Detection) - EC2/RDS 등 다른 모듈의
@@ -324,9 +329,10 @@ locals {
     # 열려 있는 public ALB 경로를 재사용하면 SG를 추가로 뚫을 필요가 없다.
     API_SERVICE_URL = "https://${var.api_subdomain}.${var.domain_name}"
     CORS_ORIGIN     = "https://${var.domain_name}"
-    # 3단계에서 api에 추가한 aws-otel-collector 사이드카는 이번 단계 범위 밖이라
-    # OTEL_EXPORTER_OTLP_ENDPOINT를 설정하지 않는다 - packages/tracing이 production에서
-    # 트레이싱을 비활성화한 채로 시작한다(ARCHITECTURE.md Observability 섹션 참고).
+    # Game tracing 추가(4단계 AIOps 보정 이후 후속 작업) - api_environment_variables의
+    # OTEL_EXPORTER_OTLP_ENDPOINT와 동일한 이유로 game도 같은 Task 안의 aws-otel-collector
+    # 사이드카(modules/ecs/game.tf)로 OTLP를 보낸다.
+    OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4318"
   }
 }
 
@@ -354,6 +360,8 @@ module "ecs" {
   ecs_game_security_group_id = module.security.ecs_game_security_group_id
   game_target_group_arn      = module.load_balancer.game_ecs_target_group_arn
   game_execution_role_arn    = module.iam.ecs_game_task_execution_role_arn
+  # Game tracing 추가 - aws-otel-collector 사이드카가 이 Task Role로 X-Ray에 쓴다.
+  game_task_role_arn         = module.iam.ecs_game_task_role_arn
   game_repository_url        = module.ecr.game_repository_url
   game_image_git_sha         = var.game_image_git_sha
   game_log_group_name        = module.logging.game_log_group_name

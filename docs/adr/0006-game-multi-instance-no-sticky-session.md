@@ -20,6 +20,7 @@ Redis 상태 공유만으로는 두 번째 문제(커넥션 라우팅)를 해결
 2. `apps/web`의 Socket.IO 클라이언트(`apps/web/src/api/socket.ts:69-70`)는 `transports: ['websocket']`으로 고정한다 — HTTP long-polling으로 폴백하지 않는다.
 3. 위 두 조건(Redis Adapter + WebSocket-only 클라이언트)을 근거로, ECS `game_ecs` ALB 타겟그룹(`infra/terraform/modules/load_balancer`)에는 **sticky session을 설정하지 않는다**. 리스너 규칙은 `game_traffic_target` 변수로 EC2/ECS 사이를 weighted forward로 전환할 뿐, 어느 쪽 타겟그룹에도 stickiness 블록을 두지 않는다.
 4. multi-instance 환경(두 개 이상의 Game 인스턴스에 사용자가 실제로 분산된 상태)에서 cross-instance 브로드캐스트, room 상태 일관성, reconnect, 분산 락/fencing이 정상 동작하는지는 이 저장소 밖에서 사용자가 별도로 검증했다(2026-08-29) — WebSocket-only 환경에서 문제가 없었다는 결론이다. 검증 로그/리포트는 이 저장소에 남아 있지 않다.
+5. (2026-08-29 추가) `apps/game/src/room/room.gateway.ts`의 `@WebSocketGateway` 옵션에 `transports: ['websocket']`을 명시해 서버 쪽에서도 HTTP long-polling을 거부한다. 이 결정의 전제(WebSocket-only)가 더 이상 `apps/web` 클라이언트 설정 하나에만 암묵적으로 의존하지 않고 서버 쪽에서도 강제된다 — 아래 "고려했지만 선택하지 않은 대안"에 남겨뒀던 항목을 실제로 적용했다.
 
 ## 근거
 
@@ -29,11 +30,10 @@ Redis 상태 공유만으로는 두 번째 문제(커넥션 라우팅)를 해결
 
 ## 결과 및 트레이드오프
 
-- **이 결정은 "WebSocket-only 클라이언트"라는 전제가 깨지면 함께 깨진다.** 서버 쪽(`room.gateway.ts`의 `@WebSocketGateway` 옵션)은 지금 `transports`를 명시적으로 제한하지 않아, Engine.IO 기본값대로 여전히 long-polling 요청을 받아들인다. 즉 이 불변식은 코드로 강제되지 않고 `apps/web` 클라이언트 설정 하나에 암묵적으로 의존한다. 새 클라이언트(관리자 도구, 다른 플랫폼 앱 등)를 추가하거나 `apps/web`의 transport 설정을 바꿀 때는 이 ADR을 함께 확인해야 한다. 서버 쪽에서 `transports: ['websocket']`을 명시적으로 강제하는 방안(Engine.IO 옵션)은 이번 결정에 포함하지 않았다 — 별도 검토 대상으로 남긴다.
+- **(해결됨, 2026-08-29) 이 결정은 원래 "WebSocket-only 클라이언트"라는 전제가 깨지면 함께 깨지는 구조였다.** 서버 쪽(`room.gateway.ts`의 `@WebSocketGateway` 옵션)이 `transports`를 제한하지 않아, Engine.IO 기본값대로 long-polling 요청도 받아들였다 — 이 불변식이 코드로 강제되지 않고 `apps/web` 클라이언트 설정 하나에 암묵적으로 의존했다. 위 결정 5에서 서버 쪽에도 `transports: ['websocket']`을 명시해 해결했다 — 이제 클라이언트가 실수로(또는 새 클라이언트가) polling을 요청해도 서버가 거부하므로, sticky session 미사용 결정이 클라이언트 설정 하나에만 의존하지 않는다.
 - **검증이 저장소 밖에서 이루어졌다.** cross-instance broadcast, room 상태 일관성, reconnect, 분산 락/fencing에 대한 실제 부하 테스트 로그나 리포트가 이 저장소에 없다 — 재현 가능한 근거가 아니라 사용자 확인에 의존한 결정이다. 이후 실제 `game_traffic_target = "ecs"` 전환 및 안정화 기간 중 회귀가 발견되면 이 ADR을 재검토한다.
 - ALB에 sticky session이 없으므로, Task가 scale-out/in되거나 배포로 교체될 때 특정 인스턴스에 편중된 연결 분포가 새 Task로 자동 재분배되지 않는다는 점은 여전히 남아 있는 별개의 이슈다(`docs/infra/ecs-fargate-migration-plan.md`의 Auto Scaling 고려사항 참고) — 이 ADR은 sticky session의 필요 여부만 다루고, connection 재분배 문제는 5단계(Auto Scaling)에서 별도로 다룬다.
 
 ## 고려했지만 선택하지 않은 대안
 
 - **ALB duration-based sticky cookie를 켜둔 채로 시작**: WebSocket 연결에는 실질적 효과가 없고(연결이 유지되는 동안 재라우팅될 요청이 없음), 오히려 향후 관리자 도구 등에서 별도 세션 개념과 혼동될 여지가 있어 채택하지 않았다.
-- **서버 쪽 `transports: ['websocket']` 강제**: 더 안전한 방향이지만, 지금 유일한 클라이언트가 이미 WebSocket-only이고 이번 4단계 범위(ECS 인프라 구성)를 벗어나는 애플리케이션 코드 변경이라 이번 결정에서는 제외했다. 새 클라이언트가 추가되기 전에 적용을 검토한다.

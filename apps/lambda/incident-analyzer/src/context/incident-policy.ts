@@ -38,17 +38,19 @@ export interface IncidentPolicy {
   deploymentServices: readonly DeploymentServiceName[];
 }
 
-// 세 IncidentType 모두 현재 동일한 공통 환경변수 집합을 필요로 한다(EC2_INSTANCE_ID 등
-// QUIZ_SNAPSHOT_FAILURE가 실제로 쓰지 않는 값도 같은 Lambda/환경변수 집합을 공유하므로
-// 필수로 취급한다 - README "환경 변수" 절 참고). API_TARGET_5XX만 API_LOG_GROUP_NAME이 추가로 필요하다.
+// 세 IncidentType 모두 현재 동일한 공통 환경변수 집합을 필요로 한다(README "환경 변수" 절
+// 참고). API_TARGET_5XX/GAME_TARGET_5XX만 각자 추가 환경변수가 더 필요하다.
+//
+// EC2_INSTANCE_ID/EC2_METRIC_NAMESPACE는 4단계 AIOps 보정에서 제거했다 - Game까지 ECS로
+// 전환되며 이 두 값을 쓰던 마지막 metric(GAME_TARGET_5XX의 EC2.CPUUtilization/
+// EC2.MemoryUsedPercent)이 ECS.Game.CPUUtilization/ECS.Game.MemoryUtilization으로
+// 교체됐다 - 이제 어떤 IncidentPolicy.metricNames도 EC2 dimension을 참조하지 않는다.
 const COMMON_REQUIRED_ENV = [
   "GAME_LOG_GROUP_NAME",
   "ALB_ARN_SUFFIX",
   "API_TARGET_GROUP_ARN_SUFFIX",
   "GAME_TARGET_GROUP_ARN_SUFFIX",
   "DB_INSTANCE_IDENTIFIER",
-  "EC2_INSTANCE_ID",
-  "EC2_METRIC_NAMESPACE",
   "CACHE_CLUSTER_ID",
   "SLACK_WEBHOOK_PARAMETER_NAME",
   "OPENAI_API_KEY_PARAMETER_NAME",
@@ -83,12 +85,28 @@ export const INCIDENT_POLICIES: Record<IncidentType, IncidentPolicy> = {
     deploymentServices: ["api", "game"],
   },
   GAME_TARGET_5XX: {
+    // EC2 game 타겟그룹의 Target5xx Alarm - game_traffic_target이 아직 "ec2"이거나
+    // 롤백 기간에는 이쪽이 실제로 ALARM이 된다.
     alarmNameEnvVar: "GAME_TARGET_5XX_ALARM_NAME",
     defaultAlarmName: "SongQuiz-Prod-High-Game-Target5xx",
+    // ECS game_ecs 타겟그룹의 Target5xx Alarm(4단계 AIOps 보정) - game_traffic_target이
+    // "ecs"로 전환된 뒤에는 이쪽이 실제로 ALARM이 된다. API_TARGET_5XX의
+    // additionalAlarms와 동일한 이유 - 트래픽 전환 시점과 무관하게 분석이 끊기지 않는다.
+    additionalAlarms: [
+      {
+        alarmNameEnvVar: "GAME_ECS_TARGET_5XX_ALARM_NAME",
+        defaultAlarmName: "SongQuiz-Prod-High-Game-ECS-Target5xx",
+      },
+    ],
     metricNames: [
       "Game.HTTPCode_Target_5XX_Count",
       "Game.TargetResponseTime",
       "Game.RequestCount",
+      // 4단계 AIOps 보정 - EC2 game 타겟그룹과 별개로 ECS game_ecs 타겟그룹의
+      // 트래픽/5xx도 함께 조회한다(API_TARGET_5XX의 ECS.API.* 3종과 동일한 이유).
+      "ECS.Game.HTTPCode_Target_5XX_Count",
+      "ECS.Game.TargetResponseTime",
+      "ECS.Game.RequestCount",
       "API.HTTPCode_Target_5XX_Count",
       "API.TargetResponseTime",
       "API.RequestCount",
@@ -98,8 +116,11 @@ export const INCIDENT_POLICIES: Record<IncidentType, IncidentPolicy> = {
       "Game.RedisLockRenewFailure",
       "Game.RoomLockLeaseLost",
       "Game.StaleFencingWriteRejected",
-      "EC2.CPUUtilization",
-      "EC2.MemoryUsedPercent",
+      // Game은 ECS로 전환됐으므로(4단계 AIOps 보정) 더 이상 EC2.CPUUtilization/
+      // EC2.MemoryUsedPercent(정지된 app_a만 반영)를 Game 원인 분석 근거로 쓰지 않는다.
+      // QUIZ_SNAPSHOT_FAILURE는 이 두 지표를 애초에 쓰지 않아 영향 없다.
+      "ECS.Game.CPUUtilization",
+      "ECS.Game.MemoryUtilization",
       "Redis.MemoryUsagePercentage",
       "Redis.CurrConnections",
       "Redis.Evictions",
@@ -107,7 +128,15 @@ export const INCIDENT_POLICIES: Record<IncidentType, IncidentPolicy> = {
       "RDS.DatabaseConnections",
     ],
     logSource: "game",
-    requiredEnv: COMMON_REQUIRED_ENV,
+    // GAME_TARGET_5XX만 ECS_CLUSTER_NAME/ECS_GAME_SERVICE_NAME/GAME_ECS_TARGET_GROUP_ARN_SUFFIX가
+    // 추가로 필요하다 - API_TARGET_5XX와 동일한 이유(apps/lambda/CLAUDE.md, terraform apply
+    // 전에 CI가 코드를 먼저 배포해도 다른 IncidentType은 영향받지 않는다).
+    requiredEnv: [
+      ...COMMON_REQUIRED_ENV,
+      "ECS_CLUSTER_NAME",
+      "ECS_GAME_SERVICE_NAME",
+      "GAME_ECS_TARGET_GROUP_ARN_SUFFIX",
+    ],
     collectsTraces: true,
     deploymentServices: ["api", "game"],
   },

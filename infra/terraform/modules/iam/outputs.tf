@@ -22,3 +22,8 @@ output "ecs_game_task_execution_role_arn" {
   description = "apps/game ECS 태스크 정의의 execution_role_arn에 쓸 IAM Role ARN"
   value       = aws_iam_role.ecs_game_task_execution.arn
 }
+
+output "ecs_game_task_role_arn" {
+  description = "apps/game ECS 태스크 정의의 task_role_arn에 쓸 IAM Role ARN (Game tracing 추가)"
+  value       = aws_iam_role.ecs_game_task.arn
+}

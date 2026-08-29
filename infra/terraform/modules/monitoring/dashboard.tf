@@ -112,9 +112,9 @@ locals {
         ]
       }
     },
-    # Game 자원 부족 여부 - Game은 아직 app_a EC2에 남아 있다(5단계에서 ECS로 전환 예정).
-    # API가 ECS로 이관된 뒤 이 EC2 CPU/Memory/Disk는 사실상 Game 프로세스만 반영한다 -
-    # 위젯 제목을 "app_a"가 아니라 "Game"으로 명시해 혼동을 막는다.
+    # Game 자원 부족 여부 - 4단계 AIOps 보정(ECS Fargate 이관)에서 API 위젯(위)과 동일하게
+    # ECS 기준으로 교체했다. app_a EC2는 정지 상태라 그 CPU/Memory는 더 이상 Game 부하를
+    # 반영하지 않는다(game_traffic_target = "ecs" 전환 완료).
     {
       type   = "metric"
       x      = 12
@@ -122,7 +122,7 @@ locals {
       width  = 12
       height = 6
       properties = {
-        title  = "Game Resources (EC2, app_a)"
+        title  = "Game Resources (ECS)"
         view   = "timeSeries"
         region = var.aws_region
         stat   = "Average"
@@ -131,17 +131,8 @@ locals {
           left = { min = 0, max = 100 }
         }
         metrics = [
-          ["AWS/EC2", "CPUUtilization", "InstanceId", var.app_instance_id, { label = "CPUUtilization" }],
-          [var.ec2_metric_namespace, "mem_used_percent", "InstanceId", var.app_instance_id, { label = "mem_used_percent" }],
-          # disk_used_percent는 InstanceId 외에 CloudWatch Agent가 자동으로 붙이는 fstype
-          # dimension도 갖고 있는데, 그 값(ext4 등)을 Terraform이 알 방법이 없어 하드코딩하지
-          # 않는다. path="/"(우리가 수집하도록 설정한 유일한 mount point)로만 필터링하는
-          # SEARCH 식을 써서 실제 fstype 값과 무관하게 정확히 이 지표 하나만 찾는다.
-          [{
-            expression = "SEARCH('{${var.ec2_metric_namespace},InstanceId,fstype,path} MetricName=\"disk_used_percent\" InstanceId=\"${var.app_instance_id}\" path=\"/\"', 'Average', ${local.period})"
-            label      = "disk_used_percent (path=/)"
-            id         = "diskUsedPercent"
-          }],
+          ["AWS/ECS", "CPUUtilization", "ClusterName", var.ecs_cluster_name, "ServiceName", var.ecs_game_service_name, { label = "CPUUtilization" }],
+          ["AWS/ECS", "MemoryUtilization", "ClusterName", var.ecs_cluster_name, "ServiceName", var.ecs_game_service_name, { label = "MemoryUtilization" }],
         ]
       }
     },

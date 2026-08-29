@@ -149,15 +149,15 @@ variable "game_port" {
 }
 
 variable "game_task_cpu" {
-  description = "apps/game 태스크의 Fargate CPU 유닛(1024 = 1 vCPU) - 이번 단계는 사이드카가 없어 api_task_cpu의 3단계 이전 기본값(256)을 그대로 따른다"
+  description = "apps/game 태스크의 Fargate CPU 유닛(1024 = 1 vCPU) - Game tracing 추가(4단계 AIOps 보정 이후 후속 작업)에서 ADOT Collector 사이드카(otel_collector_cpu) 몫까지 포함하도록 api_task_cpu와 동일한 이유로 256에서 512로 올렸다"
   type        = string
-  default     = "256"
+  default     = "512"
 }
 
 variable "game_task_memory" {
-  description = "apps/game 태스크의 Fargate 메모리(MiB) - api_task_memory의 3단계 이전 기본값(512)을 그대로 따른다"
+  description = "apps/game 태스크의 Fargate 메모리(MiB) - Game tracing 추가에서 ADOT Collector 사이드카(otel_collector_memory) 몫까지 포함하도록 api_task_memory와 동일한 이유로 512에서 1024로 올렸다"
   type        = string
-  default     = "512"
+  default     = "1024"
 }
 
 variable "game_desired_count" {

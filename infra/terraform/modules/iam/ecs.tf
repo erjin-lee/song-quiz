@@ -160,9 +160,9 @@ resource "aws_iam_role_policy" "ecs_api_task_xray_write" {
 # ECS Fargate 이관 4단계 - apps/game Fargate 태스크의 Task Execution Role. ecs_api_task_execution과
 # 같은 성격(ECR pull, awslogs, SSM 시크릿 복호화)이지만 대상 리포지토리/로그 그룹/시크릿이 다르다.
 #
-# apps/game은 지금 애플리케이션 코드에서 AWS SDK를 직접 쓰지 않는다(SES 발신 없음, X-Ray
-# 사이드카도 이번 단계 범위 밖) - 그래서 ecs_api_task 같은 별도 Task Role은 만들지 않는다.
-# 나중에 game이 런타임에 AWS 권한이 필요해지면(예: 트레이싱 사이드카) 그때 Task Role을 추가한다.
+# 4단계 당시에는 apps/game 애플리케이션 코드가 AWS SDK를 직접 쓰지 않아(SES 발신 없음, X-Ray
+# 사이드카도 그 단계 범위 밖) ecs_api_task 같은 별도 Task Role을 만들지 않았다. Game tracing
+# 추가(아래 ecs_game_task)에서 X-Ray 사이드카가 필요해져 Task Role을 새로 만들었다.
 resource "aws_iam_role" "ecs_game_task_execution" {
   name = "${var.project_name}-ecs-game-task-execution"
 
@@ -248,6 +248,48 @@ resource "aws_iam_role_policy" "ecs_game_task_execution_ssm" {
         Effect   = "Allow"
         Action   = "kms:Decrypt"
         Resource = var.ecs_game_secrets_kms_key_arn
+      }
+    ]
+  })
+}
+
+# Game tracing 추가(4단계 AIOps 보정 이후 후속 작업) - ecs_api_task와 동일한 성격의 Task
+# Role. apps/game은 여전히 SES 등 다른 AWS SDK 호출은 없어 X-Ray 쓰기 권한 하나만 준다.
+resource "aws_iam_role" "ecs_game_task" {
+  name = "${var.project_name}-ecs-game-task"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Principal = { Service = "ecs-tasks.amazonaws.com" }
+        Action    = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = {
+    Name = "${var.project_name}-ecs-game-task"
+  }
+}
+
+# ecs_api_task_xray_write와 동일한 이유/권한 - Game의 aws-otel-collector 사이드카
+# (modules/ecs/game.tf)가 이 Task Role 자격증명으로 X-Ray에 쓴다.
+resource "aws_iam_role_policy" "ecs_game_task_xray_write" {
+  name = "${var.project_name}-ecs-game-task-xray-write"
+  role = aws_iam_role.ecs_game_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "xray:PutTraceSegments",
+          "xray:PutTelemetryRecords",
+        ]
+        Resource = "*"
       }
     ]
   })
