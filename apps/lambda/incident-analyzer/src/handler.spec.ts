@@ -56,6 +56,7 @@ const ENV = {
   CACHE_CLUSTER_ID: "deploy-terraform-cache",
   ECS_CLUSTER_NAME: "song-quiz-cluster",
   ECS_API_SERVICE_NAME: "song-quiz-api",
+  API_ECS_TARGET_GROUP_ARN_SUFFIX: "targetgroup/deploy-terraform-app-ecs/jkl",
   SLACK_WEBHOOK_PARAMETER_NAME: "/song-quiz/prod/slack/alarm-webhook-url",
   OPENAI_API_KEY_PARAMETER_NAME: "/song-quiz/prod/openai/api-key",
 };
@@ -186,6 +187,27 @@ describe("handler", () => {
     expect(mockSendSlackMessage).toHaveBeenCalledTimes(1);
   });
 
+  it("ECS app_ecs 타겟그룹의 API Target5xx ALARM도 같은 API_TARGET_5XX 분석으로 연결된다(3단계 - api_traffic_target 전환 시점과 무관하게 EC2/ECS 두 타겟그룹 모두 감시)", async () => {
+    const event: EventBridgeAlarmStateChangeEvent = {
+      ...apiTarget5xxEvent,
+      detail: {
+        ...apiTarget5xxEvent.detail,
+        alarmName: "SongQuiz-Prod-High-API-ECS-Target5xx",
+      },
+    };
+
+    const { handler } = await import("./handler");
+    await handler(event);
+
+    expect(mockCollectMetrics).toHaveBeenCalledTimes(1);
+    expect(mockCollectMetrics).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "API_TARGET_5XX",
+    );
+    expect(mockSendSlackMessage).toHaveBeenCalledTimes(1);
+  });
+
   it("API Target5xx의 OK 상태도 분석하지 않는다(§6)", async () => {
     const event: EventBridgeAlarmStateChangeEvent = {
       ...apiTarget5xxEvent,
@@ -231,6 +253,16 @@ describe("handler", () => {
 
   it("API_LOG_GROUP_NAME이 없으면 API Target5xx만 조용히 종료한다", async () => {
     process.env.API_LOG_GROUP_NAME = "";
+
+    const { handler } = await import("./handler");
+    await handler(apiTarget5xxEvent);
+
+    expect(mockCollectMetrics).not.toHaveBeenCalled();
+    expect(mockSendSlackMessage).not.toHaveBeenCalled();
+  });
+
+  it("API_ECS_TARGET_GROUP_ARN_SUFFIX가 없으면 API Target5xx만 조용히 종료한다(3단계)", async () => {
+    process.env.API_ECS_TARGET_GROUP_ARN_SUFFIX = "";
 
     const { handler } = await import("./handler");
     await handler(apiTarget5xxEvent);

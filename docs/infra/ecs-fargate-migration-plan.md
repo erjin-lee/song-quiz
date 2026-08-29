@@ -554,6 +554,19 @@ Task 수 증가에 따라 RDS/Redis connection 수가 증가하므로 Task별 co
     - 이미 충족: CloudWatch Logs Insights 쿼리(`collect-logs.ts`)는 원래도 log stream 이름이
       아니라 log group + 최상위 JSON 필드(`event`/`level`/`errorCode` 등)만 사용해, ECS
       `awslogs-stream-prefix` 형식 변경에 영향받지 않는다 - 별도 코드 변경 없이 확인만 했다.
+    - 코드 리뷰로 드러난 P1을 이 안에서 함께 고쳤다: 처음 구현에서는 `API_TARGET_5XX`
+      IncidentPolicy의 metric 교체(EC2 -> ECS)만 하고, 정작 이 IncidentType을 트리거하는
+      Alarm 자체는 여전히 EC2 app 타겟그룹의 `SongQuiz-Prod-High-API-Target5xx` 하나만
+      보고 있었다 - ECS app_ecs 타겟그룹의 `SongQuiz-Prod-High-API-ECS-Target5xx`는
+      EventBridge Rule/`INCIDENT_TYPE_BY_ALARM_NAME`/`DescribeAlarms` IAM 어디에도
+      연결돼 있지 않아, `api_traffic_target = "ecs"`로 전환한 뒤 실제 ECS 5xx가 나도
+      incident-analyzer가 아예 호출되지 않는 상태였다. `IncidentPolicy`에
+      `additionalAlarms` 필드를 추가해 하나의 IncidentType이 여러 Alarm에 매핑될 수
+      있게 하고, `API_TARGET_5XX`가 EC2/ECS 두 타겟그룹의 Target5xx Alarm을 모두
+      트리거로 갖도록 EventBridge Rule/`aiops` IAM(`DescribeAlarms`)/env 배선을 함께
+      고쳤다. metric도 EC2 app 타겟그룹의 `API.*`와 ECS app_ecs 타겟그룹의 `ECS.API.*`를
+      나란히 조회하도록 확장했다(트래픽이 실제로 어느 타겟그룹에 있는지와 무관하게
+      관찰 가능). 관련 테스트 3개 추가, 전체 93개 통과.
     - 미완료(다음 작업, 사용자가 직접 진행): 실제 `terraform apply`(bootstrap + prod, SSM
       시크릿 값 입력 포함) 및 `CI_ECS_DEPLOY_ROLE_ARN` 리포지토리 변수 등록, `deploy-api.yml`
       워크플로우 실제 실행 검증(ECR push -> Task Definition 리비전 -> 서비스 갱신 -> stable),

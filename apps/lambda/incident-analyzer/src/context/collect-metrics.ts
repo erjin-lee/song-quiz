@@ -40,6 +40,9 @@ const METRIC_SEMANTICS: Record<string, MetricSemantic> = {
   "Redis.Evictions": "sparse_count",
   "ECS.API.CPUUtilization": "gauge",
   "ECS.API.MemoryUtilization": "gauge",
+  "ECS.API.HTTPCode_Target_5XX_Count": "sparse_count",
+  "ECS.API.TargetResponseTime": "gauge",
+  "ECS.API.RequestCount": "sparse_count",
 };
 
 const cloudWatchClient = new CloudWatchClient({});
@@ -72,6 +75,9 @@ export interface CollectMetricsConfig {
   // 받는다(apiLogGroupName과 동일 패턴).
   ecsClusterName?: string;
   ecsApiServiceName?: string;
+  // ECS app_ecs 타겟그룹의 트래픽/5xx/지연시간 조회용(3단계) - EC2 apiTargetGroupArnSuffix와
+  // 별개다. 트래픽 전환 시점과 무관하게 실제 트래픽을 받는 쪽을 조회하기 위해 둘 다 본다.
+  apiEcsTargetGroupArnSuffix?: string;
 }
 
 export interface CollectMetricsResult {
@@ -133,6 +139,35 @@ function buildAllQuerySpecs(config: CollectMetricsConfig): MetricQuerySpec[] {
       metricName: "RequestCount",
       stat: "Sum",
       dimensions: albDimensions(config.apiTargetGroupArnSuffix),
+    },
+    // ECS app_ecs 타겟그룹 전용(3단계) - EC2 app 타겟그룹(위 api5xx/apiLatency/
+    // apiRequestCount)과 나란히 조회한다. config.apiEcsTargetGroupArnSuffix가 없어도
+    // (terraform apply 전 CI 코드 우선 배포) spec 자체는 항상 만들어지지만, 이 값은
+    // API_TARGET_5XX의 requiredEnv에도 있어 handler.ts의 findMissingEnv가 먼저 걸러내
+    // 실제로는 값이 비어 있는 채 조회되지 않는다(ecsClusterName/ecsApiServiceName과 동일 이유).
+    {
+      id: "ecsApi5xx",
+      name: "ECS.API.HTTPCode_Target_5XX_Count",
+      namespace: "AWS/ApplicationELB",
+      metricName: "HTTPCode_Target_5XX_Count",
+      stat: "Sum",
+      dimensions: albDimensions(config.apiEcsTargetGroupArnSuffix ?? ""),
+    },
+    {
+      id: "ecsApiLatency",
+      name: "ECS.API.TargetResponseTime",
+      namespace: "AWS/ApplicationELB",
+      metricName: "TargetResponseTime",
+      stat: "Average",
+      dimensions: albDimensions(config.apiEcsTargetGroupArnSuffix ?? ""),
+    },
+    {
+      id: "ecsApiRequestCount",
+      name: "ECS.API.RequestCount",
+      namespace: "AWS/ApplicationELB",
+      metricName: "RequestCount",
+      stat: "Sum",
+      dimensions: albDimensions(config.apiEcsTargetGroupArnSuffix ?? ""),
     },
     {
       id: "gameRequestCount",

@@ -198,13 +198,16 @@ module "aiops" {
   game_log_group_name = module.logging.game_log_group_name
   game_log_group_arn  = module.logging.game_log_group_arn
   # API Target5xx 분석(§AIOps v1-3)의 Logs Insights 조회 대상.
-  api_log_group_name           = module.logging.api_log_group_name
-  api_log_group_arn            = module.logging.api_log_group_arn
-  game_metric_namespace        = module.logging.game_metric_namespace
-  alb_arn_suffix               = module.load_balancer.arn_suffix
-  api_target_group_arn_suffix  = module.load_balancer.app_target_group_arn_suffix
-  game_target_group_arn_suffix = module.load_balancer.game_target_group_arn_suffix
-  db_instance_identifier       = module.database.identifier
+  api_log_group_name = module.logging.api_log_group_name
+  # 3단계 - EC2 app 타겟그룹과 별개로 ECS app_ecs 타겟그룹의 트래픽/5xx도 감시한다
+  # (monitoring 모듈에 이미 전달하는 것과 동일한 값을 재사용).
+  api_ecs_target_group_arn_suffix = module.load_balancer.app_ecs_target_group_arn_suffix
+  api_log_group_arn               = module.logging.api_log_group_arn
+  game_metric_namespace           = module.logging.game_metric_namespace
+  alb_arn_suffix                  = module.load_balancer.arn_suffix
+  api_target_group_arn_suffix     = module.load_balancer.app_target_group_arn_suffix
+  game_target_group_arn_suffix    = module.load_balancer.game_target_group_arn_suffix
+  db_instance_identifier          = module.database.identifier
   # Game Target5xx 분석(§AIOps v1-2)의 EC2/Redis Metric 조회용 - monitoring 모듈에 이미
   # 전달하는 것과 동일한 값을 그대로 재사용한다.
   ec2_instance_id      = module.compute.app_a_id
