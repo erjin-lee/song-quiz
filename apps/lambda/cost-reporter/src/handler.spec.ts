@@ -29,6 +29,14 @@ describe("handler", () => {
   beforeEach(() => {
     jest.resetModules();
     jest.clearAllMocks();
+    // handler.ts는 getReportDateRange(new Date())로 실제 시스템 시각을 그대로 쓴다
+    // (date-range.spec.ts처럼 now를 인자로 주입하는 테스트가 아니다) - 아래 mock 데이터의
+    // date: "2026-08-27"은 getReportDateRange가 계산하는 reportDate(전일)와 반드시 같아야
+    // 하므로, 시스템 시각을 명시적으로 고정한다(date-range.spec.ts의 "2026-08-28T01:00:00Z
+    // -> reportDate 2026-08-27" 케이스와 동일한 시각). 이걸 안 하면 실제 달력 날짜가
+    // 하루씩 지날 때마다 reportDate가 이 mock 데이터의 날짜와 어긋나 previousDayUsd가
+    // null(데이터 미반영)로 계산되면서 이 테스트가 매일 조용히 깨진다.
+    jest.useFakeTimers().setSystemTime(new Date("2026-08-28T01:00:00.000Z"));
     process.env = {
       ...originalEnv,
       SLACK_WEBHOOK_PARAMETER_NAME: "/song-quiz/prod/slack/alarm-webhook-url",
@@ -51,6 +59,10 @@ describe("handler", () => {
       "https://hooks.slack.com/services/test",
     );
     mockSendSlackMessage.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   afterAll(() => {
