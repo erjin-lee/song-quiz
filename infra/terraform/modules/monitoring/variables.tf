@@ -63,3 +63,13 @@ variable "ecs_api_service_name" {
   description = "AWS/ECS 지표의 ServiceName dimension 값 (ecs 모듈 출력) - ECS Fargate 이관 2단계"
   type        = string
 }
+
+variable "game_ecs_target_group_arn_suffix" {
+  description = "apps/game ECS Fargate 타겟그룹(game_ecs)의 arn_suffix (load_balancer 모듈 출력, TargetGroup dimension) - ECS Fargate 이관 4단계"
+  type        = string
+}
+
+variable "ecs_game_service_name" {
+  description = "AWS/ECS 지표의 ServiceName dimension 값 (ecs 모듈 출력) - ECS Fargate 이관 4단계"
+  type        = string
+}

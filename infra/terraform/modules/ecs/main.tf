@@ -1,7 +1,7 @@
-# apps/api ECS Fargate 클러스터/태스크 정의/서비스. ECS Fargate 이관 2단계
-# (docs/infra/ecs-fargate-migration-plan.md) - game은 아직 이관 대상이 아니라 이 모듈은
-# api 전용이다(5단계에서 game도 필요해지면 그때 이 모듈을 확장하거나 game용 리소스를
-# 추가한다).
+# ECS 클러스터(api/game 공용) + apps/api 태스크 정의/서비스. ECS Fargate 이관 2단계
+# (docs/infra/ecs-fargate-migration-plan.md) 산출물이다. apps/game 태스크 정의/서비스는
+# 4단계에서 game.tf에 별도 파일로 추가했다 - api 전용으로 시작한 이 파일을 계속 부풀리지
+# 않기 위함(infra/terraform/CLAUDE.md의 "main.tf만 리소스 종류별로 쪼갠다" 원칙).
 
 resource "aws_ecs_cluster" "main" {
   name = "${var.project_name}-cluster"

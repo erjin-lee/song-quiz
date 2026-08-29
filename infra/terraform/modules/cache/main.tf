@@ -28,6 +28,16 @@ resource "aws_security_group" "cache" {
     security_groups = [var.ecs_api_security_group_id]
   }
 
+  # ECS Fargate 이관 4단계 - apps/game Fargate 태스크도 room 분산 락/상태를 위해 Redis를
+  # 쓴다. app(위, EC2 시절 규칙)은 game EC2가 완전히 제거될 때까지 유지한다.
+  ingress {
+    description     = "Redis from ecs_game tier"
+    from_port       = var.cache_port
+    to_port         = var.cache_port
+    protocol        = "tcp"
+    security_groups = [var.ecs_game_security_group_id]
+  }
+
   egress {
     description = "Allow all outbound"
     from_port   = 0

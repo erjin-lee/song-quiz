@@ -110,6 +110,35 @@ resource "aws_security_group" "ecs_api" {
   }
 }
 
+# ECS Fargate 이관 4단계 - apps/game Fargate 태스크 전용 보안 그룹. ecs_api(위)와 같은
+# 이유로 SSH inbound가 없다. game은 RDS에 직접 접근하지 않으므로(ADR-0004) db SG의
+# inbound source로는 추가하지 않는다 - Redis(cache 모듈)만 추가한다.
+resource "aws_security_group" "ecs_game" {
+  name        = "${var.project_name}-ecs-game"
+  description = "Security group for apps/game ECS Fargate tasks"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    description     = "Game port from public tier"
+    from_port       = var.game_port
+    to_port         = var.game_port
+    protocol        = "tcp"
+    security_groups = [aws_security_group.public.id]
+  }
+
+  egress {
+    description = "Allow all outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.project_name}-ecs-game"
+  }
+}
+
 resource "aws_security_group" "db" {
   name        = "${var.project_name}-db"
   description = "Security group for private db tier"

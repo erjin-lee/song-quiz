@@ -109,6 +109,34 @@ resource "aws_lb_target_group_attachment" "game_a" {
   port             = var.game_port
 }
 
+# ECS Fargate 이관 4단계(docs/infra/ecs-fargate-migration-plan.md) - apps/game Fargate
+# 태스크용 타겟그룹. app_ecs(위 app 타겟그룹 주석)와 동일한 이유로 기존 game 타겟그룹을
+# "ip"로 바꾸지 않고 별도로 만든다 - target_type은 생성 후 바꿀 수 없는 속성이라, 바꾸면
+# Terraform이 destroy+recreate하면서 그 순간 EC2 Game이 타겟그룹째로 사라진다.
+resource "aws_lb_target_group" "game_ecs" {
+  name        = "${var.project_name}-game-ecs"
+  port        = var.game_port
+  protocol    = "HTTP"
+  vpc_id      = var.vpc_id
+  target_type = "ip"
+
+  # app_ecs와 동일하게 readiness(/ready, Redis 연결 확인)를 쓴다. 기존 EC2 game
+  # 타겟그룹은 계속 alb_health_check_path(liveness, /health)를 쓴다.
+  health_check {
+    path                = var.game_ecs_health_check_path
+    protocol            = "HTTP"
+    matcher             = "200"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+  }
+
+  tags = {
+    Name = "${var.project_name}-game-ecs"
+  }
+}
+
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.main.arn
   port              = 80
@@ -158,15 +186,31 @@ resource "aws_lb_listener" "https" {
   }
 }
 
-# game 서브도메인으로 온 요청만 apps/game 타겟그룹으로 보낸다. default_action보다
+# game 서브도메인으로 온 요청만 apps/game 타겟그룹으로 보낸다. default_action(api)보다
 # 먼저 평가되므로, api 서브도메인/그 외 트래픽에는 영향이 없다.
+#
+# https 리스너의 default_action(api_traffic_target)과 동일한 이유로 단일 target_group_arn
+# 대신 weighted forward를 쓴다 - game_ecs 타겟그룹이 항상 이 규칙에 연결되어 있어야
+# ECS 서비스가 "target group ... does not have an associated load balancer" 없이
+# 생성되고, var.game_traffic_target으로 실제 트래픽 비중만 in-place로 전환/롤백된다.
 resource "aws_lb_listener_rule" "game" {
   listener_arn = aws_lb_listener.https.arn
   priority     = 100
 
   action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.game.arn
+    type = "forward"
+
+    forward {
+      target_group {
+        arn    = aws_lb_target_group.game.arn
+        weight = var.game_traffic_target == "ecs" ? 0 : 100
+      }
+
+      target_group {
+        arn    = aws_lb_target_group.game_ecs.arn
+        weight = var.game_traffic_target == "ecs" ? 100 : 0
+      }
+    }
   }
 
   condition {

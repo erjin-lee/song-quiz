@@ -46,6 +46,12 @@ module "iam" {
   ecr_api_repository_arn      = module.ecr.api_repository_arn
   ecs_api_secret_arns         = values(local.api_secret_arns)
   ecs_api_secrets_kms_key_arn = aws_kms_key.api_secrets.arn
+
+  # ECS Fargate 이관 4단계 - apps/game Task Execution Role도 같은 목적. KMS 키는 api와
+  # 시크릿을 공유하므로(secrets.tf의 local.game_secret_arns) 동일한 aws_kms_key.api_secrets를 쓴다.
+  ecr_game_repository_arn      = module.ecr.game_repository_arn
+  ecs_game_secret_arns         = values(local.game_secret_arns)
+  ecs_game_secrets_kms_key_arn = aws_kms_key.api_secrets.arn
 }
 
 module "compute" {
@@ -80,6 +86,9 @@ module "load_balancer" {
   # ECS Fargate 이관 2단계 - "ec2"(기본값)면 지금과 동일하게 app_a EC2로, "ecs"로
   # 바꾸면 apps/api Fargate 태스크로 트래픽이 전환된다.
   api_traffic_target = var.api_traffic_target
+
+  # ECS Fargate 이관 4단계 - api_traffic_target과 동일한 패턴의 Game 컷오버 스위치.
+  game_traffic_target = var.game_traffic_target
 }
 
 module "acm" {
@@ -145,14 +154,15 @@ module "database" {
 module "cache" {
   source = "../../modules/cache"
 
-  project_name              = var.project_name
-  vpc_id                    = module.network.vpc_id
-  private_db_subnet_ids     = module.network.private_db_subnet_ids
-  app_security_group_id     = module.security.app_security_group_id
-  ecs_api_security_group_id = module.security.ecs_api_security_group_id
-  cache_port                = var.cache_port
-  cache_engine_version      = var.cache_engine_version
-  cache_node_type           = var.cache_node_type
+  project_name               = var.project_name
+  vpc_id                     = module.network.vpc_id
+  private_db_subnet_ids      = module.network.private_db_subnet_ids
+  app_security_group_id      = module.security.app_security_group_id
+  ecs_api_security_group_id  = module.security.ecs_api_security_group_id
+  ecs_game_security_group_id = module.security.ecs_game_security_group_id
+  cache_port                 = var.cache_port
+  cache_engine_version       = var.cache_engine_version
+  cache_node_type            = var.cache_node_type
 }
 
 module "monitoring" {
@@ -174,6 +184,11 @@ module "monitoring" {
   api_ecs_target_group_arn_suffix = module.load_balancer.app_ecs_target_group_arn_suffix
   ecs_cluster_name                = module.ecs.cluster_name
   ecs_api_service_name            = module.ecs.api_service_name
+
+  # ECS Fargate 이관 4단계 - api_ecs와 동일한 이유로 game_traffic_target 전환 전에
+  # UnhealthyHost/Target5xx/CPU/Memory 알람을 미리 만들어둔다.
+  game_ecs_target_group_arn_suffix = module.load_balancer.game_ecs_target_group_arn_suffix
+  ecs_game_service_name            = module.ecs.game_service_name
 }
 
 # CloudWatch Alarm(SongQuiz-Prod-*) 상태 변화를 EventBridge -> Lambda로 받아 Slack에 전달한다.
@@ -289,6 +304,30 @@ locals {
     # (packages/tracing/src/init-tracing.ts의 resolveTraceExporter 참고).
     OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4318"
   }
+
+  # ECS Fargate 이관 4단계 - apps/game 컨테이너에 평문으로 주입할 환경변수.
+  # secrets.tf의 local.game_secret_arns(시크릿)와 짝을 이룬다. REDIS_HOST/REDIS_PORT/
+  # REDIS_DB는 apps/api와 같은 Redis 클러스터를 db 0으로 함께 쓴다(apps/game/src/cache/
+  # cache.service.ts 기본값과 동일 - 키 네임스페이스는 REDIS_DB가 아니라 키 prefix로
+  # 나뉜다). REDIS_PASSWORD는 넣지 않는다 - 이 ElastiCache 클러스터는 AUTH token을 쓰지
+  # 않으므로(cache 모듈) 두 서비스 모두 process.env.REDIS_PASSWORD가 undefined일 때
+  # 정상 동작한다. DB_* 환경변수는 없다 - Game은 RDS에 직접 접근하지 않는다(ADR-0004).
+  game_environment_variables = {
+    NODE_ENV   = "production"
+    PORT       = tostring(var.game_port)
+    COMMIT_SHA = var.game_image_git_sha
+    REDIS_HOST = module.cache.address
+    REDIS_PORT = tostring(var.cache_port)
+    REDIS_DB   = "0"
+    # api 서브도메인(public ALB)을 그대로 호출한다 - api_environment_variables의
+    # GAME_SERVICE_URL과 동일한 이유: Game이 ECS(public subnet)로 옮겨간 뒤에도 이미
+    # 열려 있는 public ALB 경로를 재사용하면 SG를 추가로 뚫을 필요가 없다.
+    API_SERVICE_URL = "https://${var.api_subdomain}.${var.domain_name}"
+    CORS_ORIGIN     = "https://${var.domain_name}"
+    # 3단계에서 api에 추가한 aws-otel-collector 사이드카는 이번 단계 범위 밖이라
+    # OTEL_EXPORTER_OTLP_ENDPOINT를 설정하지 않는다 - packages/tracing이 production에서
+    # 트레이싱을 비활성화한 채로 시작한다(ARCHITECTURE.md Observability 섹션 참고).
+  }
 }
 
 module "ecs" {
@@ -311,13 +350,28 @@ module "ecs" {
   environment_variables     = local.api_environment_variables
   secret_arns               = local.api_secret_arns
 
-  # aws_ecs_service.api는 api_target_group_arn(위)을 통해 module.load_balancer의
-  # aws_lb_target_group.app_ecs에는 이미 참조 기반 의존성이 있지만, 그 타겟그룹을
-  # 실제로 "리스너에 연결"하는 aws_lb_listener.https(weighted forward)는 별도
-  # 리소스라 이 참조만으로는 순서가 보장되지 않는다 - 최초 apply에서 둘이 병렬로
-  # 실행되면 ECS가 서비스를 만들려는 시점에 타겟그룹이 아직 어떤 리스너에도 연결되지
-  # 않은 상태일 수 있어 "target group ... does not have an associated load balancer"로
-  # 실패할 수 있다. module 전체에 대한 depends_on으로 load_balancer의 모든 리소스
-  # (리스너 포함)가 끝난 뒤에만 ecs가 시작되도록 명시적으로 순서를 고정한다.
+  # ECS Fargate 이관 4단계 - apps/game
+  ecs_game_security_group_id = module.security.ecs_game_security_group_id
+  game_target_group_arn      = module.load_balancer.game_ecs_target_group_arn
+  game_execution_role_arn    = module.iam.ecs_game_task_execution_role_arn
+  game_repository_url        = module.ecr.game_repository_url
+  game_image_git_sha         = var.game_image_git_sha
+  game_log_group_name        = module.logging.game_log_group_name
+  game_port                  = var.game_port
+  game_task_cpu              = var.game_task_cpu
+  game_task_memory           = var.game_task_memory
+  game_desired_count         = var.game_desired_count
+  game_environment_variables = local.game_environment_variables
+  game_secret_arns           = local.game_secret_arns
+
+  # aws_ecs_service.api/game은 api_target_group_arn/game_target_group_arn(위)을 통해
+  # module.load_balancer의 aws_lb_target_group.app_ecs/game_ecs에는 이미 참조 기반
+  # 의존성이 있지만, 그 타겟그룹을 실제로 "리스너(규칙)에 연결"하는 aws_lb_listener.https/
+  # aws_lb_listener_rule.game(둘 다 weighted forward)은 별도 리소스라 이 참조만으로는
+  # 순서가 보장되지 않는다 - 최초 apply에서 둘이 병렬로 실행되면 ECS가 서비스를 만들려는
+  # 시점에 타겟그룹이 아직 어떤 리스너에도 연결되지 않은 상태일 수 있어
+  # "target group ... does not have an associated load balancer"로 실패할 수 있다.
+  # module 전체에 대한 depends_on으로 load_balancer의 모든 리소스(리스너/규칙 포함)가
+  # 끝난 뒤에만 ecs가 시작되도록 명시적으로 순서를 고정한다.
   depends_on = [module.load_balancer]
 }

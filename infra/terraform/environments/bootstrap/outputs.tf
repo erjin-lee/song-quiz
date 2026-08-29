@@ -27,3 +27,8 @@ output "ci_ecs_deploy_role_arn" {
   description = "deploy-api.yml(3단계)이 ECR push + ECS Task Definition 등록/Service 갱신을 할 때 assume할 IAM Role ARN - 리포지토리 변수(CI_ECS_DEPLOY_ROLE_ARN)에 이 값을 등록한다"
   value       = aws_iam_role.ci_ecs_deploy.arn
 }
+
+output "ci_ecs_deploy_game_role_arn" {
+  description = "deploy-game.yml(4단계)이 ECR push + ECS Task Definition 등록/Service 갱신을 할 때 assume할 IAM Role ARN - 리포지토리 변수(CI_ECS_DEPLOY_GAME_ROLE_ARN)에 이 값을 등록한다"
+  value       = aws_iam_role.ci_ecs_deploy_game.arn
+}

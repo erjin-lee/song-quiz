@@ -176,19 +176,27 @@ Avoid unnecessary variables for values that are truly implementation details.
 └── modules/
     ├── network/           # VPC, 서브넷, 라우팅
     ├── security/          # public/app/db 보안 그룹 + ecs_api 보안 그룹(ECS Fargate
-    │                       # 이관 2단계, 2026-08-28)
+    │                       # 이관 2단계, 2026-08-28) + ecs_game 보안 그룹(4단계, 2026-08-29)
     ├── iam/                # app 인스턴스 역할/정책 + apps/api ECS Task Execution/Task
     │                       # Role(2단계) + Task Role의 X-Ray 쓰기 권한(3단계, 2026-08-29 -
     │                       # ecs 모듈의 aws-otel-collector 사이드카가 이 권한으로 X-Ray에 쓴다)
+    │                       # + apps/game ECS Task Execution Role(4단계, 2026-08-29) - game은
+    │                       # AWS SDK를 직접 쓰지 않아 별도 Task Role은 아직 없다
     ├── compute/           # bastion + app_a 인스턴스
     ├── load_balancer/     # ALB, 타겟그룹, 리스너 + app_ecs 타겟그룹(2단계, ALB
-    │                       # default_action은 api_traffic_target 변수로 EC2/ECS 전환)
+    │                       # default_action은 api_traffic_target 변수로 EC2/ECS 전환) +
+    │                       # game_ecs 타겟그룹(4단계, game 리스너 규칙이 game_traffic_target
+    │                       # 변수로 EC2/ECS weighted forward 전환 - sticky session 없음,
+    │                       # WebSocket-only 확인됨)
     ├── acm/                # ALB용 와일드카드 인증서
     ├── web/                # S3 + CloudFront (정적 웹)
     ├── dns/                # api/game 서브도메인 레코드
     ├── ses/                # SES 도메인 인증 + DKIM
-    ├── database/          # RDS (address output은 ECS 태스크의 DB_HOST_NAME 환경변수용, 2단계)
-    ├── cache/              # ElastiCache (address output/ecs_api SG 규칙도 2단계 추가)
+    ├── database/          # RDS (address output은 ECS 태스크의 DB_HOST_NAME 환경변수용, 2단계) -
+    │                       # apps/game은 RDS에 직접 접근하지 않아(ADR-0004) ecs_game SG는
+    │                       # 추가하지 않는다
+    ├── cache/              # ElastiCache (address output/ecs_api SG 규칙도 2단계 추가,
+    │                       # ecs_game SG 규칙은 4단계 추가)
     ├── logging/            # CloudWatch Log Group(api/game) + Game 실패 이벤트 Metric Filter
     ├── monitoring/         # CloudWatch Dashboard(SongQuiz-Prod) + Alarm 1차 세트(alarms.tf) -
                              # 다른 모듈의 output만 참조, 새 Custom Metric/Metric Filter는 만들지
@@ -199,7 +207,10 @@ Avoid unnecessary variables for values that are truly implementation details.
                              # 개수 지표(RunningTaskCount 등)는 Container Insights 비용
                              # 때문에 아직 도입하지 않았다 - desired_count=1 고정(오토스케일링은
                              # 6단계)이라 이미 있는 api_ecs_no_healthy_hosts 알람으로 충분하다고
-                             # 판단했다.
+                             # 판단했다. 4단계(2026-08-29)에서 alarms.tf에 game_ecs 알람(api_ecs와
+                             # 동일한 패턴 - UnhealthyHost/Target5xx/NoHealthyHosts/CPU/Memory)만
+                             # 추가했다 - Dashboard의 EC2/ECS 위젯 분리는 이번 범위에서는 하지
+                             # 않았다(사용자 요청, 3단계 수준 관측 정리는 별도 단계로 미룸).
     ├── notification/       # CloudWatch Alarm(SongQuiz-Prod-*) 상태변화 -> EventBridge -> Lambda
     │                        # (apps/lambda/alarm-notifier) -> Slack Incoming Webhook. monitoring의
     │                        # 개별 Alarm 리소스를 직접 참조하지 않고 alarm 이름 prefix로만 연결된다
@@ -220,9 +231,9 @@ Avoid unnecessary variables for values that are truly implementation details.
     │                        # 별도로 있다(다른 root state라 module output을 공유할 수 없어
     │                        # project_name으로 ARN을 직접 구성 - ci_deploy_metadata와 동일한 이유)
     │                        # (2026-08-28 도입)
-    └── ecs/                # apps/api ECS 클러스터/태스크 정의/서비스. ECS Fargate 이관 2단계
-                             # 산출물(2026-08-28) - game은 아직 대상이 아니다(api 전용). 시크릿
-                             # (DB_PASSWORD, JWT 시크릿 등)은 이 모듈이 만들지 않는다 -
+    └── ecs/                # ECS 클러스터(api/game 공용) + apps/api 태스크 정의/서비스(main.tf).
+                             # ECS Fargate 이관 2단계 산출물(2026-08-28). 시크릿(DB_PASSWORD,
+                             # JWT 시크릿 등)은 이 모듈이 만들지 않는다 -
                              # environments/prod/secrets.tf가 SSM Parameter Store(SecureString)로
                              # 만들고, 이 모듈과 iam 모듈 양쪽에 ARN을 나눠 전달한다(두 모듈이
                              # 서로 참조하면 순환 참조가 생기기 때문 - secrets.tf 주석 참고).
@@ -235,6 +246,16 @@ Avoid unnecessary variables for values that are truly implementation details.
                              # ecs update-service)는 .github/workflows/deploy-api.yml이 맡고,
                              # 그 workflow가 assume하는 IAM Role은 (ecr 모듈의 ecr-push.tf와
                              # 동일한 이유로) environments/bootstrap/ecs-deploy.tf에 별도로 있다.
+                             #
+                             # apps/game 태스크 정의/서비스(game.tf)는 4단계(2026-08-29)에서
+                             # 추가했다 - api 패턴을 그대로 따르되 OTel 사이드카는 이번 범위에
+                             # 넣지 않았다(트레이싱 비활성 상태로 시작, ARCHITECTURE.md
+                             # Observability 참고). game은 AWS SDK를 직접 쓰지 않아 Task Role이
+                             # 없다(task_role_arn을 null로 생략 가능하게 변수를 nullable로
+                             # 만들었다). CI 배포는 .github/workflows/deploy-game.yml +
+                             # environments/bootstrap/ecs-deploy-game.tf(별도 OIDC Role -
+                             # "Deploy Game" workflow 전용, ecs-deploy.tf의 api 전용 Role과는
+                             # workflow 조건이 달라 재사용할 수 없다).
 ```
 
 새 환경(예: staging)이 필요해지면 `environments/<env>/`를 추가하고 같은 모듈들을
