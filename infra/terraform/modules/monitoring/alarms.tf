@@ -148,7 +148,7 @@ resource "aws_cloudwatch_metric_alarm" "target_5xx" {
 # "5분 집계 구간의 평균 CPU가 95%를 초과"를 의미한다.
 resource "aws_cloudwatch_metric_alarm" "ec2_high_cpu" {
   alarm_name        = "SongQuiz-Prod-Warning-EC2-HighCPU"
-  alarm_description = "app_a average CPU utilization exceeded 95% over a 5-minute period (basic monitoring granularity, not a verified moment-to-moment 5-minute streak). service=ec2 severity=warning category=infrastructure signal=CPUUtilization condition=avg>95/5m"
+  alarm_description = "app_a average CPU utilization exceeded 95% over a 5-minute period (basic monitoring granularity, not a verified moment-to-moment 5-minute streak). API moved to ECS Fargate in stage 2, so this EC2 metric now reflects the Game process only. service=ec2 severity=warning category=infrastructure signal=CPUUtilization condition=avg>95/5m"
 
   namespace   = "AWS/EC2"
   metric_name = "CPUUtilization"
@@ -177,7 +177,7 @@ resource "aws_cloudwatch_metric_alarm" "ec2_high_cpu" {
 # 1분 datapoint 5개 연속으로 실제 5분 지속을 그대로 표현할 수 있다.
 resource "aws_cloudwatch_metric_alarm" "ec2_high_memory" {
   alarm_name        = "SongQuiz-Prod-Warning-EC2-HighMemory"
-  alarm_description = "app_a memory utilization exceeded 90% for 5 consecutive minutes. service=ec2 severity=warning category=infrastructure signal=mem_used_percent condition=avg>90/5m"
+  alarm_description = "app_a memory utilization exceeded 90% for 5 consecutive minutes. API moved to ECS Fargate in stage 2, so this EC2 metric now reflects the Game process only. service=ec2 severity=warning category=infrastructure signal=mem_used_percent condition=avg>90/5m"
 
   namespace   = var.ec2_metric_namespace
   metric_name = "mem_used_percent"
@@ -276,7 +276,7 @@ locals {
 # 배포 직후부터 계속 ALARM 상태가 되므로 95%로 올렸다.
 resource "aws_cloudwatch_metric_alarm" "ec2_high_disk" {
   alarm_name        = "SongQuiz-Prod-Warning-EC2-HighDisk"
-  alarm_description = "app_a root volume (path=/, fstype=${local.ec2_root_disk_fstype}) disk utilization reached or exceeded 95% for 5 consecutive minutes. service=ec2 severity=warning category=infrastructure signal=disk_used_percent condition=avg>=95/5m"
+  alarm_description = "app_a root volume (path=/, fstype=${local.ec2_root_disk_fstype}) disk utilization reached or exceeded 95% for 5 consecutive minutes. Disk is still shared by both processes even after the API moved to ECS Fargate in stage 2 (only CPU/Memory became Game-only). service=ec2 severity=warning category=infrastructure signal=disk_used_percent condition=avg>=95/5m"
 
   namespace   = var.ec2_metric_namespace
   metric_name = "disk_used_percent"

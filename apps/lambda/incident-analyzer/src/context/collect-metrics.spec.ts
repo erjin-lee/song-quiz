@@ -17,6 +17,9 @@ const CONFIG: CollectMetricsConfig = {
   ec2InstanceId: "i-088da98215dd782e4",
   ec2MetricNamespace: "SongQuiz/EC2",
   cacheClusterId: "deploy-terraform-cache",
+  ecsClusterName: "song-quiz-cluster",
+  ecsApiServiceName: "song-quiz-api",
+  apiEcsTargetGroupArnSuffix: "targetgroup/deploy-terraform-app-ecs/jkl",
 };
 
 const WINDOW = {
@@ -273,7 +276,7 @@ describe("collectMetrics", () => {
   });
 
   describe("API_TARGET_5XX(신규)", () => {
-    it("요청받은 13개 metric + room 분산 락 3종을 정확한 이름으로 모두 요청한다(새 metric spec 없이 기존 것만 재사용)", async () => {
+    it("요청받은 19개 metric을 정확한 이름으로 모두 요청한다(3단계 - EC2.CPUUtilization/EC2.MemoryUsedPercent 대신 ECS.API.CPUUtilization/ECS.API.MemoryUtilization을 쓰고, EC2 app 타겟그룹과 별개로 ECS app_ecs 타겟그룹의 5xx/Latency/RequestCount도 함께 본다)", async () => {
       sendMock.mockResolvedValueOnce({ MetricDataResults: [] });
 
       const result = await collectMetrics(WINDOW, CONFIG, "API_TARGET_5XX");
@@ -283,6 +286,9 @@ describe("collectMetrics", () => {
         "API.HTTPCode_Target_5XX_Count",
         "API.TargetResponseTime",
         "API.RequestCount",
+        "ECS.API.HTTPCode_Target_5XX_Count",
+        "ECS.API.TargetResponseTime",
+        "ECS.API.RequestCount",
         "Game.HTTPCode_Target_5XX_Count",
         "Game.TargetResponseTime",
         "Game.RequestCount",
@@ -291,21 +297,87 @@ describe("collectMetrics", () => {
         "Game.StaleFencingWriteRejected",
         "RDS.CPUUtilization",
         "RDS.DatabaseConnections",
-        "EC2.CPUUtilization",
-        "EC2.MemoryUsedPercent",
+        "ECS.API.CPUUtilization",
+        "ECS.API.MemoryUtilization",
         "Redis.MemoryUsagePercentage",
         "Redis.CurrConnections",
         "Redis.Evictions",
       ]);
     });
 
-    it("GetMetricData 호출이 실패하면 failed 상태와 함께 16개 metric을 COLLECTION_FAILED로 채운다", async () => {
+    it("ECS app_ecs 타겟그룹의 5xx/Latency/RequestCount를 EC2 app 타겟그룹과 별개 dimension으로 조회한다(3단계)", async () => {
+      sendMock.mockResolvedValueOnce({ MetricDataResults: [] });
+
+      await collectMetrics(WINDOW, CONFIG, "API_TARGET_5XX");
+
+      const input = sendMock.mock.calls[0][0].input;
+      const queryByName = new Map<string, MetricDataQuery>(
+        input.MetricDataQueries.map((q: MetricDataQuery) => [q.Id, q]),
+      );
+
+      expect(queryByName.get("ecsApi5xx")?.MetricStat?.Metric).toEqual({
+        Namespace: "AWS/ApplicationELB",
+        MetricName: "HTTPCode_Target_5XX_Count",
+        Dimensions: [
+          { Name: "LoadBalancer", Value: CONFIG.albArnSuffix },
+          { Name: "TargetGroup", Value: CONFIG.apiEcsTargetGroupArnSuffix },
+        ],
+      });
+      expect(queryByName.get("ecsApiLatency")?.MetricStat?.Metric).toEqual({
+        Namespace: "AWS/ApplicationELB",
+        MetricName: "TargetResponseTime",
+        Dimensions: [
+          { Name: "LoadBalancer", Value: CONFIG.albArnSuffix },
+          { Name: "TargetGroup", Value: CONFIG.apiEcsTargetGroupArnSuffix },
+        ],
+      });
+      expect(queryByName.get("ecsApiRequestCount")?.MetricStat?.Metric).toEqual(
+        {
+          Namespace: "AWS/ApplicationELB",
+          MetricName: "RequestCount",
+          Dimensions: [
+            { Name: "LoadBalancer", Value: CONFIG.albArnSuffix },
+            { Name: "TargetGroup", Value: CONFIG.apiEcsTargetGroupArnSuffix },
+          ],
+        },
+      );
+    });
+
+    it("ECS API CPU/Memory metric을 실제 ecs 모듈과 동일한 namespace/dimension으로 조회한다(3단계)", async () => {
+      sendMock.mockResolvedValueOnce({ MetricDataResults: [] });
+
+      await collectMetrics(WINDOW, CONFIG, "API_TARGET_5XX");
+
+      const input = sendMock.mock.calls[0][0].input;
+      const queryByName = new Map<string, MetricDataQuery>(
+        input.MetricDataQueries.map((q: MetricDataQuery) => [q.Id, q]),
+      );
+
+      expect(queryByName.get("ecsApiCpu")?.MetricStat?.Metric).toEqual({
+        Namespace: "AWS/ECS",
+        MetricName: "CPUUtilization",
+        Dimensions: [
+          { Name: "ClusterName", Value: CONFIG.ecsClusterName },
+          { Name: "ServiceName", Value: CONFIG.ecsApiServiceName },
+        ],
+      });
+      expect(queryByName.get("ecsApiMemory")?.MetricStat?.Metric).toEqual({
+        Namespace: "AWS/ECS",
+        MetricName: "MemoryUtilization",
+        Dimensions: [
+          { Name: "ClusterName", Value: CONFIG.ecsClusterName },
+          { Name: "ServiceName", Value: CONFIG.ecsApiServiceName },
+        ],
+      });
+    });
+
+    it("GetMetricData 호출이 실패하면 failed 상태와 함께 19개 metric을 COLLECTION_FAILED로 채운다", async () => {
       sendMock.mockRejectedValueOnce(new Error("boom"));
 
       const result = await collectMetrics(WINDOW, CONFIG, "API_TARGET_5XX");
 
       expect(result.status).toBe("failed");
-      expect(result.metrics).toHaveLength(16);
+      expect(result.metrics).toHaveLength(19);
       for (const metric of result.metrics) {
         expect(metric.dataState).toBe("COLLECTION_FAILED");
       }

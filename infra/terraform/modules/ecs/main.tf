@@ -11,6 +11,47 @@ resource "aws_ecs_cluster" "main" {
   }
 }
 
+# ADOT Collector 사이드카 설정(3단계 - docs/infra/ecs-fargate-migration-plan.md). EC2에서는
+# CloudWatch Agent가 127.0.0.1:4318에서 OTLP를 받아 X-Ray로 보내주지만
+# (environments/prod/cloudwatch-agent/amazon-cloudwatch-agent.json), ECS Task에는 그 역할을
+# 할 host-level agent가 없다 - 대신 같은 Task 안에 Collector 컨테이너를 사이드카로 띄운다.
+# awsvpc network mode라 api/otel-collector 두 컨테이너가 네트워크 네임스페이스를 공유하므로
+# api는 그대로 localhost:4318로 보내면 된다(EC2와 동일한 포트로 맞춰 둘을 대칭시켰다).
+#
+# 설정 파일을 별도 S3/SSM 리소스로 만들지 않고 AOT_CONFIG_CONTENT 환경변수(ADOT Collector가
+# 공식 지원하는 "--config=env:AOT_CONFIG_CONTENT" 방식)로 YAML을 직접 주입한다 - 시크릿이
+# 아니므로 secrets(SSM)가 아니라 environment로 충분하다.
+locals {
+  otel_collector_config = yamlencode({
+    receivers = {
+      otlp = {
+        protocols = {
+          http = {
+            endpoint = "0.0.0.0:4318"
+          }
+        }
+      }
+    }
+    processors = {
+      batch = {}
+    }
+    exporters = {
+      awsxray = {
+        region = var.aws_region
+      }
+    }
+    service = {
+      pipelines = {
+        traces = {
+          receivers  = ["otlp"]
+          processors = ["batch"]
+          exporters  = ["awsxray"]
+        }
+      }
+    }
+  })
+}
+
 # container_definitions는 environment(평문)와 secrets(SSM Parameter Store ARN 참조)
 # 두 종류로 나뉜다 - 실제 값은 environments/prod가 map으로 넘겨주고, 이 모듈은 그 map을
 # ECS가 요구하는 {name, value}/{name, valueFrom} 리스트 형태로만 변환한다(값 자체를
@@ -68,6 +109,30 @@ resource "aws_ecs_task_definition" "api" {
         timeout     = 5
         retries     = 3
         startPeriod = 30
+      }
+    },
+    {
+      name  = "aws-otel-collector"
+      image = var.otel_collector_image
+      # essential=false - 사이드카가 죽어도(트레이스 export 실패) api 컨테이너/Task 전체를
+      # 함께 종료시키지 않는다. 트레이싱은 부가 관측 기능이지 서비스 가용성 요건이 아니다.
+      essential = false
+      cpu       = var.otel_collector_cpu
+      memory    = var.otel_collector_memory
+
+      command = ["--config=env:AOT_CONFIG_CONTENT"]
+
+      environment = [
+        { name = "AOT_CONFIG_CONTENT", value = local.otel_collector_config }
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = var.api_log_group_name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "ecs-otel"
+        }
       }
     }
   ])

@@ -88,7 +88,9 @@ locals {
         ]
       }
     },
-    # EC2 자원 부족 여부 - CPU(AWS/EC2)와 Memory/Disk(CloudWatch Agent, SongQuiz/EC2)를 한 화면에
+    # API 자원 부족 여부 - 3단계(ECS Fargate 이관)에서 API가 ECS로 전환된 뒤에는 API
+    # 런타임 자원 상태를 AWS/ECS Service CPU/MemoryUtilization으로 본다(app_a EC2 CPU/Memory는
+    # 더 이상 API를 반영하지 않는다 - 아래 "Game Resources (EC2)" 위젯 참고).
     {
       type   = "metric"
       x      = 0
@@ -96,7 +98,31 @@ locals {
       width  = 12
       height = 6
       properties = {
-        title  = "EC2 Resources (app_a)"
+        title  = "API Resources (ECS)"
+        view   = "timeSeries"
+        region = var.aws_region
+        stat   = "Average"
+        period = local.period
+        yAxis = {
+          left = { min = 0, max = 100 }
+        }
+        metrics = [
+          ["AWS/ECS", "CPUUtilization", "ClusterName", var.ecs_cluster_name, "ServiceName", var.ecs_api_service_name, { label = "CPUUtilization" }],
+          ["AWS/ECS", "MemoryUtilization", "ClusterName", var.ecs_cluster_name, "ServiceName", var.ecs_api_service_name, { label = "MemoryUtilization" }],
+        ]
+      }
+    },
+    # Game 자원 부족 여부 - Game은 아직 app_a EC2에 남아 있다(5단계에서 ECS로 전환 예정).
+    # API가 ECS로 이관된 뒤 이 EC2 CPU/Memory/Disk는 사실상 Game 프로세스만 반영한다 -
+    # 위젯 제목을 "app_a"가 아니라 "Game"으로 명시해 혼동을 막는다.
+    {
+      type   = "metric"
+      x      = 12
+      y      = 12
+      width  = 12
+      height = 6
+      properties = {
+        title  = "Game Resources (EC2, app_a)"
         view   = "timeSeries"
         region = var.aws_region
         stat   = "Average"
@@ -122,8 +148,8 @@ locals {
     # RDS가 병목인지 - CPU
     {
       type   = "metric"
-      x      = 12
-      y      = 12
+      x      = 0
+      y      = 18
       width  = 12
       height = 6
       properties = {
@@ -140,7 +166,7 @@ locals {
     # RDS가 병목인지 - Connection pool 급증 여부는 평균보다 최댓값이 중요
     {
       type   = "metric"
-      x      = 0
+      x      = 12
       y      = 18
       width  = 12
       height = 6
@@ -159,8 +185,8 @@ locals {
     # Evictions는 발생 횟수라 Sum, 나머지 둘은 시점 값이라 Average를 쓴다.
     {
       type   = "metric"
-      x      = 12
-      y      = 18
+      x      = 0
+      y      = 24
       width  = 12
       height = 6
       properties = {

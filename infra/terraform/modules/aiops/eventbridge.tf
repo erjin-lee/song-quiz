@@ -15,9 +15,16 @@
 # 주소(aws_cloudwatch_event_rule.quiz_snapshot_failure_alarm)는 그대로 두고 event_pattern의
 # alarmName 목록만 늘렸다(리소스 이름을 바꾸면 Terraform이 삭제 후 재생성으로 계획해
 # 불필요한 replace가 생긴다).
+#
+# 3단계(ECS Fargate 이관)에서 api_ecs_target_5xx_alarm_name을 추가했다 - API Target5xx는
+# 이제 EC2 app 타겟그룹과 ECS app_ecs 타겟그룹 두 곳 모두에 Alarm이 있고(monitoring 모듈의
+# local.alarm_target_groups), api_traffic_target 값에 따라 실제로 어느 쪽이 ALARM이 될지
+# 달라진다. 두 Alarm 모두 여기서 감시해야 트래픽 전환 시점과 무관하게 분석이 끊기지
+# 않는다(incident-policy.ts의 IncidentPolicy.additionalAlarms가 Lambda 쪽에서 두 이름을
+# 같은 API_TARGET_5XX IncidentType으로 취급한다).
 resource "aws_cloudwatch_event_rule" "quiz_snapshot_failure_alarm" {
   name        = "${var.name_prefix}-aiops-quiz-snapshot-failure"
-  description = "${var.quiz_snapshot_failure_alarm_name}/${var.game_target_5xx_alarm_name}/${var.api_target_5xx_alarm_name} Alarm의 ALARM 상태 변화만 incident-analyzer Lambda로 전달한다"
+  description = "${var.quiz_snapshot_failure_alarm_name}/${var.game_target_5xx_alarm_name}/${var.api_target_5xx_alarm_name}/${var.api_ecs_target_5xx_alarm_name} Alarm의 ALARM 상태 변화만 incident-analyzer Lambda로 전달한다"
 
   event_pattern = jsonencode({
     source      = ["aws.cloudwatch"]
@@ -27,6 +34,7 @@ resource "aws_cloudwatch_event_rule" "quiz_snapshot_failure_alarm" {
         var.quiz_snapshot_failure_alarm_name,
         var.game_target_5xx_alarm_name,
         var.api_target_5xx_alarm_name,
+        var.api_ecs_target_5xx_alarm_name,
       ]
       state = {
         value = ["ALARM"]

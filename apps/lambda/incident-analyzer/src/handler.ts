@@ -16,23 +16,27 @@ import { buildAiAnalysisMessage } from "./slack/build-ai-analysis-message";
 import { sendSlackMessage } from "./send-slack-message";
 import { getSsmParameter } from "./get-ssm-parameter";
 
-// EventBridge Rule(infra/terraform/modules/aiops/eventbridge.tf)이 이미 정확히 이 두 알람
-// 이름 + ALARM 상태로 좁혀 보내지만, alarm-notifier와 동일하게 Lambda 쪽에서도 한 번 더
+// EventBridge Rule(infra/terraform/modules/aiops/eventbridge.tf)이 이미 정확히 이 Alarm
+// 이름들 + ALARM 상태로 좁혀 보내지만, alarm-notifier와 동일하게 Lambda 쪽에서도 한 번 더
 // 방어적으로 검증한다(§6 - OK/INSUFFICIENT_DATA는 분석하지 않는다, §5 - 다른 Alarm은
 // 분석하지 않는다). 새 Alarm을 추가할 때는 IncidentPolicy(context/incident-policy.ts)에
 // 항목 하나만 추가한다(§v1-2 최소 공통화) - 아직 지원하지 않는 Alarm은 이 맵에 없으므로
-// 자동으로 skip된다.
-const INCIDENT_TYPE_BY_ALARM_NAME: Record<string, IncidentType> =
-  Object.fromEntries(
-    (Object.keys(INCIDENT_POLICIES) as IncidentType[]).map(
-      (incidentType): [string, IncidentType] => {
-        const policy = INCIDENT_POLICIES[incidentType];
-        const alarmName =
-          process.env[policy.alarmNameEnvVar] ?? policy.defaultAlarmName;
-        return [alarmName, incidentType];
-      },
-    ),
-  );
+// 자동으로 skip된다. 한 IncidentType이 여러 Alarm에 매핑될 수도 있다(3단계 -
+// IncidentPolicy.additionalAlarms, API_TARGET_5XX가 EC2/ECS 두 타겟그룹의 Target5xx
+// Alarm을 모두 이 타입으로 취급하는 경우 참고).
+const INCIDENT_TYPE_BY_ALARM_NAME: Record<string, IncidentType> = {};
+for (const incidentType of Object.keys(INCIDENT_POLICIES) as IncidentType[]) {
+  const policy = INCIDENT_POLICIES[incidentType];
+  const primaryAlarmName =
+    process.env[policy.alarmNameEnvVar] ?? policy.defaultAlarmName;
+  INCIDENT_TYPE_BY_ALARM_NAME[primaryAlarmName] = incidentType;
+
+  for (const additional of policy.additionalAlarms ?? []) {
+    const additionalAlarmName =
+      process.env[additional.alarmNameEnvVar] ?? additional.defaultAlarmName;
+    INCIDENT_TYPE_BY_ALARM_NAME[additionalAlarmName] = incidentType;
+  }
+}
 const ALARM_NAME_PREFIX = "SongQuiz-Prod-";
 const ANALYSIS_WINDOW_MINUTES = 15;
 const DEFAULT_OPENAI_MODEL = "gpt-5.6-luna";
@@ -52,6 +56,14 @@ const DB_INSTANCE_IDENTIFIER = process.env.DB_INSTANCE_IDENTIFIER;
 const EC2_INSTANCE_ID = process.env.EC2_INSTANCE_ID;
 const EC2_METRIC_NAMESPACE = process.env.EC2_METRIC_NAMESPACE;
 const CACHE_CLUSTER_ID = process.env.CACHE_CLUSTER_ID;
+// API_TARGET_5XX(3단계, ECS Fargate 이관)에서만 쓴다 - API_LOG_GROUP_NAME과 동일한 이유로
+// findMissingEnv가 이 IncidentType일 때만 필수로 취급한다.
+const ECS_CLUSTER_NAME = process.env.ECS_CLUSTER_NAME;
+const ECS_API_SERVICE_NAME = process.env.ECS_API_SERVICE_NAME;
+// API_TARGET_5XX(3단계)에서만 쓴다 - ECS app_ecs 타겟그룹의 트래픽/5xx 조회용으로,
+// EC2 API_TARGET_GROUP_ARN_SUFFIX와 나란히 본다.
+const API_ECS_TARGET_GROUP_ARN_SUFFIX =
+  process.env.API_ECS_TARGET_GROUP_ARN_SUFFIX;
 const SLACK_WEBHOOK_PARAMETER_NAME = process.env.SLACK_WEBHOOK_PARAMETER_NAME;
 const OPENAI_API_KEY_PARAMETER_NAME = process.env.OPENAI_API_KEY_PARAMETER_NAME;
 const OPENAI_MODEL = process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL;
@@ -150,6 +162,9 @@ export async function handler(
           ec2InstanceId: EC2_INSTANCE_ID as string,
           ec2MetricNamespace: EC2_METRIC_NAMESPACE as string,
           cacheClusterId: CACHE_CLUSTER_ID as string,
+          ecsClusterName: ECS_CLUSTER_NAME,
+          ecsApiServiceName: ECS_API_SERVICE_NAME,
+          apiEcsTargetGroupArnSuffix: API_ECS_TARGET_GROUP_ARN_SUFFIX,
         },
         incidentType,
       ),

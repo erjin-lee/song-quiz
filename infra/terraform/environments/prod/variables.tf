@@ -251,15 +251,15 @@ variable "api_traffic_target" {
 }
 
 variable "api_task_cpu" {
-  description = "apps/api Fargate 태스크의 CPU 유닛(1024 = 1 vCPU)"
+  description = "apps/api Fargate 태스크의 CPU 유닛(1024 = 1 vCPU) - 3단계에서 ADOT Collector 사이드카 몫까지 포함하도록 256에서 512로 올렸다"
   type        = string
-  default     = "256"
+  default     = "512"
 }
 
 variable "api_task_memory" {
-  description = "apps/api Fargate 태스크의 메모리(MiB)"
+  description = "apps/api Fargate 태스크의 메모리(MiB) - 3단계에서 ADOT Collector 사이드카 몫까지 포함하도록 512에서 1024로 올렸다"
   type        = string
-  default     = "512"
+  default     = "1024"
 }
 
 variable "api_desired_count" {

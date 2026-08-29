@@ -133,3 +133,26 @@ resource "aws_iam_role_policy" "ecs_api_task_ses_send" {
     ]
   })
 }
+
+# app_xray_write(main.tf, EC2용)와 동일한 최소 권한 - 3단계(트레이싱)에서 추가한
+# aws-otel-collector 사이드카(main.tf)가 이 Task Role 자격증명으로 X-Ray에 쓴다(사이드카도
+# Task Execution Role이 아니라 Task Role을 쓴다). xray:PutTraceSegments/PutTelemetryRecords는
+# 리소스 수준 권한을 지원하지 않는 계정 전역 액션이라 Resource가 "*"일 수밖에 없다.
+resource "aws_iam_role_policy" "ecs_api_task_xray_write" {
+  name = "${var.project_name}-ecs-api-task-xray-write"
+  role = aws_iam_role.ecs_api_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "xray:PutTraceSegments",
+          "xray:PutTelemetryRecords",
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}

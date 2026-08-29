@@ -38,6 +38,11 @@ const METRIC_SEMANTICS: Record<string, MetricSemantic> = {
   "Redis.MemoryUsagePercentage": "gauge",
   "Redis.CurrConnections": "gauge",
   "Redis.Evictions": "sparse_count",
+  "ECS.API.CPUUtilization": "gauge",
+  "ECS.API.MemoryUtilization": "gauge",
+  "ECS.API.HTTPCode_Target_5XX_Count": "sparse_count",
+  "ECS.API.TargetResponseTime": "gauge",
+  "ECS.API.RequestCount": "sparse_count",
 };
 
 const cloudWatchClient = new CloudWatchClient({});
@@ -65,6 +70,14 @@ export interface CollectMetricsConfig {
   ec2InstanceId: string;
   ec2MetricNamespace: string;
   cacheClusterId: string;
+  // API_TARGET_5XX(3단계 - ECS Fargate 이관)에서만 쓴다 - apps/lambda/CLAUDE.md 규칙대로,
+  // terraform apply 전에 CI가 코드를 먼저 배포해 이 값이 아직 없을 수 있으므로 optional로
+  // 받는다(apiLogGroupName과 동일 패턴).
+  ecsClusterName?: string;
+  ecsApiServiceName?: string;
+  // ECS app_ecs 타겟그룹의 트래픽/5xx/지연시간 조회용(3단계) - EC2 apiTargetGroupArnSuffix와
+  // 별개다. 트래픽 전환 시점과 무관하게 실제 트래픽을 받는 쪽을 조회하기 위해 둘 다 본다.
+  apiEcsTargetGroupArnSuffix?: string;
 }
 
 export interface CollectMetricsResult {
@@ -126,6 +139,35 @@ function buildAllQuerySpecs(config: CollectMetricsConfig): MetricQuerySpec[] {
       metricName: "RequestCount",
       stat: "Sum",
       dimensions: albDimensions(config.apiTargetGroupArnSuffix),
+    },
+    // ECS app_ecs 타겟그룹 전용(3단계) - EC2 app 타겟그룹(위 api5xx/apiLatency/
+    // apiRequestCount)과 나란히 조회한다. config.apiEcsTargetGroupArnSuffix가 없어도
+    // (terraform apply 전 CI 코드 우선 배포) spec 자체는 항상 만들어지지만, 이 값은
+    // API_TARGET_5XX의 requiredEnv에도 있어 handler.ts의 findMissingEnv가 먼저 걸러내
+    // 실제로는 값이 비어 있는 채 조회되지 않는다(ecsClusterName/ecsApiServiceName과 동일 이유).
+    {
+      id: "ecsApi5xx",
+      name: "ECS.API.HTTPCode_Target_5XX_Count",
+      namespace: "AWS/ApplicationELB",
+      metricName: "HTTPCode_Target_5XX_Count",
+      stat: "Sum",
+      dimensions: albDimensions(config.apiEcsTargetGroupArnSuffix ?? ""),
+    },
+    {
+      id: "ecsApiLatency",
+      name: "ECS.API.TargetResponseTime",
+      namespace: "AWS/ApplicationELB",
+      metricName: "TargetResponseTime",
+      stat: "Average",
+      dimensions: albDimensions(config.apiEcsTargetGroupArnSuffix ?? ""),
+    },
+    {
+      id: "ecsApiRequestCount",
+      name: "ECS.API.RequestCount",
+      namespace: "AWS/ApplicationELB",
+      metricName: "RequestCount",
+      stat: "Sum",
+      dimensions: albDimensions(config.apiEcsTargetGroupArnSuffix ?? ""),
     },
     {
       id: "gameRequestCount",
@@ -225,6 +267,34 @@ function buildAllQuerySpecs(config: CollectMetricsConfig): MetricQuerySpec[] {
       metricName: "DatabaseConnections",
       stat: "Average",
       dimensions: { DBInstanceIdentifier: config.dbInstanceIdentifier },
+    },
+    // API_TARGET_5XX 전용(3단계, ECS Fargate 이관) - API가 ECS로 전환된 뒤에는 EC2
+    // CPU/Memory가 더 이상 API 부하를 반영하지 않으므로, API 원인 분석 근거를 이 두
+    // 지표로 교체했다(incident-policy.ts 참고). config.ecsClusterName/ecsApiServiceName이
+    // 없어도(terraform apply 전 CI 코드 우선 배포) spec 자체는 항상 만들어지지만, 이 두
+    // 지표는 API_TARGET_5XX의 requiredEnv에도 있어 handler.ts의 findMissingEnv가 먼저
+    // 걸러내므로 실제로는 값이 비어 있는 채 조회되지 않는다.
+    {
+      id: "ecsApiCpu",
+      name: "ECS.API.CPUUtilization",
+      namespace: "AWS/ECS",
+      metricName: "CPUUtilization",
+      stat: "Average",
+      dimensions: {
+        ClusterName: config.ecsClusterName ?? "",
+        ServiceName: config.ecsApiServiceName ?? "",
+      },
+    },
+    {
+      id: "ecsApiMemory",
+      name: "ECS.API.MemoryUtilization",
+      namespace: "AWS/ECS",
+      metricName: "MemoryUtilization",
+      stat: "Average",
+      dimensions: {
+        ClusterName: config.ecsClusterName ?? "",
+        ServiceName: config.ecsApiServiceName ?? "",
+      },
     },
   ];
 }
