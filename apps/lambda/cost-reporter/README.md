@@ -28,7 +28,7 @@ devDependencies로만 선언되어 있다 - Lambda Node.js 관리형 런타임�
 
 | 구성 요소 | 무엇을 하는가 | Terraform |
 |---|---|---|
-| Cost Allocation Tag | 모든 리소스에 `Project`/`Environment`/`ManagedBy`를 자동으로 붙이고(provider `default_tags`), EC2/ALB/RDS/ElastiCache/NAT처럼 api/game이 함께 쓰는 리소스에 `Service = shared`를, apps/web 전용 리소스에 `Service = web`을 붙인다 | `environments/{prod,bootstrap}/providers.tf`, 각 모듈의 `tags` |
+| Cost Allocation Tag | 모든 리소스에 `Project`/`Environment`/`ManagedBy`를 자동으로 붙이고(provider `default_tags`), Bastion/`app_a`(EC2)/ALB/RDS/ElastiCache처럼 api/game이 함께 쓰는 리소스에 `Service = shared`를, ECR/ECS Task Definition·Service처럼 서비스별로 나뉘는 리소스에 `Service = api`/`Service = game`을, apps/web 전용 리소스에 `Service = web`을 붙인다 | `environments/{prod,bootstrap}/providers.tf`, 각 모듈의 `tags` |
 | Monthly Budget | 이번 달 실제/예상 비용이 설정한 한도의 50/80/100%(실제)·80/100%(예상)를 넘으면 이메일로 알린다 | `modules/finops/budget.tf` |
 | Cost Anomaly Detection | 계정 전체 AWS 서비스 비용을 매일 관찰하다가, 과거 지출 패턴 대비 비정상적으로 튄 비용(절대값 기준)이 있으면 이메일로 알린다 | `modules/finops/anomaly-detection.tf` |
 | Cost Reporter(이 워크스페이스) | 그날그날의 실제 지출 현황을 매일 한 번 요약해서 Slack으로 보여준다 | `modules/cost-reporter/` |

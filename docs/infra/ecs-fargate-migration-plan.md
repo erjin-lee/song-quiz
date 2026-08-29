@@ -788,32 +788,52 @@ Task 수 증가에 따라 RDS/Redis connection 수가 증가하므로 Task별 co
     - public Fargate Task의 public IP는 Task 재생성/배포 시 변경될 수 있다.
     - 고정 egress IP가 필요한 외부 연동이 존재하면 public Fargate 구조만으로는 해결할 수 없으며 NAT Gateway EIP 또는 별도 egress 구조를 다시 검토해야 한다.
 
-- **CI/CD 파이프라인 재작성**
-    - 현재 `deploy-api.yml`/`deploy-game.yml`은 EC2 SSH + PM2 배포 방식이다.
-    - 1단계에서는 ECR build/push만 별도 workflow로 추가하고 Production 배포에는 연결하지 않는다.
-    - 각 서비스 ECS 전환 단계에서 ECR push → Task Definition revision → ECS Service deploy 흐름으로 변경한다.
+- **CI/CD 파이프라인 재작성** - 해결됨(2026-08-29)
+    - `deploy-api.yml`(3단계)/`deploy-game.yml`(4단계) 모두 EC2 SSH + PM2 배포에서
+      ECR push → Task Definition revision → ECS Service deploy 흐름으로 교체했다.
+    - 단, `deploy-game.yml`이 main에서 실제 push로 트리거되어 CI 경로(OIDC
+      assume-role 포함)로 정상 완주하는지는 아직 실행 확인이 안 됐다(4단계 "진행
+      상태" 참고) - 지금 서비스 중인 이미지는 병합 전 사용자가 로컬에서 직접
+      build/push한 것이다.
 
-- **RDS/Redis connection pool**
-    - ECS Task가 scale-out될수록 프로세스별 connection pool도 함께 증가한다.
-    - Auto Scaling 도입 전에 RDS `max_connections`, MySQL pool 크기, Redis connection 수를 검토한다.
+- **RDS/Redis connection pool** - 해결됨(2026-08-29, 5단계)
+    - `modules/ecs/autoscaling.tf`의 `api_autoscaling_max_capacity`(기본 3)를 RDS
+      `db.t3.micro`의 `max_connections`(약 85)와 Task당 TypeORM 기본 connection
+      pool(10)을 곱한 값이 안전하게 여유를 두도록 정했다(최대 30/85). Redis
+      connection 수는 이번 단계에서 별도로 조정하지 않았다 - 실제 부하 관찰 후
+      필요하면 재검토한다.
 
-- **Socket.IO multi-instance**
-    - Redis Adapter만으로 모든 multi-instance 문제가 해결되는 것은 아니다.
-    - transport 방식, sticky session 필요 여부, reconnect, lock/timer/fencing을 실제 부하 테스트로 검증한다.
+- **Socket.IO multi-instance** - 해결됨(2026-08-29)
+    - transport(WebSocket-only, `apps/web/src/api/socket.ts`)와 sticky session
+      미사용 결정, Redis Adapter가 푸는 문제와 sticky session이 푸는 문제의 구분을
+      [ADR-0006](../adr/0006-game-multi-instance-no-sticky-session.md)에 기록했다.
+      실제 부하 테스트는 사용자가 이 저장소 밖에서 별도로 진행했다(로그/리포트는
+      저장소에 없음).
 
-- **Task 종료/배포 중 연결 처리**
+- **Task 종료/배포 중 연결 처리** - 미해결
     - ECS rolling deployment/scale-in으로 Game Task가 종료될 때 Socket.IO connection이 끊긴다.
     - client reconnect와 room 복구가 정상적으로 동작하는지 검증한다.
     - 필요하면 ECS stop timeout / graceful shutdown 처리도 검토한다.
+    - 5단계 Auto Scaling을 실제 적용은 했지만(2026-08-29) 아직 real scale-in 이벤트로
+      이 시나리오를 관찰하지는 않았다.
 
-- **AIOps metric 의미 변경**
-    - API/Game이 ECS로 전환되면 기존 EC2 CPU/Memory metric은 해당 서비스 runtime 상태를 나타내지 않는다.
-    - 서비스가 ECS로 전환되는 시점에 IncidentPolicy 및 Dashboard의 runtime metric을 ECS 기준으로 교체한다.
+- **AIOps metric 의미 변경** - 부분 해결
+    - API는 3단계에서 `API_TARGET_5XX` IncidentPolicy와 Dashboard를 ECS
+      CPU/MemoryUtilization 기준으로 교체했다.
+    - Game은 4단계 범위에서 제외했다 - `incident-analyzer`의 `GAME_TARGET_5XX`
+      IncidentPolicy와 Dashboard는 여전히 EC2 CPU/Memory 지표를 참조한다
+      (`environments/prod/main.tf`의 `module.aiops`/`module.monitoring`에 전달하는
+      `ec2_instance_id`/`ec2_metric_namespace`가 그대로다). `app_a`가 정지된 지금은
+      이 지표가 사실상 계속 비어 있는 상태다 - Game Target5xx 발생 시
+      incident-analyzer가 Infrastructure 컨텍스트 없이(또는 결측으로) 분석하게 된다.
+      후속 작업으로 남아 있다.
 
-- **NAT 제거 가능 여부**
-    - ECS 전환 완료만으로 NAT 제거 조건이 충족된다고 가정하지 않는다.
-    - NAT 삭제 전에 실제 NAT를 사용하는 private workload가 남아 있는지 별도로 확인한다.
+- **NAT 제거 가능 여부** - 해결됨(2026-08-29)
+    - "NAT Gateway 제거 조건" 절 참고 - `app_a`가 정지(제거 아님) 상태에서, 코드/실제
+      AWS 조회로 NAT를 쓰는 workload가 없음을 확인한 뒤 NAT Gateway/EIP/route를
+      제거했다.
 
-- **Bastion 장기 유지 여부**
-    - ECS 전환 후 애플리케이션 서버 SSH 용도는 사라진다.
-    - RDS/Redis 터널링 용도만으로 Bastion을 계속 유지할지, SSM 등 다른 접근 방식으로 전환할지는 후속 작업으로 판단한다.
+- **Bastion 장기 유지 여부** - 결정됨(2026-08-29, 사용자 결정)
+    - 애플리케이션 서버 SSH 용도(구 EC2 배포)는 사라졌지만, RDS/Redis 터널링 등
+      운영 접근 용도로 **그대로 유지**하기로 했다. SSM 전환 등 대체 방식 검토는
+      보류.
