@@ -142,6 +142,31 @@ variable "ecs_api_service_name" {
   type        = string
 }
 
+# Game Target5xx 분석(ECS Fargate 이관 4단계 AIOps 보정) - api_ecs_service_name과 동일한
+# 이유. Game도 app_a EC2가 정지되고 game_traffic_target = "ecs"로 전환된 뒤에는 EC2
+# CPU/Memory 대신 이 값들로 AWS/ECS CPUUtilization/MemoryUtilization을 조회한다.
+variable "ecs_game_service_name" {
+  description = "apps/game ECS 서비스 이름(ecs 모듈 출력) - AWS/ECS Metric의 ServiceName dimension"
+  type        = string
+}
+
+# game_ecs 타겟그룹의 Target5xx Alarm(monitoring 모듈의 local.alarm_target_groups.game_ecs가
+# 만드는 것과 같은 이름) - game_target_5xx_alarm_name(EC2 game 타겟그룹)과 별개 Alarm이지만
+# incident-policy.ts의 IncidentPolicy.additionalAlarms를 통해 같은 GAME_TARGET_5XX
+# IncidentType으로 취급된다. api_ecs_target_5xx_alarm_name과 동일한 패턴.
+variable "game_ecs_target_5xx_alarm_name" {
+  description = "Game Target5xx(ECS game_ecs 타겟그룹) 분석 대상 Alarm 이름(정확히 일치). EventBridge event pattern과 Lambda 쪽 방어적 재검증에 함께 쓴다."
+  type        = string
+  default     = "SongQuiz-Prod-High-Game-ECS-Target5xx"
+}
+
+# ECS game_ecs 타겟그룹의 트래픽/5xx/지연시간 조회용 - EC2 game_target_group_arn_suffix와
+# 별개다. api_ecs_target_group_arn_suffix와 동일한 이유로 둘 다 나란히 본다.
+variable "game_ecs_target_group_arn_suffix" {
+  description = "apps/game ECS Fargate 타겟그룹(game_ecs)의 arn_suffix(load_balancer 모듈 출력)"
+  type        = string
+}
+
 variable "slack_webhook_parameter_name" {
   description = "Slack Incoming Webhook URL이 저장된 SSM Parameter 이름(SecureString). alarm-notifier(modules/notification)와 같은 채널을 재사용하므로 기본값을 그 모듈의 기본값과 동일하게 둔다(§25) - 별도 AIOps 전용 Webhook을 새로 만들지 않는다."
   type        = string

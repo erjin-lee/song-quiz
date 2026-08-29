@@ -22,9 +22,13 @@
 # 달라진다. 두 Alarm 모두 여기서 감시해야 트래픽 전환 시점과 무관하게 분석이 끊기지
 # 않는다(incident-policy.ts의 IncidentPolicy.additionalAlarms가 Lambda 쪽에서 두 이름을
 # 같은 API_TARGET_5XX IncidentType으로 취급한다).
+#
+# ECS Fargate 이관 4단계 AIOps 보정에서 game_ecs_target_5xx_alarm_name을 동일한 이유로
+# 추가했다 - Game도 game_traffic_target 값에 따라 EC2 game 타겟그룹/ECS game_ecs 타겟그룹
+# 중 어느 쪽이 실제로 ALARM이 될지 달라진다.
 resource "aws_cloudwatch_event_rule" "quiz_snapshot_failure_alarm" {
   name        = "${var.name_prefix}-aiops-quiz-snapshot-failure"
-  description = "${var.quiz_snapshot_failure_alarm_name}/${var.game_target_5xx_alarm_name}/${var.api_target_5xx_alarm_name}/${var.api_ecs_target_5xx_alarm_name} Alarm의 ALARM 상태 변화만 incident-analyzer Lambda로 전달한다"
+  description = "${var.quiz_snapshot_failure_alarm_name}/${var.game_target_5xx_alarm_name}/${var.game_ecs_target_5xx_alarm_name}/${var.api_target_5xx_alarm_name}/${var.api_ecs_target_5xx_alarm_name} Alarm의 ALARM 상태 변화만 incident-analyzer Lambda로 전달한다"
 
   event_pattern = jsonencode({
     source      = ["aws.cloudwatch"]
@@ -33,6 +37,7 @@ resource "aws_cloudwatch_event_rule" "quiz_snapshot_failure_alarm" {
       alarmName = [
         var.quiz_snapshot_failure_alarm_name,
         var.game_target_5xx_alarm_name,
+        var.game_ecs_target_5xx_alarm_name,
         var.api_target_5xx_alarm_name,
         var.api_ecs_target_5xx_alarm_name,
       ]

@@ -52,18 +52,21 @@ const ALB_ARN_SUFFIX = process.env.ALB_ARN_SUFFIX;
 const API_TARGET_GROUP_ARN_SUFFIX = process.env.API_TARGET_GROUP_ARN_SUFFIX;
 const GAME_TARGET_GROUP_ARN_SUFFIX = process.env.GAME_TARGET_GROUP_ARN_SUFFIX;
 const DB_INSTANCE_IDENTIFIER = process.env.DB_INSTANCE_IDENTIFIER;
-// Game Target5xx 분석(EC2/Redis resource pressure 비교, §v1-2)에만 필요한 metric dimension이다.
-const EC2_INSTANCE_ID = process.env.EC2_INSTANCE_ID;
-const EC2_METRIC_NAMESPACE = process.env.EC2_METRIC_NAMESPACE;
 const CACHE_CLUSTER_ID = process.env.CACHE_CLUSTER_ID;
-// API_TARGET_5XX(3단계, ECS Fargate 이관)에서만 쓴다 - API_LOG_GROUP_NAME과 동일한 이유로
-// findMissingEnv가 이 IncidentType일 때만 필수로 취급한다.
+// API_TARGET_5XX(3단계, ECS Fargate 이관)/GAME_TARGET_5XX(4단계 AIOps 보정)에서 쓴다 -
+// API_LOG_GROUP_NAME과 동일한 이유로 findMissingEnv가 해당 IncidentType일 때만 필수로
+// 취급한다. api/game이 같은 ECS 클러스터를 공유하므로 ECS_CLUSTER_NAME 하나를 함께 쓴다.
 const ECS_CLUSTER_NAME = process.env.ECS_CLUSTER_NAME;
 const ECS_API_SERVICE_NAME = process.env.ECS_API_SERVICE_NAME;
+const ECS_GAME_SERVICE_NAME = process.env.ECS_GAME_SERVICE_NAME;
 // API_TARGET_5XX(3단계)에서만 쓴다 - ECS app_ecs 타겟그룹의 트래픽/5xx 조회용으로,
 // EC2 API_TARGET_GROUP_ARN_SUFFIX와 나란히 본다.
 const API_ECS_TARGET_GROUP_ARN_SUFFIX =
   process.env.API_ECS_TARGET_GROUP_ARN_SUFFIX;
+// GAME_TARGET_5XX(4단계 AIOps 보정)에서만 쓴다 - ECS game_ecs 타겟그룹의 트래픽/5xx
+// 조회용으로, EC2 GAME_TARGET_GROUP_ARN_SUFFIX와 나란히 본다.
+const GAME_ECS_TARGET_GROUP_ARN_SUFFIX =
+  process.env.GAME_ECS_TARGET_GROUP_ARN_SUFFIX;
 const SLACK_WEBHOOK_PARAMETER_NAME = process.env.SLACK_WEBHOOK_PARAMETER_NAME;
 const OPENAI_API_KEY_PARAMETER_NAME = process.env.OPENAI_API_KEY_PARAMETER_NAME;
 const OPENAI_MODEL = process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL;
@@ -159,12 +162,12 @@ export async function handler(
           apiTargetGroupArnSuffix: API_TARGET_GROUP_ARN_SUFFIX as string,
           gameTargetGroupArnSuffix: GAME_TARGET_GROUP_ARN_SUFFIX as string,
           dbInstanceIdentifier: DB_INSTANCE_IDENTIFIER as string,
-          ec2InstanceId: EC2_INSTANCE_ID as string,
-          ec2MetricNamespace: EC2_METRIC_NAMESPACE as string,
           cacheClusterId: CACHE_CLUSTER_ID as string,
           ecsClusterName: ECS_CLUSTER_NAME,
           ecsApiServiceName: ECS_API_SERVICE_NAME,
           apiEcsTargetGroupArnSuffix: API_ECS_TARGET_GROUP_ARN_SUFFIX,
+          ecsGameServiceName: ECS_GAME_SERVICE_NAME,
+          gameEcsTargetGroupArnSuffix: GAME_ECS_TARGET_GROUP_ARN_SUFFIX,
         },
         incidentType,
       ),

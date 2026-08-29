@@ -51,12 +51,13 @@ const ENV = {
   API_TARGET_GROUP_ARN_SUFFIX: "targetgroup/deploy-terraform-api/def",
   GAME_TARGET_GROUP_ARN_SUFFIX: "targetgroup/deploy-terraform-game/ghi",
   DB_INSTANCE_IDENTIFIER: "deploy-terraform-db",
-  EC2_INSTANCE_ID: "i-088da98215dd782e4",
-  EC2_METRIC_NAMESPACE: "SongQuiz/EC2",
   CACHE_CLUSTER_ID: "deploy-terraform-cache",
   ECS_CLUSTER_NAME: "song-quiz-cluster",
   ECS_API_SERVICE_NAME: "song-quiz-api",
+  ECS_GAME_SERVICE_NAME: "song-quiz-game",
   API_ECS_TARGET_GROUP_ARN_SUFFIX: "targetgroup/deploy-terraform-app-ecs/jkl",
+  GAME_ECS_TARGET_GROUP_ARN_SUFFIX:
+    "targetgroup/deploy-terraform-game-ecs/mno",
   SLACK_WEBHOOK_PARAMETER_NAME: "/song-quiz/prod/slack/alarm-webhook-url",
   OPENAI_API_KEY_PARAMETER_NAME: "/song-quiz/prod/openai/api-key",
 };
@@ -282,8 +283,7 @@ describe("handler", () => {
     expect(mockSendSlackMessage).not.toHaveBeenCalled();
   });
 
-  it("ECS_CLUSTER_NAME/ECS_API_SERVICE_NAME이 없어도 QuizSnapshotFailure/Game Target5xx는 계속 동작한다(3단계 - API_TARGET_5XX 전용 requiredEnv)", async () => {
-    process.env.ECS_CLUSTER_NAME = "";
+  it("ECS_API_SERVICE_NAME이 없어도 QuizSnapshotFailure/Game Target5xx는 계속 동작한다(3단계 - API_TARGET_5XX 전용 requiredEnv)", async () => {
     process.env.ECS_API_SERVICE_NAME = "";
 
     const { handler } = await import("./handler");
@@ -292,6 +292,75 @@ describe("handler", () => {
 
     expect(mockCollectMetrics).toHaveBeenCalledTimes(2);
     expect(mockSendSlackMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("ECS_CLUSTER_NAME이 없으면 API/Game Target5xx 둘 다 조용히 종료하고 QuizSnapshotFailure는 계속 동작한다(4단계 AIOps 보정 - api/game이 ECS_CLUSTER_NAME을 공유한다)", async () => {
+    process.env.ECS_CLUSTER_NAME = "";
+
+    const { handler } = await import("./handler");
+    await handler(alarmEvent);
+    await handler(gameTarget5xxEvent);
+    await handler(apiTarget5xxEvent);
+
+    expect(mockCollectMetrics).toHaveBeenCalledTimes(1);
+    expect(mockCollectMetrics).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "QUIZ_SNAPSHOT_FAILURE",
+    );
+    expect(mockSendSlackMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("ECS_GAME_SERVICE_NAME이 없으면 Game Target5xx만 조용히 종료한다(4단계 AIOps 보정)", async () => {
+    process.env.ECS_GAME_SERVICE_NAME = "";
+
+    const { handler } = await import("./handler");
+    await handler(gameTarget5xxEvent);
+
+    expect(mockCollectMetrics).not.toHaveBeenCalled();
+    expect(mockSendSlackMessage).not.toHaveBeenCalled();
+  });
+
+  it("ECS_GAME_SERVICE_NAME이 없어도 QuizSnapshotFailure/API Target5xx는 계속 동작한다(4단계 AIOps 보정 - GAME_TARGET_5XX 전용 requiredEnv)", async () => {
+    process.env.ECS_GAME_SERVICE_NAME = "";
+
+    const { handler } = await import("./handler");
+    await handler(alarmEvent);
+    await handler(apiTarget5xxEvent);
+
+    expect(mockCollectMetrics).toHaveBeenCalledTimes(2);
+    expect(mockSendSlackMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("GAME_ECS_TARGET_GROUP_ARN_SUFFIX가 없으면 Game Target5xx만 조용히 종료한다(4단계 AIOps 보정)", async () => {
+    process.env.GAME_ECS_TARGET_GROUP_ARN_SUFFIX = "";
+
+    const { handler } = await import("./handler");
+    await handler(gameTarget5xxEvent);
+
+    expect(mockCollectMetrics).not.toHaveBeenCalled();
+    expect(mockSendSlackMessage).not.toHaveBeenCalled();
+  });
+
+  it("ECS game_ecs 타겟그룹의 Game Target5xx ALARM도 같은 GAME_TARGET_5XX 분석으로 연결된다(4단계 AIOps 보정 - game_traffic_target 전환 시점과 무관하게 EC2/ECS 두 타겟그룹 모두 감시)", async () => {
+    const event: EventBridgeAlarmStateChangeEvent = {
+      ...gameTarget5xxEvent,
+      detail: {
+        ...gameTarget5xxEvent.detail,
+        alarmName: "SongQuiz-Prod-High-Game-ECS-Target5xx",
+      },
+    };
+
+    const { handler } = await import("./handler");
+    await handler(event);
+
+    expect(mockCollectMetrics).toHaveBeenCalledTimes(1);
+    expect(mockCollectMetrics).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "GAME_TARGET_5XX",
+    );
+    expect(mockSendSlackMessage).toHaveBeenCalledTimes(1);
   });
 
   it("Metrics/Logs가 모두 실패하면 OpenAI를 호출하지 않는다(§16)", async () => {

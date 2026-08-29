@@ -183,8 +183,10 @@ Avoid unnecessary variables for values that are truly implementation details.
     ├── iam/                # app 인스턴스 역할/정책 + apps/api ECS Task Execution/Task
     │                       # Role(2단계) + Task Role의 X-Ray 쓰기 권한(3단계, 2026-08-29 -
     │                       # ecs 모듈의 aws-otel-collector 사이드카가 이 권한으로 X-Ray에 쓴다)
-    │                       # + apps/game ECS Task Execution Role(4단계, 2026-08-29) - game은
-    │                       # AWS SDK를 직접 쓰지 않아 별도 Task Role은 아직 없다
+    │                       # + apps/game ECS Task Execution Role(4단계, 2026-08-29) - 4단계
+    │                       # 당시에는 game이 AWS SDK를 직접 쓰지 않아 별도 Task Role이
+    │                       # 없었지만, Game tracing 추가(4단계 AIOps 보정 이후 후속 작업)에서
+    │                       # ecs_game_task Role + X-Ray 쓰기 권한을 api와 동일한 패턴으로 추가했다
     ├── compute/           # bastion + app_a 인스턴스
     ├── load_balancer/     # ALB, 타겟그룹, 리스너 + app_ecs 타겟그룹(2단계, ALB
     │                       # default_action은 api_traffic_target 변수로 EC2/ECS 전환) +
@@ -212,8 +214,13 @@ Avoid unnecessary variables for values that are truly implementation details.
                              # 6단계)이라 이미 있는 api_ecs_no_healthy_hosts 알람으로 충분하다고
                              # 판단했다. 4단계(2026-08-29)에서 alarms.tf에 game_ecs 알람(api_ecs와
                              # 동일한 패턴 - UnhealthyHost/Target5xx/NoHealthyHosts/CPU/Memory)만
-                             # 추가했다 - Dashboard의 EC2/ECS 위젯 분리는 이번 범위에서는 하지
-                             # 않았다(사용자 요청, 3단계 수준 관측 정리는 별도 단계로 미룸).
+                             # 추가했다 - Dashboard의 EC2/ECS 위젯 분리는 그 범위에서는 하지
+                             # 않았다(사용자 요청, 3단계 수준 관측 정리는 별도 단계로 미룸). Game
+                             # ECS AIOps 보정(4단계 이후 후속 작업, 2026-08-29)에서 "Game
+                             # Resources" 위젯을 API 위젯과 동일하게 ECS CPU/MemoryUtilization
+                             # 기준으로 교체했다 - `modules/aiops`(incident-analyzer)의
+                             # `GAME_TARGET_5XX` IncidentPolicy도 같은 작업에서 EC2 대신 ECS
+                             # 지표를 쓰도록 함께 바꿨다.
     ├── notification/       # CloudWatch Alarm(SongQuiz-Prod-*) 상태변화 -> EventBridge -> Lambda
     │                        # (apps/lambda/alarm-notifier) -> Slack Incoming Webhook. monitoring의
     │                        # 개별 Alarm 리소스를 직접 참조하지 않고 alarm 이름 prefix로만 연결된다
@@ -251,11 +258,16 @@ Avoid unnecessary variables for values that are truly implementation details.
                              # 동일한 이유로) environments/bootstrap/ecs-deploy.tf에 별도로 있다.
                              #
                              # apps/game 태스크 정의/서비스(game.tf)는 4단계(2026-08-29)에서
-                             # 추가했다 - api 패턴을 그대로 따르되 OTel 사이드카는 이번 범위에
-                             # 넣지 않았다(트레이싱 비활성 상태로 시작, ARCHITECTURE.md
-                             # Observability 참고). game은 AWS SDK를 직접 쓰지 않아 Task Role이
-                             # 없다(task_role_arn을 null로 생략 가능하게 변수를 nullable로
-                             # 만들었다). CI 배포는 .github/workflows/deploy-game.yml +
+                             # 추가했다 - api 패턴을 그대로 따르되 OTel 사이드카는 4단계 범위에
+                             # 넣지 않았었다(당시 트레이싱 비활성 상태로 시작). Game tracing
+                             # 추가(4단계 AIOps 보정 이후 후속 작업, 2026-08-29)에서 api와
+                             # 동일한 aws-otel-collector 사이드카를 game.tf에 추가하고,
+                             # game_task_cpu/game_task_memory 기본값도 api_task_cpu/memory의
+                             # 3단계와 동일한 이유로 256/512에서 512/1024로 올렸다(사이드카 몫
+                             # 128 CPU/256MiB 포함). game도 이제 ecs_game_task Role(iam 모듈)을
+                             # task_role_arn으로 쓴다(더 이상 null이 아니다) - 이 사이드카가
+                             # X-Ray에 쓸 때 이 Role의 자격증명을 쓴다. CI 배포는
+                             # .github/workflows/deploy-game.yml +
                              # environments/bootstrap/ecs-deploy-game.tf(별도 OIDC Role -
                              # "Deploy Game" workflow 전용, ecs-deploy.tf의 api 전용 Role과는
                              # workflow 조건이 달라 재사용할 수 없다).

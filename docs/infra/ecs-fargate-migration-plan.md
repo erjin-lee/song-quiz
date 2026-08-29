@@ -652,7 +652,22 @@ Task 수 증가에 따라 RDS/Redis connection 수가 증가하므로 Task별 co
 - 진행 상태(2026-08-29): 2단계(API ECS 전환)와 동일한 범위로 인프라를 구성했다 - 3단계에서
   api에 추가한 aws-otel-collector 트레이싱 사이드카, Dashboard EC2/ECS 위젯 분리,
   incident-analyzer IncidentPolicy 교체는 이번 범위에 포함하지 않았다(사용자 요청, 안정화
-  이후 별도 단계로 미룬다).
+  이후 별도 단계로 미룬다). 세 항목 모두 안정화 이후 후속 작업으로 완료했다 - 트레이싱
+  사이드카는 "Game tracing 추가", 나머지 둘은 "Game ECS AIOps 보정"에서(둘 다 아래
+  참고).
+  - 진행 상태(2026-08-29, 추가 - Game tracing 추가): `modules/ecs/game.tf`에 api와 동일한
+    `aws-otel-collector` 사이드카(`essential=false`, `AOT_CONFIG_CONTENT`로 OTLP receiver
+    -> awsxray exporter 설정 주입)를 추가하고, game 컨테이너에
+    `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318`(`environments/prod/main.tf`)을
+    설정했다. `modules/iam`에 `ecs_game_task` Role(+ X-Ray
+    `PutTraceSegments`/`PutTelemetryRecords` 쓰기 권한)을 새로 추가했다 - 4단계 당시에는
+    game이 AWS SDK를 직접 쓰지 않아 Task Role 자체가 없었지만, 이 사이드카가 X-Ray에
+    쓰려면 Task Role 자격증명이 필요하다. `game_task_cpu`/`game_task_memory` 기본값도
+    api_task_cpu/memory의 3단계와 동일한 이유로 256/512에서 512/1024로 올렸다(사이드카 몫
+    128 CPU/256MiB 포함). `ARCHITECTURE.md` Observability 섹션도 API/Game이 이제 같은
+    Traces 경로를 쓰도록 갱신했다. `terraform fmt`/`validate` 통과. `aws-otel-collector`가
+    실제로 X-Ray에 trace를 전달하는지 실제 trace로 검증하는 것은 아직 남아 있다(`terraform
+    apply` 이후 사용자가 직접 진행).
     - 완료: `modules/security`(`ecs_game` SG, SSH 없음), `modules/cache`(`ecs_game` SG를
       Redis inbound source에 추가 - `database`는 추가하지 않음, Game은 RDS에 직접
       접근하지 않는다/ADR-0004), `modules/iam`(`ecs_game_task_execution` Role만 추가 -
@@ -690,11 +705,21 @@ Task 수 증가에 따라 RDS/Redis connection 수가 증가하므로 Task별 co
       모두 `"ecs"`로 전환했다 - `api.*`/`game.*` 서브도메인 트래픽이 100% ECS Fargate로
       서비스되는 것을 ALB 리스너/리스너 규칙의 forward weight(둘 다 EC2 쪽 0 / ECS 쪽
       100)로 직접 확인했다.
-    - 미완료(다음 작업, 사용자가 직접 진행): 지금 서비스 중인 Game Task Definition
-      (`deploy-terraform-game:1`)의 이미지는 여전히 병합 전 검증 때 사용자가 로컬에서
-      직접 build/push한 것이다(`sha-6ad6735...`) - `deploy-game.yml`이 main에서 실제
-      push로 트리거되어 CI 경로(OIDC assume-role 포함)로 정상 완주하는지는 아직 별도로
-      확인되지 않았다.
+    - 진행 상태(2026-08-29, 추가 - deploy-game.yml 실제 실행 검증): `gh workflow run
+      deploy-game.yml --ref main`(workflow_dispatch)로 CI 경로를 직접 실행해 확인했다 -
+      push 트리거와 동일한 job 정의를 타므로 OIDC assume-role 이후 단계는 push
+      트리거와 완전히 동일하다. Checkout -> Configure AWS credentials(OIDC assume-role,
+      `CI_ECS_DEPLOY_GAME_ROLE_ARN`) -> ECR 로그인 -> Docker build/push
+      (`sha-9567bc5...`) -> Task Definition 새 리비전 등록(`deploy-terraform-game:2`) ->
+      `ecs update-service` -> `ecs wait services-stable` -> deployment metadata 기록까지
+      4분 24초 만에 전부 성공(workflow run
+      [33238110985](https://github.com/erjin-lee/song-quiz/actions/runs/33238110985)).
+      배포 후 `aws ecs describe-services`로 `ACTIVE`/`runningCount == desiredCount == 1`/
+      `taskDefinition == deploy-terraform-game:2`를 확인했고, 배포된 이미지 태그
+      (`sha-9567bc5...`)가 그 시점의 `origin/main` HEAD 커밋과 정확히 일치하는 것도
+      확인했다. 이전(병합 전 사용자가 로컬에서 직접 build/push한) `deploy-terraform-game:1`
+      이미지는 이제 CI가 만든 리비전 2로 교체됐다 - 남은 "CI 경로 자체가 실제로
+      완주하는지"는 이 실행으로 완전히 확인됐다.
     - 결정 사항(2026-08-29): `app_a` EC2는 완전 제거하지 않고 **정지 상태로 유지**하기로
       했다(사용자 결정) - `stop-instances`만 실행했고 Terraform 리소스(`aws_instance.app_a`,
       EC2 타겟그룹/attachment, 관련 IAM Role 등)는 그대로 둔다. NAT Gateway/EIP/
@@ -791,10 +816,10 @@ Task 수 증가에 따라 RDS/Redis connection 수가 증가하므로 Task별 co
 - **CI/CD 파이프라인 재작성** - 해결됨(2026-08-29)
     - `deploy-api.yml`(3단계)/`deploy-game.yml`(4단계) 모두 EC2 SSH + PM2 배포에서
       ECR push → Task Definition revision → ECS Service deploy 흐름으로 교체했다.
-    - 단, `deploy-game.yml`이 main에서 실제 push로 트리거되어 CI 경로(OIDC
-      assume-role 포함)로 정상 완주하는지는 아직 실행 확인이 안 됐다(4단계 "진행
-      상태" 참고) - 지금 서비스 중인 이미지는 병합 전 사용자가 로컬에서 직접
-      build/push한 것이다.
+    - `deploy-game.yml`이 CI 경로(OIDC assume-role 포함)로 정상 완주하는지도
+      `workflow_dispatch` 실제 실행으로 확인했다(4단계 "진행 상태" 참고) - 서비스
+      중인 이미지가 CI가 만든 Task Definition 리비전(`deploy-terraform-game:2`)으로
+      교체됐다.
 
 - **RDS/Redis connection pool** - 해결됨(2026-08-29, 5단계)
     - `modules/ecs/autoscaling.tf`의 `api_autoscaling_max_capacity`(기본 3)를 RDS
@@ -817,16 +842,25 @@ Task 수 증가에 따라 RDS/Redis connection 수가 증가하므로 Task별 co
     - 5단계 Auto Scaling을 실제 적용은 했지만(2026-08-29) 아직 real scale-in 이벤트로
       이 시나리오를 관찰하지는 않았다.
 
-- **AIOps metric 의미 변경** - 부분 해결
+- **AIOps metric 의미 변경** - 해결됨(2026-08-29, Game ECS AIOps 보정)
     - API는 3단계에서 `API_TARGET_5XX` IncidentPolicy와 Dashboard를 ECS
       CPU/MemoryUtilization 기준으로 교체했다.
-    - Game은 4단계 범위에서 제외했다 - `incident-analyzer`의 `GAME_TARGET_5XX`
-      IncidentPolicy와 Dashboard는 여전히 EC2 CPU/Memory 지표를 참조한다
-      (`environments/prod/main.tf`의 `module.aiops`/`module.monitoring`에 전달하는
-      `ec2_instance_id`/`ec2_metric_namespace`가 그대로다). `app_a`가 정지된 지금은
-      이 지표가 사실상 계속 비어 있는 상태다 - Game Target5xx 발생 시
-      incident-analyzer가 Infrastructure 컨텍스트 없이(또는 결측으로) 분석하게 된다.
-      후속 작업으로 남아 있다.
+    - Game은 4단계 범위에서 제외했었으나(당시 상태: `incident-analyzer`의
+      `GAME_TARGET_5XX` IncidentPolicy와 Dashboard가 여전히 EC2 CPU/Memory 지표를
+      참조 - `app_a` 정지로 사실상 비어 있는 상태) 후속 작업으로 API와 동일한 패턴을
+      적용했다: `incident-policy.ts`의 `GAME_TARGET_5XX`가 `EC2.CPUUtilization`/
+      `EC2.MemoryUsedPercent` 대신 `ECS.Game.CPUUtilization`/`ECS.Game.MemoryUtilization`을
+      쓰고, `game_ecs` 타겟그룹의 Target5xx Alarm(`SongQuiz-Prod-High-Game-ECS-Target5xx`)을
+      `additionalAlarms`로 추가해 `game_traffic_target` 전환 시점과 무관하게 EC2/ECS
+      두 타겟그룹 모두 감시한다. `modules/monitoring`의 Dashboard "Game Resources"
+      위젯도 API 위젯과 동일하게 ECS 기준으로 교체했다. 더 이상 쓰이지 않게 된
+      `EC2_INSTANCE_ID`/`EC2_METRIC_NAMESPACE`(aiops 모듈 전용, monitoring 모듈의
+      EC2 Warning 알람용은 유지)도 함께 제거했다. `yarn workspace incident-analyzer
+      build`/`test`(100개) 통과, `terraform validate` 통과, `terraform plan`으로
+      실제 원격 state에 재연결해 확인 - **0 to add, 3 to change(aiops의 event_rule/
+      lambda_function, monitoring의 dashboard, 전부 in-place update), 0 to
+      destroy**(기존 리소스 교체/삭제 없음). `terraform apply`는 사용자가 직접
+      진행한다.
 
 - **NAT 제거 가능 여부** - 해결됨(2026-08-29)
     - "NAT Gateway 제거 조건" 절 참고 - `app_a`가 정지(제거 아님) 상태에서, 코드/실제

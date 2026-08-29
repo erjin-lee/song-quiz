@@ -71,6 +71,9 @@ resource "aws_lambda_function" "incident_analyzer" {
       CACHE_CLUSTER_ID                 = var.cache_cluster_id
       ECS_CLUSTER_NAME                 = var.ecs_cluster_name
       ECS_API_SERVICE_NAME             = var.ecs_api_service_name
+      ECS_GAME_SERVICE_NAME            = var.ecs_game_service_name
+      GAME_ECS_TARGET_5XX_ALARM_NAME   = var.game_ecs_target_5xx_alarm_name
+      GAME_ECS_TARGET_GROUP_ARN_SUFFIX = var.game_ecs_target_group_arn_suffix
       SLACK_WEBHOOK_PARAMETER_NAME     = var.slack_webhook_parameter_name
       OPENAI_API_KEY_PARAMETER_NAME    = var.openai_api_key_parameter_name
       OPENAI_MODEL                     = var.openai_model
