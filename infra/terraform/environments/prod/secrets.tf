@@ -166,4 +166,14 @@ locals {
       API_DOCS_PASSWORD = aws_ssm_parameter.api_docs_password[0].arn
     } : {}
   )
+
+  # ECS Fargate 이관 4단계 - apps/game이 쓰는 시크릿은 apps/api와 값을 공유하는
+  # USER_JWT_SECRET(방 참가 토큰 HMAC 키)/INTERNAL_SERVICE_SECRET(api<->game 내부 인증)
+  # 둘뿐이다(ADR-0004). 별도 SSM 파라미터를 새로 만들지 않고 위 api_secret_arns가 참조하는
+  # 파라미터를 그대로 재사용한다 - 두 서비스가 각자 다른 파라미터를 쓰면 로테이션 시 값이
+  # 갈라질 위험이 생긴다.
+  game_secret_arns = {
+    USER_JWT_SECRET         = aws_ssm_parameter.api_user_jwt_secret.arn
+    INTERNAL_SERVICE_SECRET = aws_ssm_parameter.api_internal_service_secret.arn
+  }
 }

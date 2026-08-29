@@ -68,3 +68,19 @@ variable "api_traffic_target" {
     error_message = "api_traffic_target은 \"ec2\" 또는 \"ecs\"만 허용합니다."
   }
 }
+
+variable "game_ecs_health_check_path" {
+  description = "game_ecs 타겟그룹(ECS Fargate) 헬스체크 경로 - readiness(Redis 연결 확인)를 쓴다. 기존 EC2 game 타겟그룹은 계속 alb_health_check_path(liveness)를 쓴다"
+  type        = string
+  default     = "/ready"
+}
+
+variable "game_traffic_target" {
+  description = "game 리스너 규칙이 Game 트래픽을 보낼 대상. \"ec2\"(app_a, 기존/기본값) 또는 \"ecs\"(Fargate, 신규). ECS 이관 4단계 컷오버 스위치 - environments/prod의 동일 이름 변수 참고"
+  type        = string
+
+  validation {
+    condition     = contains(["ec2", "ecs"], var.game_traffic_target)
+    error_message = "game_traffic_target은 \"ec2\" 또는 \"ecs\"만 허용합니다."
+  }
+}

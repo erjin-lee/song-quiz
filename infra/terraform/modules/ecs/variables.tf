@@ -104,3 +104,80 @@ variable "secret_arns" {
   description = "apps/api 컨테이너에 SSM Parameter Store에서 복호화해 주입할 환경변수 (name => Parameter ARN)"
   type        = map(string)
 }
+
+# --- ECS Fargate 이관 4단계 - apps/game (game.tf) ---
+
+variable "ecs_game_security_group_id" {
+  description = "apps/game ECS 태스크에 붙일 보안 그룹 ID (security 모듈 출력)"
+  type        = string
+}
+
+variable "game_target_group_arn" {
+  description = "apps/game ECS 서비스가 등록될 ALB 타겟그룹 ARN (load_balancer 모듈의 game_ecs 출력)"
+  type        = string
+}
+
+variable "game_execution_role_arn" {
+  description = "apps/game ECS Task Execution Role ARN (iam 모듈 출력)"
+  type        = string
+}
+
+variable "game_task_role_arn" {
+  description = "apps/game ECS Task Role ARN. apps/game은 지금 AWS SDK를 직접 쓰지 않아 Task Role이 없다 - null이면 aws_ecs_task_definition.game이 task_role_arn 필드를 생략한다"
+  type        = string
+  default     = null
+}
+
+variable "game_repository_url" {
+  description = "apps/game ECR 리포지토리 URL (ecr 모듈 출력)"
+  type        = string
+}
+
+variable "game_image_git_sha" {
+  description = "배포할 apps/game 이미지의 git commit SHA - api_image_git_sha와 동일한 \"sha-<값>\" 태그 관례를 쓴다"
+  type        = string
+}
+
+variable "game_log_group_name" {
+  description = "awslogs 드라이버가 쓸 CloudWatch Log Group 이름 (logging 모듈 출력, 기존 apps/game Log Group을 그대로 재사용)"
+  type        = string
+}
+
+variable "game_port" {
+  description = "apps/game(room + Socket.IO) 서버가 사용하는 포트"
+  type        = number
+}
+
+variable "game_task_cpu" {
+  description = "apps/game 태스크의 Fargate CPU 유닛(1024 = 1 vCPU) - 이번 단계는 사이드카가 없어 api_task_cpu의 3단계 이전 기본값(256)을 그대로 따른다"
+  type        = string
+  default     = "256"
+}
+
+variable "game_task_memory" {
+  description = "apps/game 태스크의 Fargate 메모리(MiB) - api_task_memory의 3단계 이전 기본값(512)을 그대로 따른다"
+  type        = string
+  default     = "512"
+}
+
+variable "game_desired_count" {
+  description = "apps/game ECS 서비스가 유지할 태스크 개수 (Auto Scaling은 5단계에서 추가 - 그 전까지는 고정값)"
+  type        = number
+  default     = 1
+}
+
+variable "game_health_check_grace_period_seconds" {
+  description = "ECS 서비스가 새 태스크의 ALB readiness 체크 실패를 무시해주는 유예 시간(초)"
+  type        = number
+  default     = 60
+}
+
+variable "game_environment_variables" {
+  description = "apps/game 컨테이너에 평문으로 주입할 환경변수 (name => value). 시크릿은 game_secret_arns를 쓴다"
+  type        = map(string)
+}
+
+variable "game_secret_arns" {
+  description = "apps/game 컨테이너에 SSM Parameter Store에서 복호화해 주입할 환경변수 (name => Parameter ARN)"
+  type        = map(string)
+}

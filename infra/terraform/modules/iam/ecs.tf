@@ -156,3 +156,99 @@ resource "aws_iam_role_policy" "ecs_api_task_xray_write" {
     ]
   })
 }
+
+# ECS Fargate 이관 4단계 - apps/game Fargate 태스크의 Task Execution Role. ecs_api_task_execution과
+# 같은 성격(ECR pull, awslogs, SSM 시크릿 복호화)이지만 대상 리포지토리/로그 그룹/시크릿이 다르다.
+#
+# apps/game은 지금 애플리케이션 코드에서 AWS SDK를 직접 쓰지 않는다(SES 발신 없음, X-Ray
+# 사이드카도 이번 단계 범위 밖) - 그래서 ecs_api_task 같은 별도 Task Role은 만들지 않는다.
+# 나중에 game이 런타임에 AWS 권한이 필요해지면(예: 트레이싱 사이드카) 그때 Task Role을 추가한다.
+resource "aws_iam_role" "ecs_game_task_execution" {
+  name = "${var.project_name}-ecs-game-task-execution"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Principal = { Service = "ecs-tasks.amazonaws.com" }
+        Action    = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = {
+    Name = "${var.project_name}-ecs-game-task-execution"
+  }
+}
+
+resource "aws_iam_role_policy" "ecs_game_task_execution_ecr" {
+  name = "${var.project_name}-ecs-game-task-execution-ecr"
+  role = aws_iam_role.ecs_game_task_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "ecr:GetAuthorizationToken"
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+        ]
+        Resource = var.ecr_game_repository_arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "ecs_game_task_execution_logs" {
+  name = "${var.project_name}-ecs-game-task-execution-logs"
+  role = aws_iam_role.ecs_game_task_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+        ]
+        # EC2 CloudWatch Agent(main.tf의 app_cloudwatch_logs)가 쓰는 것과 동일한
+        # Log Group ARN(var.game_log_group_arn) - 3단계에서 apps/api ECS도 기존
+        # Log Group을 그대로 재사용한 것과 같은 이유다.
+        Resource = "${var.game_log_group_arn}:*"
+      }
+    ]
+  })
+}
+
+# USER_JWT_SECRET/INTERNAL_SERVICE_SECRET은 apps/api와 값을 공유하는 시크릿이라(ADR-0004,
+# environments/prod/secrets.tf) 별도 SSM 파라미터/KMS 키를 새로 만들지 않고 apps/api가 쓰는
+# 것과 동일한 파라미터 ARN/KMS 키를 그대로 참조한다 - 값이 두 군데로 갈라지는 것을 막기 위함이다.
+resource "aws_iam_role_policy" "ecs_game_task_execution_ssm" {
+  name = "${var.project_name}-ecs-game-task-execution-ssm"
+  role = aws_iam_role.ecs_game_task_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "ssm:GetParameters"
+        Resource = var.ecs_game_secret_arns
+      },
+      {
+        Effect   = "Allow"
+        Action   = "kms:Decrypt"
+        Resource = var.ecs_game_secrets_kms_key_arn
+      }
+    ]
+  })
+}

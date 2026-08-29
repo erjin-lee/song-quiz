@@ -1,6 +1,6 @@
 # 비용 절감을 위한 ECS Fargate 이관 계획
 
-- 상태: Draft (단계 1 착수 전)
+- 상태: In Progress (1~4단계 Terraform/워크플로우 구성 완료, `terraform apply` 및 트래픽 컷오버는 사용자가 진행 예정 - 각 단계 "진행 상태" 참고)
 - 범위: `apps/api`, `apps/game`의 컴퓨트 계층을 EC2(`app_a`) 단일 인스턴스에서 ECR + ECS Fargate로 전환한다. RDS/ElastiCache/S3+CloudFront(web)/SES/DNS는 이번 이관 범위 밖이며 그대로 둔다(RDS/ElastiCache는 private subnet 유지).
 - 관련 코드/설정: `infra/terraform/modules/{network,security,compute,load_balancer,iam,logging,monitoring,database,cache}`, `.github/workflows/deploy-api.yml`, `.github/workflows/deploy-game.yml`, [`ARCHITECTURE.md`](../../ARCHITECTURE.md) Observability 섹션
 
@@ -575,7 +575,7 @@ Task 수 증가에 따라 RDS/Redis connection 수가 증가하므로 Task별 co
       trace/deployment context를 정상 수집하는지 라이브 검증, `api_traffic_target = "ecs"`
       전환, 최소 1~2주 안정 운영 관찰.
 
-### 4단계 — Game multi-instance 부하 테스트
+### 체크 — Game multi-instance 부하 테스트
 
 - Game은 Redis 기반 room state, Socket.IO, 분산 락/fencing, timer/reconnect를 사용하므로 ECS 전환 전에 실제 multi-instance 환경에서 정상 동작하는지 검증한다.
 - 이 단계에서는 Production 인프라를 ECS로 전환하지 않는다. 로컬 또는 별도의 검증 환경에서 Game 프로세스를 여러 개 띄워 테스트한다.
@@ -603,8 +603,13 @@ Task 수 증가에 따라 RDS/Redis connection 수가 증가하므로 Task별 co
     - Game instance 하나를 종료해도 reconnect 후 정상 복구된다.
     - lock/fencing/timer 관련 metric에서 예상하지 못한 회귀가 없다.
     - 단일 EC2 환경 대비 round progression/ACK/재접속 품질에 의미 있는 회귀가 없다.
+- 진행 상태(2026-08-29): 사용자가 별도로 multi-instance 부하 테스트를 완료했고, Socket.IO
+  transport는 WebSocket-only로 확인되어 **ALB sticky session이 불필요**하다고 결론냈다
+  (4단계의 game_ecs 타겟그룹은 stickiness 없이 구성한다). 상세 결과는 이 저장소 밖에서
+  진행되어 여기에 로그/리포트로 남아 있지 않다 - 관련 ADR("Game multi-instance 검증
+  관련 ADR", 아래 "함께 갱신해야 할 문서" 참고)은 아직 작성되지 않았다.
 
-### 5단계 — Game ECS 전환
+### 4단계 — Game ECS 전환
 
 - API 전환과 동일한 패턴으로 Game ECS Service/Task Definition을 추가한다.
 - 기존 EC2 Game Target Group은 rollback용으로 유지하고, ECS Game 전용 `target_type = "ip"` Target Group을 새로 만든다.
@@ -627,8 +632,39 @@ Task 수 증가에 따라 RDS/Redis connection 수가 증가하므로 Task별 co
     - API/Game 모두 EC2 `app_a`에 의존하지 않는다.
     - 안정화 기간 후 `app_a` 제거가 완료된다.
     - NAT 사용 workload가 없음을 확인한 뒤 NAT 제거를 별도 적용한다.
+- 진행 상태(2026-08-29): 2단계(API ECS 전환)와 동일한 범위로 인프라를 구성했다 - 3단계에서
+  api에 추가한 aws-otel-collector 트레이싱 사이드카, Dashboard EC2/ECS 위젯 분리,
+  incident-analyzer IncidentPolicy 교체는 이번 범위에 포함하지 않았다(사용자 요청, 안정화
+  이후 별도 단계로 미룬다).
+    - 완료: `modules/security`(`ecs_game` SG, SSH 없음), `modules/cache`(`ecs_game` SG를
+      Redis inbound source에 추가 - `database`는 추가하지 않음, Game은 RDS에 직접
+      접근하지 않는다/ADR-0004), `modules/iam`(`ecs_game_task_execution` Role만 추가 -
+      Game은 AWS SDK를 직접 쓰지 않아 별도 Task Role은 만들지 않았다, `task_role_arn`은
+      null 허용), `modules/ecs`(`game.tf` - api 패턴과 동일한 Task Definition/Service,
+      OTel 사이드카 제외), `modules/load_balancer`(`game_ecs` 타겟그룹 + `game_traffic_target`
+      weighted forward로 game 리스너 규칙 전환, sticky session 없음 - 위 체크 단계 결론),
+      `modules/monitoring`(`game_ecs`를 `alarm_target_groups`에 추가해 UnhealthyHost/
+      Target5xx 자동 커버, `game_ecs_no_healthy_hosts` Critical + `ecs_game_high_cpu`/
+      `high_memory` Warning 알람 - api\_ecs와 동일한 패턴, Dashboard는 이번 범위에서
+      변경하지 않음), `environments/prod/secrets.tf`(새 SSM 파라미터 없이 apps/api와
+      공유하는 `USER_JWT_SECRET`/`INTERNAL_SERVICE_SECRET`만 재사용), `environments/prod/main.tf`
+      (`game_environment_variables` - `API_SERVICE_URL`은 기존처럼 public ALB api
+      서브도메인을 그대로 호출), `environments/bootstrap/ecs-deploy-game.tf`("Deploy Game"
+      workflow 전용 `ci_ecs_deploy_game` OIDC Role), `.github/workflows/deploy-game.yml`
+      (SSH+PM2 배포를 ECR push -> Task Definition 리비전 -> `ecs update-service` ->
+      `ecs wait services-stable`로 대체 - `deploy-api.yml`과 동일한 구조). `terraform fmt`/
+      `validate`(`environments/prod`, `environments/bootstrap`) 모두 통과.
+    - 결정 사항: `game_traffic_target` 기본값은 `"ec2"`로 유지한다 - 이 문서의 체크
+      단계가 이 저장소 안에서 검증 가능한 형태(로그/리포트)로 남아 있지 않으므로, 실제
+      트래픽 컷오버는 사용자가 별도로 `"ecs"`로 전환하는 시점까지 미룬다.
+    - 미완료(다음 작업, 사용자가 직접 진행): 실제 `terraform apply`(bootstrap + prod),
+      `CI_ECS_DEPLOY_GAME_ROLE_ARN` 리포지토리 변수 등록, `deploy-game.yml` 실제 실행
+      검증(ECR push -> Task Definition 리비전 -> 서비스 갱신 -> stable), `game_traffic_target
+      = "ecs"` 전환, 안정화 기간 관찰 후 `app_a` EC2 제거, NAT 사용 workload 없음 확인 후
+      NAT Gateway 제거, Bastion 필요성 재검토, "Game multi-instance 검증 관련 ADR" 작성
+      (아래 "함께 갱신해야 할 문서" 참고).
 
-### 6단계 — ECS Auto Scaling
+### 5단계 — ECS Auto Scaling
 
 - API/Game ECS Service 각각에 Application Auto Scaling target을 등록한다.
 - 초기 v1에서는 ECS Service CPUUtilization/MemoryUtilization 기준 Target Tracking 정책으로 단순하게 시작한다.

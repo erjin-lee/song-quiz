@@ -37,3 +37,13 @@ output "app_ecs_target_group_arn_suffix" {
   description = "apps/api ECS Fargate 태스크용 타겟그룹의 arn_suffix (CloudWatch AWS/ApplicationELB 지표의 TargetGroup dimension 값)"
   value       = aws_lb_target_group.app_ecs.arn_suffix
 }
+
+output "game_ecs_target_group_arn" {
+  description = "apps/game ECS Fargate 태스크용 타겟그룹 ARN (ecs 모듈의 aws_ecs_service game load_balancer 블록에 사용)"
+  value       = aws_lb_target_group.game_ecs.arn
+}
+
+output "game_ecs_target_group_arn_suffix" {
+  description = "apps/game ECS Fargate 태스크용 타겟그룹의 arn_suffix (CloudWatch AWS/ApplicationELB 지표의 TargetGroup dimension 값)"
+  value       = aws_lb_target_group.game_ecs.arn_suffix
+}

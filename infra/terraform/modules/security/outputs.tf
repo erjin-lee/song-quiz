@@ -17,3 +17,8 @@ output "ecs_api_security_group_id" {
   description = "apps/api ECS Fargate 태스크 보안 그룹 ID"
   value       = aws_security_group.ecs_api.id
 }
+
+output "ecs_game_security_group_id" {
+  description = "apps/game ECS Fargate 태스크 보안 그룹 ID"
+  value       = aws_security_group.ecs_game.id
+}

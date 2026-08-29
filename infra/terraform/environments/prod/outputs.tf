@@ -157,3 +157,13 @@ output "api_current_traffic_target" {
   description = "지금 apply된 api_traffic_target 값(\"ec2\" 또는 \"ecs\") - ALB가 실제로 어디로 API 트래픽을 보내고 있는지 확인용"
   value       = var.api_traffic_target
 }
+
+output "ecs_game_service_name" {
+  description = "apps/game ECS 서비스 이름 - aws ecs describe-services 등에 사용"
+  value       = module.ecs.game_service_name
+}
+
+output "game_current_traffic_target" {
+  description = "지금 apply된 game_traffic_target 값(\"ec2\" 또는 \"ecs\") - ALB가 실제로 어디로 Game 트래픽을 보내고 있는지 확인용"
+  value       = var.game_traffic_target
+}

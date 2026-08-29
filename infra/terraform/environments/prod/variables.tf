@@ -267,3 +267,37 @@ variable "api_desired_count" {
   type        = number
   default     = 1
 }
+
+# --- ECS Fargate 이관 4단계 (docs/infra/ecs-fargate-migration-plan.md) ---
+# apps/game을 ECS Fargate로 옮긴다. USER_JWT_SECRET/INTERNAL_SERVICE_SECRET은 새 변수를
+# 추가하지 않는다 - secrets.tf의 local.game_secret_arns가 apps/api와 동일한 SSM 파라미터를
+# 그대로 재사용한다(위 admin/user_jwt_secret 등 이미 있는 변수와 같은 값).
+
+variable "game_image_git_sha" {
+  description = "ECS에 배포할 apps/game 이미지의 git commit SHA - publish-ecr.yml이 push한 sha-<이 값> 태그를 그대로 참조한다. 기본값 없음 - 매번 배포할 커밋으로 갱신할 것"
+  type        = string
+}
+
+variable "game_traffic_target" {
+  description = "ALB가 Game 트래픽을 보낼 대상. \"ec2\"(app_a, 기존/기본값) 또는 \"ecs\"(Fargate). ECS 서비스가 healthy한 것과 multi-instance 검증을 확인한 뒤에만 \"ecs\"로 바꾼다 - 문제가 생기면 다시 \"ec2\"로 돌리면 즉시 롤백된다"
+  type        = string
+  default     = "ec2"
+}
+
+variable "game_task_cpu" {
+  description = "apps/game Fargate 태스크의 CPU 유닛(1024 = 1 vCPU) - 이번 단계는 트레이싱 사이드카가 없어 api_task_cpu의 3단계 이전 기본값(256)을 그대로 따른다"
+  type        = string
+  default     = "256"
+}
+
+variable "game_task_memory" {
+  description = "apps/game Fargate 태스크의 메모리(MiB) - api_task_memory의 3단계 이전 기본값(512)을 그대로 따른다"
+  type        = string
+  default     = "512"
+}
+
+variable "game_desired_count" {
+  description = "apps/game ECS 서비스가 유지할 태스크 개수"
+  type        = number
+  default     = 1
+}

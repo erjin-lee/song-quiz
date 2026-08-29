@@ -126,26 +126,27 @@ graph TD
 
 ## Observability
 
-ECS Fargate 이관 3단계(`docs/infra/ecs-fargate-migration-plan.md`)에서 `apps/api`가 ECS로
-전환되며 Observability 경로가 api/game 사이에서 갈라졌다 - `apps/game`은 아직 EC2에 있어
-기존 경로를 그대로 쓰고, `apps/api`는 ECS 컨테이너 표준 경로로 바뀌었다.
+ECS Fargate 이관 3단계에서 `apps/api`가, 4단계(`docs/infra/ecs-fargate-migration-plan.md`)에서
+`apps/game`이 ECS로 전환되며 Observability 경로가 EC2/PM2 표준 경로에서 ECS 컨테이너
+표준 경로로 바뀌었다. `apps/api`는 같은 Task 안에 트레이싱 사이드카를 두지만
+`apps/game`은 4단계 범위에서 아직 사이드카를 두지 않아, 두 서비스의 Traces 경로가
+갈라져 있다.
 
 ```text
-Game
-Logs    : StructuredLogger → PM2(파일) → CloudWatch Agent → CloudWatch Logs
-Metrics : CloudWatch Agent(EC2 Memory/Disk) / Metric Filter(QuizSnapshotFailure 등) → CloudWatch Metrics
-Traces  : packages/tracing(OTel) → OTLP/HTTP(127.0.0.1:4318) → CloudWatch Agent → X-Ray/CloudWatch Traces
-
 API (ECS Fargate)
 Logs    : StructuredLogger → stdout/stderr → ECS awslogs 드라이버 → CloudWatch Logs
 Metrics : AWS/ECS CPUUtilization/MemoryUtilization(Service) / ALB Target Group 지표 → CloudWatch Metrics
 Traces  : packages/tracing(OTel) → OTLP/HTTP(localhost:4318) → aws-otel-collector 사이드카(같은 Task) → X-Ray/CloudWatch Traces
+
+Game (ECS Fargate)
+Logs    : StructuredLogger → stdout/stderr → ECS awslogs 드라이버 → CloudWatch Logs
+Metrics : AWS/ECS CPUUtilization/MemoryUtilization(Service) / ALB Target Group 지표 / Metric Filter(QuizSnapshotFailure 등) → CloudWatch Metrics
+Traces  : packages/tracing(OTel) → OTEL_EXPORTER_OTLP_ENDPOINT 미설정 → 프로덕션에서 트레이싱 비활성화(사이드카는 후속 단계에서 추가 예정)
 ```
 
 - `requestId`: 애플리케이션/운영 로그 correlation(자체 발급, `x-request-id`로 internal 호출 간 전파).
-- `traceId`/`spanId`: 실제 OpenTelemetry 분산 trace/현재 span. `packages/tracing`이 붙인 자동 계측(http/express/undici/mysql2)이 OTLP로 export하며, game↔api 간 전파는 자체 헤더가 아니라 W3C `traceparent`(OTel 표준)로 이루어진다.
-- Game(EC2)의 CloudWatch Agent는 `127.0.0.1:4318`에서만 OTLP를 수신한다(Security Group에 열려 있지 않음). 설정은 `infra/terraform/environments/prod/cloudwatch-agent/`(Terraform 리소스 아님, EC2에 수동 적용) 참고.
-- API(ECS)는 host-level agent가 없는 대신, 같은 Task 안에 `aws-otel-collector` 사이드카 컨테이너를 두고 `awsvpc` network mode로 공유되는 `localhost:4318`로 OTLP를 받아 X-Ray로 전달한다(`infra/terraform/modules/ecs`). API Log Group(`modules/logging`)은 EC2 시절과 동일하게 재사용하지만, ECS log stream 이름은 `awslogs-stream-prefix/컨테이너명/task-id` 형태로 PM2/CloudWatch Agent 때와 달라진다 - CloudWatch Logs Insights 쿼리(`apps/lambda/incident-analyzer`)는 log stream 이름이 아니라 최상위 JSON 필드(`event`/`level`/`errorCode` 등)만 보므로 이 변화에 영향받지 않는다.
+- `traceId`/`spanId`: 실제 OpenTelemetry 분산 trace/현재 span. `packages/tracing`이 붙인 자동 계측(http/express/undici/mysql2)이 OTLP로 export하며, game↔api 간 전파는 자체 헤더가 아니라 W3C `traceparent`(OTel 표준)로 이루어진다. 현재 Game은 트레이싱이 비활성화되어 있어(위) game→api 호출의 trace 연속성이 없다 - api 쪽 span은 여전히 기록된다.
+- API(ECS)는 host-level agent가 없는 대신, 같은 Task 안에 `aws-otel-collector` 사이드카 컨테이너를 두고 `awsvpc` network mode로 공유되는 `localhost:4318`로 OTLP를 받아 X-Ray로 전달한다(`infra/terraform/modules/ecs`). API/Game Log Group(`modules/logging`)은 EC2 시절과 동일하게 재사용하지만, ECS log stream 이름은 `awslogs-stream-prefix/컨테이너명/task-id` 형태로 PM2/CloudWatch Agent 때와 달라진다 - CloudWatch Logs Insights 쿼리(`apps/lambda/incident-analyzer`)는 log stream 이름이 아니라 최상위 JSON 필드(`event`/`level`/`errorCode` 등)만 보므로 이 변화에 영향받지 않는다.
 
 ## 외부 연동
 

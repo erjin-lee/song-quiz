@@ -38,6 +38,12 @@ locals {
       label                   = "API-ECS"
       target_group_arn_suffix = var.api_ecs_target_group_arn_suffix
     }
+    # ECS Fargate 이관 4단계 - api_ecs와 동일한 이유로, game_traffic_target이 아직
+    # "ec2"(기본값)인 동안에도 UnhealthyHost/Target5xx 알람을 미리 만들어둔다.
+    game_ecs = {
+      label                   = "Game-ECS"
+      target_group_arn_suffix = var.game_ecs_target_group_arn_suffix
+    }
   }
 }
 
@@ -105,6 +111,35 @@ resource "aws_cloudwatch_metric_alarm" "api_ecs_no_healthy_hosts" {
   tags = {
     Environment = "prod"
     Service     = "api_ecs"
+    Severity    = "critical"
+    Category    = "availability"
+  }
+}
+
+# --- Availability: Game-ECS No Healthy Hosts (Critical) ---
+# api_ecs_no_healthy_hosts(위)와 동일한 이유 - ECS Fargate 이관 4단계.
+resource "aws_cloudwatch_metric_alarm" "game_ecs_no_healthy_hosts" {
+  alarm_name        = "SongQuiz-Prod-Critical-Game-ECS-NoHealthyHosts"
+  alarm_description = "apps/game ECS target group has had zero healthy hosts for 3 consecutive minutes - likely a total outage (image pull/SSM/KMS/boot failure) that UnhealthyHost/Target5xx alone would miss. service=game_ecs severity=critical category=availability signal=HealthyHostCount condition=min<1/3m(breaching on missing data)"
+
+  namespace   = "AWS/ApplicationELB"
+  metric_name = "HealthyHostCount"
+  statistic   = "Minimum"
+  dimensions = {
+    LoadBalancer = var.alb_arn_suffix
+    TargetGroup  = var.game_ecs_target_group_arn_suffix
+  }
+
+  period              = 60
+  evaluation_periods  = 3
+  datapoints_to_alarm = 3
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+  treat_missing_data  = "breaching"
+
+  tags = {
+    Environment = "prod"
+    Service     = "game_ecs"
     Severity    = "critical"
     Category    = "availability"
   }
@@ -256,6 +291,63 @@ resource "aws_cloudwatch_metric_alarm" "ecs_api_high_memory" {
   tags = {
     Environment = "prod"
     Service     = "api_ecs"
+    Severity    = "warning"
+    Category    = "infrastructure"
+  }
+}
+
+# --- Infrastructure: ECS Game High CPU (Warning) ---
+# ecs_api_high_cpu(위)와 동일한 이유 - ECS Fargate 이관 4단계.
+resource "aws_cloudwatch_metric_alarm" "ecs_game_high_cpu" {
+  alarm_name        = "SongQuiz-Prod-Warning-Game-ECS-HighCPU"
+  alarm_description = "apps/game ECS service average CPU utilization exceeded 90% over a 5-minute period. service=game_ecs severity=warning category=infrastructure signal=CPUUtilization condition=avg>90/5m"
+
+  namespace   = "AWS/ECS"
+  metric_name = "CPUUtilization"
+  statistic   = "Average"
+  dimensions = {
+    ClusterName = var.ecs_cluster_name
+    ServiceName = var.ecs_game_service_name
+  }
+
+  period              = 300
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  threshold           = 90
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+
+  tags = {
+    Environment = "prod"
+    Service     = "game_ecs"
+    Severity    = "warning"
+    Category    = "infrastructure"
+  }
+}
+
+# --- Infrastructure: ECS Game High Memory (Warning) ---
+resource "aws_cloudwatch_metric_alarm" "ecs_game_high_memory" {
+  alarm_name        = "SongQuiz-Prod-Warning-Game-ECS-HighMemory"
+  alarm_description = "apps/game ECS service average memory utilization exceeded 90% over a 5-minute period. service=game_ecs severity=warning category=infrastructure signal=MemoryUtilization condition=avg>90/5m"
+
+  namespace   = "AWS/ECS"
+  metric_name = "MemoryUtilization"
+  statistic   = "Average"
+  dimensions = {
+    ClusterName = var.ecs_cluster_name
+    ServiceName = var.ecs_game_service_name
+  }
+
+  period              = 300
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  threshold           = 90
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+
+  tags = {
+    Environment = "prod"
+    Service     = "game_ecs"
     Severity    = "warning"
     Category    = "infrastructure"
   }

@@ -38,3 +38,18 @@ variable "ecs_api_secrets_kms_key_arn" {
   description = "위 SSM 파라미터를 암호화하는 KMS 키 ARN (environments/prod/secrets.tf 출력) - 기본 AWS 관리형 키(alias/aws/ssm)를 쓰지 않는 이유는 secrets.tf 주석 참고. kms:Decrypt 권한을 이 키로만 좁혀서, ssm:GetParameters를 가진 다른 role(예: ReadOnlyAccess만 붙은 ci_terraform_plan)이 값을 복호화하지 못하게 한다"
   type        = string
 }
+
+variable "ecr_game_repository_arn" {
+  description = "ECS Task Execution Role의 이미지 pull 권한을 제한할 apps/game ECR 리포지토리 ARN (ecr 모듈 출력)"
+  type        = string
+}
+
+variable "ecs_game_secret_arns" {
+  description = "ECS Task Execution Role의 ssm:GetParameters 권한을 제한할 apps/game SSM Parameter Store(SecureString) ARN 목록 (environments/prod/secrets.tf 출력) - apps/api와 값을 공유하는 USER_JWT_SECRET/INTERNAL_SERVICE_SECRET을 그대로 참조한다"
+  type        = list(string)
+}
+
+variable "ecs_game_secrets_kms_key_arn" {
+  description = "위 SSM 파라미터를 암호화하는 KMS 키 ARN - apps/api와 시크릿 값을 공유하므로 ecs_api_secrets_kms_key_arn과 동일한 키(environments/prod/secrets.tf의 aws_kms_key.api_secrets)를 그대로 전달받는다"
+  type        = string
+}
