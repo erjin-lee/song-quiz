@@ -6,23 +6,33 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { OPENAI_MODEL } from '../openai/openai-chat.client';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
 import { buildInquiryReviewSlackMessage } from './build-inquiry-review-slack-message';
 import { SubmitInquiryRequestDto } from './dto/submit-inquiry-request.dto';
 import { SubmitInquiryResponseDto } from './dto/submit-inquiry-response.dto';
+import { InquiryActionLog } from './entities/inquiry-action-log.entity';
+import { InquiryAction } from './entities/inquiry-action.entity';
 import { Inquiry } from './entities/inquiry.entity';
 import { GameNotifierClient } from './game-notifier.client';
-import { InquiryActionService } from './inquiry-action.service';
+import {
+  InquiryActionService,
+  InquiryActionSnapshot,
+} from './inquiry-action.service';
+import { INQUIRY_PROMPT_VERSION } from './inquiry-gpt.prompt';
 import { InquiryGptClient, InquirySongContext } from './inquiry-gpt.client';
-import { SlackNotifierClient } from './slack-notifier.client';
 import {
   AddAnswerArgs,
   ChangeLinkArgs,
   ChangeStartTimeArgs,
+  InquiryActionLogSource,
+  InquiryActionStatus,
   InquiryConfidence,
   InquiryFunctionName,
+  InquiryReviewActor,
   InquiryStatus,
 } from './inquiry.types';
+import { SlackNotifierClient } from './slack-notifier.client';
 
 const MAX_INQUIRIES_PER_GAME = 5;
 const RECEIVED_MESSAGE = '문의가 접수되었습니다. 확인 후 알려드릴게요.';
@@ -34,6 +44,19 @@ const ADMIN_REJECTED_MESSAGE = '요청하신 내용은 검토 후 반려되었�
 
 class InquiryArgsValidationError extends Error {}
 
+interface ActionTransitionExtra {
+  reviewedVia?: InquiryAction['reviewedVia'];
+  reviewedByUserKey?: string | null;
+  reviewedDt?: Date | null;
+  executedDt?: Date | null;
+  beforeValue?: Record<string, unknown> | null;
+  afterValue?: Record<string, unknown> | null;
+  actorUserKey?: string | null;
+  slackTeamId?: string | null;
+  slackUserId?: string | null;
+  detail?: Record<string, unknown> | null;
+}
+
 @Injectable()
 export class InquiryService {
   private readonly logger = new Logger(InquiryService.name);
@@ -41,6 +64,10 @@ export class InquiryService {
   constructor(
     @InjectRepository(Inquiry)
     private readonly inquiryRepository: Repository<Inquiry>,
+    @InjectRepository(InquiryAction)
+    private readonly actionRepository: Repository<InquiryAction>,
+    @InjectRepository(InquiryActionLog)
+    private readonly actionLogRepository: Repository<InquiryActionLog>,
     @InjectRepository(QuizSong)
     private readonly quizSongRepository: Repository<QuizSong>,
     private readonly gptClient: InquiryGptClient,
@@ -81,74 +108,59 @@ export class InquiryService {
     return { inquiryId: inquiry.inquiryId, message: RECEIVED_MESSAGE };
   }
 
-  /** 관리자가 문의를 승인한다: 판별된 조치를 실제로 실행하고 완료 처리한다. 현재 상태와 무관하게 승인할 수 있다. */
-  async approve(inquiryId: string): Promise<void> {
-    const inquiry = await this.inquiryRepository.findOne({
-      where: { inquiryId },
-    });
-    if (!inquiry) {
-      throw new NotFoundException(
-        `문의를 찾을 수 없습니다. (inquiryId: ${inquiryId})`,
-      );
-    }
-    const { matchedFunction, matchedArgs, confidence } = inquiry;
-    if (!matchedFunction || !matchedArgs || !confidence) {
-      throw new BadRequestException(
-        `승인할 조치 정보가 없습니다. (inquiryId: ${inquiryId})`,
-      );
-    }
+  /** 관리자/Slack이 문의를 승인한다: 판별된 조치를 실제로 실행하고 완료 처리한다. 현재 액션 상태와 무관하게 승인할 수 있다. */
+  async approve(inquiryId: string, actor: InquiryReviewActor): Promise<void> {
+    const inquiry = await this.findInquiryOrThrow(inquiryId);
+    const action = await this.findLatestActionOrThrow(inquiryId);
+
     // ADD_ANSWER는 재승인 시 정답이 중복으로 추가되므로, 이미 완료된 건은 재승인을 막는다.
-    if (matchedFunction === 'ADD_ANSWER' && inquiry.status === 'COMPLETED') {
+    if (action.actionType === 'ADD_ANSWER' && action.status === 'COMPLETED') {
       throw new BadRequestException(
         `이미 완료된 정답 추가 문의는 다시 승인할 수 없습니다. (inquiryId: ${inquiryId})`,
       );
     }
 
+    await this.transitionAction(action, 'APPROVED', actor.via, {
+      reviewedVia: actor.via,
+      reviewedByUserKey: actor.via === 'ADMIN' ? actor.userKey : null,
+      reviewedDt: new Date(),
+      actorUserKey: actor.via === 'ADMIN' ? actor.userKey : null,
+      slackTeamId: actor.via === 'SLACK' ? actor.slackTeamId : null,
+      slackUserId: actor.via === 'SLACK' ? actor.slackUserId : null,
+    });
+
     try {
-      await this.executeAction(
-        matchedFunction,
-        inquiry.quizSongId,
-        matchedArgs,
-        confidence,
-      );
-      await this.finish(
-        inquiry,
-        'COMPLETED',
-        matchedFunction,
-        matchedArgs,
-        confidence,
-        this.buildSuccessMessage(matchedFunction),
-      );
-    } catch (error) {
-      this.logger.error(`문의 승인 처리 실패(inquiryId: ${inquiryId})`, error);
-      await this.finish(
-        inquiry,
-        'FAILED',
-        matchedFunction,
-        matchedArgs,
-        confidence,
-        null,
-      );
+      await this.executeAndFinish(inquiry, action, inquiry.quizSongId);
+    } catch {
       throw new BadRequestException(
         `조치 실행에 실패했습니다. (inquiryId: ${inquiryId})`,
       );
     }
   }
 
-  /** 검토 대기 문의를 관리자가 반려한다. */
-  async reject(inquiryId: string): Promise<void> {
-    const inquiry = await this.findPendingReviewOrThrow(inquiryId);
-    await this.finish(
-      inquiry,
-      'REJECTED',
-      inquiry.matchedFunction,
-      inquiry.matchedArgs,
-      inquiry.confidence,
-      ADMIN_REJECTED_MESSAGE,
-    );
+  /** 검토 대기 문의를 관리자/Slack이 반려한다. */
+  async reject(inquiryId: string, actor: InquiryReviewActor): Promise<void> {
+    const inquiry = await this.findInquiryOrThrow(inquiryId);
+    const action = await this.findLatestActionOrThrow(inquiryId);
+    if (action.status !== 'PENDING_REVIEW') {
+      throw new BadRequestException(
+        `검토 대기 상태의 문의만 처리할 수 있습니다. (inquiryId: ${inquiryId})`,
+      );
+    }
+
+    await this.transitionAction(action, 'REJECTED', actor.via, {
+      reviewedVia: actor.via,
+      reviewedByUserKey: actor.via === 'ADMIN' ? actor.userKey : null,
+      reviewedDt: new Date(),
+      actorUserKey: actor.via === 'ADMIN' ? actor.userKey : null,
+      slackTeamId: actor.via === 'SLACK' ? actor.slackTeamId : null,
+      slackUserId: actor.via === 'SLACK' ? actor.slackUserId : null,
+    });
+
+    await this.finish(inquiry, 'REJECTED', ADMIN_REJECTED_MESSAGE);
   }
 
-  private async findPendingReviewOrThrow(inquiryId: string): Promise<Inquiry> {
+  private async findInquiryOrThrow(inquiryId: string): Promise<Inquiry> {
     const inquiry = await this.inquiryRepository.findOne({
       where: { inquiryId },
     });
@@ -157,12 +169,22 @@ export class InquiryService {
         `문의를 찾을 수 없습니다. (inquiryId: ${inquiryId})`,
       );
     }
-    if (inquiry.status !== 'PENDING_REVIEW') {
+    return inquiry;
+  }
+
+  private async findLatestActionOrThrow(
+    inquiryId: string,
+  ): Promise<InquiryAction> {
+    const action = await this.actionRepository.findOne({
+      where: { inquiryId },
+      order: { actionSeq: 'DESC' },
+    });
+    if (!action) {
       throw new BadRequestException(
-        `검토 대기 상태의 문의만 처리할 수 있습니다. (inquiryId: ${inquiryId})`,
+        `승인/반려할 조치 정보가 없습니다. (inquiryId: ${inquiryId})`,
       );
     }
-    return inquiry;
+    return action;
   }
 
   private async process(inquiryId: string): Promise<void> {
@@ -178,7 +200,7 @@ export class InquiryService {
       relations: { song: { artist: true } },
     });
     if (!quizSong) {
-      await this.finish(inquiry, 'FAILED', null, null, null, null);
+      await this.finish(inquiry, 'FAILED', null);
       return;
     }
 
@@ -196,39 +218,49 @@ export class InquiryService {
       inquiry.content,
     );
     if (!classifyResult.matchedFunction || !classifyResult.args) {
-      await this.finish(inquiry, 'NO_MATCH', null, null, null, null);
+      await this.finish(inquiry, 'NO_MATCH', null);
       return;
     }
 
     const { matchedFunction, args } = classifyResult;
-    const confidence = await this.gptClient.verifyConfidence(
+    const { confidence, reason } = await this.gptClient.verifyConfidence(
       matchedFunction,
       songContext,
       inquiry.content,
       args,
     );
 
-    if (confidence === 'LOW') {
-      await this.finish(
-        inquiry,
-        'REJECTED',
-        matchedFunction,
-        args,
+    const action = await this.actionRepository.save(
+      this.actionRepository.create({
+        inquiryId: inquiry.inquiryId,
+        actionSeq: 1,
+        actionType: matchedFunction,
+        actionArgs: args,
         confidence,
-        REJECTED_MESSAGE,
-      );
+        aiModel: OPENAI_MODEL,
+        promptVersion: INQUIRY_PROMPT_VERSION,
+        aiReason: reason,
+        status: 'PROPOSED',
+      }),
+    );
+    await this.actionLogRepository.save(
+      this.actionLogRepository.create({
+        actionId: action.actionId,
+        inquiryId: action.inquiryId,
+        eventType: 'PROPOSED',
+        source: 'AI',
+      }),
+    );
+
+    if (confidence === 'LOW') {
+      await this.transitionAction(action, 'REJECTED', 'SYSTEM');
+      await this.finish(inquiry, 'REJECTED', REJECTED_MESSAGE);
       return;
     }
 
     if (confidence === 'MEDIUM') {
-      await this.finish(
-        inquiry,
-        'PENDING_REVIEW',
-        matchedFunction,
-        args,
-        confidence,
-        PENDING_REVIEW_MESSAGE,
-      );
+      await this.transitionAction(action, 'PENDING_REVIEW', 'SYSTEM');
+      await this.finish(inquiry, 'PENDING_REVIEW', PENDING_REVIEW_MESSAGE);
       await this.slackNotifierClient.send(
         buildInquiryReviewSlackMessage({
           inquiryId: inquiry.inquiryId,
@@ -241,32 +273,85 @@ export class InquiryService {
       return;
     }
 
+    // HIGH: 사람 검토 없이 즉시 승인/실행한다.
+    await this.transitionAction(action, 'APPROVED', 'SYSTEM');
     try {
-      await this.executeAction(
-        matchedFunction,
-        quizSong.quizSongId,
-        args,
-        confidence,
+      await this.executeAndFinish(inquiry, action, quizSong.quizSongId);
+    } catch {
+      // executeAndFinish가 이미 액션/문의 상태를 FAILED로 마무리하고 로깅했다.
+    }
+  }
+
+  /** EXECUTING으로 전이 후 실제 조치를 실행하고, 성공/실패에 따라 액션과 문의 상태를 마무리한다. 실패 시 원본 에러를 다시 던진다. */
+  private async executeAndFinish(
+    inquiry: Inquiry,
+    action: InquiryAction,
+    quizSongId: string,
+  ): Promise<void> {
+    await this.transitionAction(action, 'EXECUTING', 'SYSTEM');
+    try {
+      const { before, after } = await this.executeAction(
+        action.actionType,
+        quizSongId,
+        action.actionArgs ?? {},
+        action.confidence ?? 'HIGH',
       );
+      await this.transitionAction(action, 'COMPLETED', 'SYSTEM', {
+        executedDt: new Date(),
+        beforeValue: before,
+        afterValue: after,
+      });
       await this.finish(
         inquiry,
         'COMPLETED',
-        matchedFunction,
-        args,
-        confidence,
-        this.buildSuccessMessage(matchedFunction),
+        this.buildSuccessMessage(action.actionType),
       );
     } catch (error) {
-      this.logger.error(`문의 조치 실행 실패(inquiryId: ${inquiryId})`, error);
-      await this.finish(
-        inquiry,
-        'FAILED',
-        matchedFunction,
-        args,
-        confidence,
-        null,
+      this.logger.error(
+        `문의 조치 실행 실패(inquiryId: ${inquiry.inquiryId})`,
+        error,
       );
+      await this.transitionAction(action, 'FAILED', 'SYSTEM', {
+        detail: { error: (error as Error).message },
+      });
+      await this.finish(inquiry, 'FAILED', null);
+      throw error;
     }
+  }
+
+  /** InquiryAction의 상태를 바꿔 저장하고, 같은 전이를 감사 로그(SQ_INQUIRY_ACTION_LOG) 한 건으로 남긴다. */
+  private async transitionAction(
+    action: InquiryAction,
+    status: InquiryActionStatus,
+    source: InquiryActionLogSource,
+    extra?: ActionTransitionExtra,
+  ): Promise<void> {
+    action.status = status;
+    if (extra?.reviewedVia !== undefined)
+      action.reviewedVia = extra.reviewedVia;
+    if (extra?.reviewedByUserKey !== undefined)
+      action.reviewedByUserKey = extra.reviewedByUserKey;
+    if (extra?.reviewedDt !== undefined) action.reviewedDt = extra.reviewedDt;
+    if (extra?.executedDt !== undefined) action.executedDt = extra.executedDt;
+    if (extra?.beforeValue !== undefined)
+      action.beforeValue = extra.beforeValue;
+    if (extra?.afterValue !== undefined) action.afterValue = extra.afterValue;
+    await this.actionRepository.save(action);
+
+    await this.actionLogRepository.save(
+      this.actionLogRepository.create({
+        actionId: action.actionId,
+        inquiryId: action.inquiryId,
+        eventType: status,
+        source,
+        actorUserKey: extra?.actorUserKey ?? null,
+        slackTeamId: extra?.slackTeamId ?? null,
+        slackUserId: extra?.slackUserId ?? null,
+        beforeValue: extra?.beforeValue ?? null,
+        afterValue: extra?.afterValue ?? null,
+        detail: extra?.detail ?? null,
+      }),
+    );
   }
 
   private async executeAction(
@@ -274,27 +359,24 @@ export class InquiryService {
     quizSongId: string,
     args: Record<string, unknown>,
     confidence: InquiryConfidence,
-  ): Promise<void> {
+  ): Promise<InquiryActionSnapshot> {
     switch (functionName) {
       case 'CHANGE_START_TIME':
-        await this.actionService.changeStartTime(
+        return this.actionService.changeStartTime(
           quizSongId,
           this.parseChangeStartTimeArgs(args),
         );
-        return;
       case 'CHANGE_LINK':
-        await this.actionService.changeLink(
+        return this.actionService.changeLink(
           quizSongId,
           this.parseChangeLinkArgs(args),
         );
-        return;
       case 'ADD_ANSWER':
-        await this.actionService.addAnswer(
+        return this.actionService.addAnswer(
           quizSongId,
           this.parseAddAnswerArgs(args),
           confidence,
         );
-        return;
     }
   }
 
@@ -355,15 +437,9 @@ export class InquiryService {
   private async finish(
     inquiry: Inquiry,
     status: InquiryStatus,
-    matchedFunction: InquiryFunctionName | null,
-    matchedArgs: Record<string, unknown> | null,
-    confidence: InquiryConfidence | null,
     resultMessage: string | null,
   ): Promise<void> {
     inquiry.status = status;
-    inquiry.matchedFunction = matchedFunction;
-    inquiry.matchedArgs = matchedArgs;
-    inquiry.confidence = confidence;
     inquiry.resultMessage = resultMessage;
     await this.inquiryRepository.save(inquiry);
 

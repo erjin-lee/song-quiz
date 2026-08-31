@@ -1,9 +1,5 @@
 import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
-import {
-  InquiryConfidence,
-  InquiryFunctionName,
-  InquiryStatus,
-} from '../inquiry.types';
+import { InquiryStatus } from '../inquiry.types';
 
 @Entity('SQ_INQUIRY')
 export class Inquiry {
@@ -23,22 +19,11 @@ export class Inquiry {
   @Column({ name: 'USER_ID', type: 'varchar', length: 255 })
   userId: string;
 
+  @Column({ name: 'USER_TYPE', type: 'varchar', length: 5, nullable: true })
+  userType: string | null;
+
   @Column({ name: 'CONTENT', type: 'text' })
   content: string;
-
-  @Column({
-    name: 'MATCHED_FUNCTION',
-    type: 'varchar',
-    length: 255,
-    nullable: true,
-  })
-  matchedFunction: InquiryFunctionName | null;
-
-  @Column({ name: 'MATCHED_ARGS', type: 'json', nullable: true })
-  matchedArgs: Record<string, unknown> | null;
-
-  @Column({ name: 'CONFIDENCE', type: 'varchar', length: 8, nullable: true })
-  confidence: InquiryConfidence | null;
 
   @Column({ name: 'STATUS', type: 'varchar', length: 20 })
   status: InquiryStatus;

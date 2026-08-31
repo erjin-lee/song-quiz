@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import OpenAI from 'openai';
 
-const OPENAI_MODEL = 'gpt-5.6-luna';
+export const OPENAI_MODEL = 'gpt-5.6-luna';
 const MAX_RETRIES = 2;
 const REQUEST_TIMEOUT_MS = 60_000;
 

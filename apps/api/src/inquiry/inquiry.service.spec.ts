@@ -2,6 +2,8 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
+import { InquiryActionLog } from './entities/inquiry-action-log.entity';
+import { InquiryAction } from './entities/inquiry-action.entity';
 import { Inquiry } from './entities/inquiry.entity';
 import { GameNotifierClient } from './game-notifier.client';
 import { InquiryActionService } from './inquiry-action.service';
@@ -38,6 +40,18 @@ describe('InquiryService', () => {
     })),
     findOne: jest.fn(),
   };
+  const actionRepositoryMock = {
+    create: jest.fn((data) => data),
+    save: jest.fn(async (data: unknown) => ({
+      actionId: 'act1',
+      ...(data as object),
+    })),
+    findOne: jest.fn(),
+  };
+  const actionLogRepositoryMock = {
+    create: jest.fn((data) => data),
+    save: jest.fn(async (data: unknown) => data),
+  };
   const quizSongRepositoryMock = {
     findOne: jest.fn(),
   };
@@ -70,6 +84,18 @@ describe('InquiryService', () => {
       ...baseQuizSong,
       song: { ...baseQuizSong.song, artist: { ...baseQuizSong.song.artist } },
     });
+    gptClientMock.verifyConfidence.mockResolvedValue({
+      confidence: 'HIGH',
+      reason: '판단 근거',
+    });
+    // executeAction이 {before, after}를 구조분해하므로 기본값을 채워둔다 - 개별 테스트는
+    // 필요하면 mockRejectedValue 등으로 덮어쓴다.
+    actionServiceMock.changeStartTime.mockResolvedValue({
+      before: {},
+      after: {},
+    });
+    actionServiceMock.changeLink.mockResolvedValue({ before: {}, after: {} });
+    actionServiceMock.addAnswer.mockResolvedValue({ before: {}, after: {} });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -77,6 +103,14 @@ describe('InquiryService', () => {
         {
           provide: getRepositoryToken(Inquiry),
           useValue: inquiryRepositoryMock,
+        },
+        {
+          provide: getRepositoryToken(InquiryAction),
+          useValue: actionRepositoryMock,
+        },
+        {
+          provide: getRepositoryToken(InquiryActionLog),
+          useValue: actionLogRepositoryMock,
         },
         {
           provide: getRepositoryToken(QuizSong),
@@ -136,9 +170,10 @@ describe('InquiryService', () => {
         expect.objectContaining({ status: 'FAILED' }),
       );
       expect(gptClientMock.classify).not.toHaveBeenCalled();
+      expect(actionRepositoryMock.save).not.toHaveBeenCalled();
     });
 
-    it('매칭되는 함수가 없으면 NO_MATCH로 종료하고 소켓 알림은 보내지 않는다', async () => {
+    it('매칭되는 함수가 없으면 NO_MATCH로 종료하고 소켓 알림/액션 생성은 하지 않는다', async () => {
       gptClientMock.classify.mockResolvedValue({
         matchedFunction: null,
         args: null,
@@ -150,18 +185,39 @@ describe('InquiryService', () => {
         expect.objectContaining({ status: 'NO_MATCH' }),
       );
       expect(gameNotifierClientMock.notifyInquiryResult).not.toHaveBeenCalled();
+      expect(actionRepositoryMock.save).not.toHaveBeenCalled();
     });
 
-    it('신뢰도가 LOW면 REJECTED로 종료하고 소켓으로 알린다', async () => {
+    it('신뢰도가 LOW면 InquiryAction도 REJECTED로 전이하고 REJECTED로 종료한다', async () => {
       gptClientMock.classify.mockResolvedValue({
         matchedFunction: 'CHANGE_START_TIME',
         args: { startSec: 30 },
       });
-      gptClientMock.verifyConfidence.mockResolvedValue('LOW');
+      gptClientMock.verifyConfidence.mockResolvedValue({
+        confidence: 'LOW',
+        reason: '근거 불충분',
+      });
 
       await callProcess('iq1');
 
       expect(actionServiceMock.changeStartTime).not.toHaveBeenCalled();
+      // 1) PROPOSED로 생성 2) REJECTED로 전이
+      expect(actionRepositoryMock.save).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          status: 'PROPOSED',
+          actionType: 'CHANGE_START_TIME',
+          confidence: 'LOW',
+          aiReason: '근거 불충분',
+        }),
+      );
+      expect(actionRepositoryMock.save).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ status: 'REJECTED' }),
+      );
+      expect(actionLogRepositoryMock.save).toHaveBeenCalledWith(
+        expect.objectContaining({ eventType: 'REJECTED', source: 'SYSTEM' }),
+      );
       expect(inquiryRepositoryMock.save).toHaveBeenCalledWith(
         expect.objectContaining({
           status: 'REJECTED',
@@ -175,16 +231,23 @@ describe('InquiryService', () => {
       expect(slackNotifierClientMock.send).not.toHaveBeenCalled();
     });
 
-    it('신뢰도가 MEDIUM이면 조치를 실행하지 않고 PENDING_REVIEW로 종료한다', async () => {
+    it('신뢰도가 MEDIUM이면 조치를 실행하지 않고 액션/문의 모두 PENDING_REVIEW로 종료한다', async () => {
       gptClientMock.classify.mockResolvedValue({
         matchedFunction: 'CHANGE_START_TIME',
         args: { startSec: 30 },
       });
-      gptClientMock.verifyConfidence.mockResolvedValue('MEDIUM');
+      gptClientMock.verifyConfidence.mockResolvedValue({
+        confidence: 'MEDIUM',
+        reason: '추정값',
+      });
 
       await callProcess('iq1');
 
       expect(actionServiceMock.changeStartTime).not.toHaveBeenCalled();
+      expect(actionRepositoryMock.save).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ status: 'PENDING_REVIEW' }),
+      );
       expect(inquiryRepositoryMock.save).toHaveBeenCalledWith(
         expect.objectContaining({
           status: 'PENDING_REVIEW',
@@ -200,18 +263,34 @@ describe('InquiryService', () => {
       );
     });
 
-    it('신뢰도가 HIGH면 조치를 실행하고 COMPLETED로 종료한다', async () => {
+    it('신뢰도가 HIGH면 조치를 실행하고 액션/문의 모두 COMPLETED로 종료한다', async () => {
       gptClientMock.classify.mockResolvedValue({
         matchedFunction: 'CHANGE_START_TIME',
         args: { startSec: 30 },
       });
-      gptClientMock.verifyConfidence.mockResolvedValue('HIGH');
+      gptClientMock.verifyConfidence.mockResolvedValue({
+        confidence: 'HIGH',
+        reason: '명확한 요청',
+      });
+      actionServiceMock.changeStartTime.mockResolvedValue({
+        before: { startSec: 10 },
+        after: { startSec: 30 },
+      });
 
       await callProcess('iq1');
 
       expect(actionServiceMock.changeStartTime).toHaveBeenCalledWith('qs1', {
         startSec: 30,
       });
+      // PROPOSED -> APPROVED -> EXECUTING -> COMPLETED
+      expect(actionRepositoryMock.save).toHaveBeenNthCalledWith(
+        4,
+        expect.objectContaining({
+          status: 'COMPLETED',
+          beforeValue: { startSec: 10 },
+          afterValue: { startSec: 30 },
+        }),
+      );
       expect(inquiryRepositoryMock.save).toHaveBeenCalledWith(
         expect.objectContaining({
           status: 'COMPLETED',
@@ -223,31 +302,35 @@ describe('InquiryService', () => {
       );
     });
 
-    it('조치 인자가 유효하지 않으면 FAILED로 종료한다', async () => {
+    it('조치 인자가 유효하지 않으면 액션/문의 모두 FAILED로 종료한다', async () => {
       gptClientMock.classify.mockResolvedValue({
         matchedFunction: 'CHANGE_START_TIME',
         args: { startSec: -10 },
       });
-      gptClientMock.verifyConfidence.mockResolvedValue('HIGH');
 
       await callProcess('iq1');
 
       expect(actionServiceMock.changeStartTime).not.toHaveBeenCalled();
+      expect(actionRepositoryMock.save).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: 'FAILED' }),
+      );
       expect(inquiryRepositoryMock.save).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'FAILED', resultMessage: null }),
       );
     });
 
-    it('조치 실행 중 예외가 발생하면 FAILED로 종료한다', async () => {
+    it('조치 실행 중 예외가 발생하면 액션/문의 모두 FAILED로 종료한다', async () => {
       gptClientMock.classify.mockResolvedValue({
         matchedFunction: 'ADD_ANSWER',
         args: { answerTxt: '너닿', answerType: null },
       });
-      gptClientMock.verifyConfidence.mockResolvedValue('HIGH');
       actionServiceMock.addAnswer.mockRejectedValue(new Error('DB 오류'));
 
       await callProcess('iq1');
 
+      expect(actionRepositoryMock.save).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: 'FAILED' }),
+      );
       expect(inquiryRepositoryMock.save).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'FAILED', resultMessage: null }),
       );
@@ -256,39 +339,45 @@ describe('InquiryService', () => {
   });
 
   describe('approve', () => {
-    const pendingInquiry = {
-      ...baseInquiry,
-      status: 'PENDING_REVIEW',
-      matchedFunction: 'CHANGE_START_TIME',
-      matchedArgs: { startSec: 30 },
+    const pendingAction = {
+      actionId: 'act1',
+      inquiryId: 'iq1',
+      actionSeq: 1,
+      actionType: 'CHANGE_START_TIME',
+      actionArgs: { startSec: 30 },
       confidence: 'MEDIUM',
+      status: 'PENDING_REVIEW',
     };
+    const adminActor = { via: 'ADMIN' as const, userKey: 'admin1' };
+
+    beforeEach(() => {
+      actionRepositoryMock.findOne.mockResolvedValue({ ...pendingAction });
+    });
 
     it('문의를 찾을 수 없으면 404를 던진다', async () => {
       inquiryRepositoryMock.findOne.mockResolvedValue(null);
 
-      await expect(service.approve('iq1')).rejects.toThrow(NotFoundException);
+      await expect(service.approve('iq1', adminActor)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
-    it('판별된 조치 정보가 없으면 400을 던진다', async () => {
-      inquiryRepositoryMock.findOne.mockResolvedValue({
-        ...pendingInquiry,
-        matchedFunction: null,
-        matchedArgs: null,
-        confidence: null,
-      });
+    it('승인할 조치 정보가 없으면 400을 던진다', async () => {
+      actionRepositoryMock.findOne.mockResolvedValue(null);
 
-      await expect(service.approve('iq1')).rejects.toThrow(BadRequestException);
+      await expect(service.approve('iq1', adminActor)).rejects.toThrow(
+        BadRequestException,
+      );
       expect(actionServiceMock.changeStartTime).not.toHaveBeenCalled();
     });
 
-    it('검토 대기 상태가 아니어도 판별된 조치가 있으면 승인할 수 있다', async () => {
-      inquiryRepositoryMock.findOne.mockResolvedValue({
-        ...pendingInquiry,
+    it('검토 대기 상태가 아니어도 조치가 있으면 승인할 수 있다', async () => {
+      actionRepositoryMock.findOne.mockResolvedValue({
+        ...pendingAction,
         status: 'REJECTED',
       });
 
-      await service.approve('iq1');
+      await service.approve('iq1', adminActor);
 
       expect(actionServiceMock.changeStartTime).toHaveBeenCalledWith('qs1', {
         startSec: 30,
@@ -299,38 +388,56 @@ describe('InquiryService', () => {
     });
 
     it('이미 완료된 정답 추가 문의는 재승인 시 400을 던진다', async () => {
-      inquiryRepositoryMock.findOne.mockResolvedValue({
-        ...pendingInquiry,
+      actionRepositoryMock.findOne.mockResolvedValue({
+        ...pendingAction,
         status: 'COMPLETED',
-        matchedFunction: 'ADD_ANSWER',
-        matchedArgs: { answerTxt: '너닿', answerType: null },
+        actionType: 'ADD_ANSWER',
+        actionArgs: { answerTxt: '너닿', answerType: null },
       });
 
-      await expect(service.approve('iq1')).rejects.toThrow(BadRequestException);
+      await expect(service.approve('iq1', adminActor)).rejects.toThrow(
+        BadRequestException,
+      );
       expect(actionServiceMock.addAnswer).not.toHaveBeenCalled();
     });
 
     it('완료된 시간/링크 변경 문의는 재승인할 수 있다', async () => {
-      inquiryRepositoryMock.findOne.mockResolvedValue({
-        ...pendingInquiry,
+      actionRepositoryMock.findOne.mockResolvedValue({
+        ...pendingAction,
         status: 'COMPLETED',
       });
 
-      await service.approve('iq1');
+      await service.approve('iq1', adminActor);
 
       expect(actionServiceMock.changeStartTime).toHaveBeenCalledWith('qs1', {
         startSec: 30,
       });
     });
 
-    it('조치를 실행하고 COMPLETED로 종료한다', async () => {
-      inquiryRepositoryMock.findOne.mockResolvedValue({ ...pendingInquiry });
-
-      await service.approve('iq1');
+    it('조치를 실행하고 액션/문의 모두 COMPLETED로 종료하며, 검토자 정보를 남긴다', async () => {
+      await service.approve('iq1', adminActor);
 
       expect(actionServiceMock.changeStartTime).toHaveBeenCalledWith('qs1', {
         startSec: 30,
       });
+      // transitionAction이 같은 action 인스턴스를 계속 mutate하며 저장하므로, save에
+      // 기록된 마지막 호출 인자가 (reviewedVia 등 이전 단계에서 세팅된 값을 유지한 채)
+      // 최종 상태를 담고 있다.
+      expect(actionRepositoryMock.save).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          status: 'COMPLETED',
+          reviewedVia: 'ADMIN',
+          reviewedByUserKey: 'admin1',
+          executedDt: expect.any(Date),
+        }),
+      );
+      expect(actionLogRepositoryMock.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: 'APPROVED',
+          source: 'ADMIN',
+          actorUserKey: 'admin1',
+        }),
+      );
       expect(inquiryRepositoryMock.save).toHaveBeenCalledWith(
         expect.objectContaining({
           status: 'COMPLETED',
@@ -342,11 +449,29 @@ describe('InquiryService', () => {
       );
     });
 
+    it('Slack 액터로 승인하면 slackUserId/slackTeamId를 로그에 남긴다', async () => {
+      await service.approve('iq1', {
+        via: 'SLACK',
+        slackTeamId: 'T1',
+        slackUserId: 'U1',
+      });
+
+      expect(actionLogRepositoryMock.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: 'APPROVED',
+          source: 'SLACK',
+          slackTeamId: 'T1',
+          slackUserId: 'U1',
+        }),
+      );
+    });
+
     it('조치 실행 중 예외가 발생하면 FAILED로 종료하고 400을 던진다', async () => {
-      inquiryRepositoryMock.findOne.mockResolvedValue({ ...pendingInquiry });
       actionServiceMock.changeStartTime.mockRejectedValue(new Error('DB 오류'));
 
-      await expect(service.approve('iq1')).rejects.toThrow(BadRequestException);
+      await expect(service.approve('iq1', adminActor)).rejects.toThrow(
+        BadRequestException,
+      );
       expect(inquiryRepositoryMock.save).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'FAILED' }),
       );
@@ -354,35 +479,51 @@ describe('InquiryService', () => {
   });
 
   describe('reject', () => {
-    const pendingInquiry = {
-      ...baseInquiry,
-      status: 'PENDING_REVIEW',
-      matchedFunction: 'ADD_ANSWER',
-      matchedArgs: { answerTxt: '너닿', answerType: null },
+    const pendingAction = {
+      actionId: 'act1',
+      inquiryId: 'iq1',
+      actionSeq: 1,
+      actionType: 'ADD_ANSWER',
+      actionArgs: { answerTxt: '너닿', answerType: null },
       confidence: 'MEDIUM',
+      status: 'PENDING_REVIEW',
     };
+    const adminActor = { via: 'ADMIN' as const, userKey: 'admin1' };
+
+    beforeEach(() => {
+      actionRepositoryMock.findOne.mockResolvedValue({ ...pendingAction });
+    });
 
     it('문의를 찾을 수 없으면 404를 던진다', async () => {
       inquiryRepositoryMock.findOne.mockResolvedValue(null);
 
-      await expect(service.reject('iq1')).rejects.toThrow(NotFoundException);
+      await expect(service.reject('iq1', adminActor)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('검토 대기 상태가 아니면 400을 던진다', async () => {
-      inquiryRepositoryMock.findOne.mockResolvedValue({
-        ...pendingInquiry,
+      actionRepositoryMock.findOne.mockResolvedValue({
+        ...pendingAction,
         status: 'REJECTED',
       });
 
-      await expect(service.reject('iq1')).rejects.toThrow(BadRequestException);
+      await expect(service.reject('iq1', adminActor)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
-    it('REJECTED로 종료하고 소켓으로 알린다', async () => {
-      inquiryRepositoryMock.findOne.mockResolvedValue({ ...pendingInquiry });
-
-      await service.reject('iq1');
+    it('REJECTED로 종료하고 소켓으로 알리며 검토자 정보를 남긴다', async () => {
+      await service.reject('iq1', adminActor);
 
       expect(actionServiceMock.addAnswer).not.toHaveBeenCalled();
+      expect(actionRepositoryMock.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'REJECTED',
+          reviewedVia: 'ADMIN',
+          reviewedByUserKey: 'admin1',
+        }),
+      );
       expect(inquiryRepositoryMock.save).toHaveBeenCalledWith(
         expect.objectContaining({
           status: 'REJECTED',

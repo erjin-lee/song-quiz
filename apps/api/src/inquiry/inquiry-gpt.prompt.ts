@@ -1,6 +1,9 @@
 import type { InquiryFunctionName } from './inquiry.types';
 import type { InquirySongContext } from './inquiry-gpt.client';
 
+/** 프롬프트를 실질적으로 바꿀 때마다 사람이 수동으로 올린다(SQ_INQUIRY_ACTION.PROMPT_VERSION에 기록). */
+export const INQUIRY_PROMPT_VERSION = 'v1';
+
 export const CLASSIFY_SYSTEM_RULES = `너는 음악 퀴즈 게임에서 유저가 남긴 곡 관련 문의를 보고, 사전에 정의된 조치 함수 중 어떤 것을 사용해야 할지 판별하는 역할이다.
 
 사용 가능한 함수는 다음과 같다.
@@ -50,9 +53,9 @@ LOW: 요청 취지가 불명확하거나, 값이 비합리적(음수, 영상 길
 
 ## 출력 형식
 
-설명 없이 반드시 아래 JSON 형식만 출력한다.
+설명 없이 반드시 아래 JSON 형식만 출력한다. reason에는 판단 근거를 한두 문장으로 요약한다.
 
-{ "confidence": "HIGH" }`,
+{ "confidence": "HIGH", "reason": "판단 근거" }`,
 
   CHANGE_LINK: `너는 한국 음악 퀴즈 출제곡의 유튜브 링크 교체 요청이 타당한지 판별하는 역할이다.
 
@@ -90,9 +93,9 @@ LOW:
 
 ## 출력 형식
 
-설명 없이 반드시 아래 JSON 형식만 출력한다.
+설명 없이 반드시 아래 JSON 형식만 출력한다. reason에는 판단 근거를 한두 문장으로 요약한다.
 
-{ "confidence": "HIGH" }`,
+{ "confidence": "HIGH", "reason": "판단 근거" }`,
 
   ADD_ANSWER: `너는 한국 음악 퀴즈의 정답 후보 데이터를 판별하는 역할이다.
 
@@ -126,9 +129,9 @@ LOW: 원곡 제목과 관계가 불명확하거나, 다른 곡과 혼동될 수 
 
 ## 출력 형식
 
-설명 없이 반드시 아래 JSON 형식만 출력한다.
+설명 없이 반드시 아래 JSON 형식만 출력한다. reason에는 판단 근거를 한두 문장으로 요약한다.
 
-{ "confidence": "HIGH", "type": "ORIGINAL" }`,
+{ "confidence": "HIGH", "type": "ORIGINAL", "reason": "판단 근거" }`,
 };
 
 export function buildClassifyUserMessage(

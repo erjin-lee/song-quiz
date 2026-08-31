@@ -17,6 +17,11 @@ const MAX_ANSWER_TYPE_LENGTH = 12;
 /** 시작 시간 변경/링크 교체 시 종료 시간을 맞추는 클립 길이(초). quiz-generator.service.ts의 QUIZ_SONG_CLIP_SEC과 동일하게 맞춘다. */
 const QUIZ_SONG_CLIP_SEC = 30;
 
+export interface InquiryActionSnapshot {
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+}
+
 @Injectable()
 export class InquiryActionService {
   constructor(
@@ -31,12 +36,22 @@ export class InquiryActionService {
   async changeStartTime(
     quizSongId: string,
     args: ChangeStartTimeArgs,
-  ): Promise<void> {
+  ): Promise<InquiryActionSnapshot> {
     const quizSong = await this.findQuizSongOrThrow(quizSongId);
+    const before = {
+      startSec: quizSong.startSec,
+      youtubeUrl: quizSong.youtubeUrl,
+    };
+
     quizSong.startSec = args.startSec;
     quizSong.endSec = args.startSec + QUIZ_SONG_CLIP_SEC;
     quizSong.youtubeUrl = withStartSecParam(quizSong.youtubeUrl, args.startSec);
     await this.quizSongRepository.save(quizSong);
+
+    return {
+      before,
+      after: { startSec: quizSong.startSec, youtubeUrl: quizSong.youtubeUrl },
+    };
   }
 
   /**
@@ -45,8 +60,16 @@ export class InquiryActionService {
    * 쓴다. 종료 시간은 시작 시간 + QUIZ_SONG_CLIP_SEC으로 고정한다
    * (quiz-generator.service.ts와 동일한 클립 길이).
    */
-  async changeLink(quizSongId: string, args: ChangeLinkArgs): Promise<void> {
+  async changeLink(
+    quizSongId: string,
+    args: ChangeLinkArgs,
+  ): Promise<InquiryActionSnapshot> {
     const quizSong = await this.findQuizSongOrThrow(quizSongId);
+    const before = {
+      youtubeUrl: quizSong.youtubeUrl,
+      startSec: quizSong.startSec,
+      durationSec: quizSong.durationSec,
+    };
     const { videoId, startSec: startSecFromUrl } = parseYoutubeUrl(
       args.youtubeUrl,
     );
@@ -69,21 +92,37 @@ export class InquiryActionService {
     quizSong.startSec = startSec;
     quizSong.endSec = startSec + QUIZ_SONG_CLIP_SEC;
     await this.quizSongRepository.save(quizSong);
+
+    return {
+      before,
+      after: {
+        youtubeUrl: quizSong.youtubeUrl,
+        startSec: quizSong.startSec,
+        durationSec: quizSong.durationSec,
+      },
+    };
   }
 
   async addAnswer(
     quizSongId: string,
     args: AddAnswerArgs,
     confidence: InquiryConfidence,
-  ): Promise<void> {
+  ): Promise<InquiryActionSnapshot> {
+    const answerType =
+      args.answerType?.slice(0, MAX_ANSWER_TYPE_LENGTH) ?? null;
     const quizAnswer = this.quizAnswerRepository.create({
       quizSongId,
       answerTxt: args.answerTxt,
-      answerType: args.answerType?.slice(0, MAX_ANSWER_TYPE_LENGTH) ?? null,
+      answerType,
       confidence,
       isActive: 'Y',
     });
     await this.quizAnswerRepository.save(quizAnswer);
+
+    return {
+      before: {},
+      after: { answerTxt: args.answerTxt, answerType },
+    };
   }
 
   private async findQuizSongOrThrow(quizSongId: string): Promise<QuizSong> {

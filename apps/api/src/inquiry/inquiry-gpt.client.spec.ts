@@ -163,16 +163,28 @@ describe('InquiryGptClient', () => {
       ]);
     });
 
-    it('신뢰도 값을 반환한다', async () => {
+    it('신뢰도 값과 근거를 반환한다', async () => {
       openAiChatClientMock.requestJson.mockResolvedValue(
-        JSON.stringify({ confidence: 'LOW' }),
+        JSON.stringify({ confidence: 'LOW', reason: '근거 없음' }),
       );
 
       const result = await client.verifyConfidence('ADD_ANSWER', song, '문의', {
         answerTxt: '너닿',
       });
 
-      expect(result).toBe('LOW');
+      expect(result).toEqual({ confidence: 'LOW', reason: '근거 없음' });
+    });
+
+    it('reason이 응답에 없으면 빈 문자열로 폴백한다', async () => {
+      openAiChatClientMock.requestJson.mockResolvedValue(
+        JSON.stringify({ confidence: 'HIGH' }),
+      );
+
+      const result = await client.verifyConfidence('ADD_ANSWER', song, '문의', {
+        answerTxt: '너닿',
+      });
+
+      expect(result).toEqual({ confidence: 'HIGH', reason: '' });
     });
 
     it('유효하지 않은 confidence면 InquiryGptError를 던진다', async () => {
