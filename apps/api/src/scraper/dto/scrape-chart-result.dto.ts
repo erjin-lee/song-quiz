@@ -32,7 +32,10 @@ export class ScrapeChartResultDto {
   @ApiProperty({ description: '이미 존재하여 저장을 건너뛴 곡 수' })
   skippedSongCount: number;
 
-  @ApiProperty({ description: '퀴즈 출제곡으로 저장된 수' })
+  @ApiProperty({ description: '아티스트 정보가 없어 건너뛴 곡 수' })
+  skippedInvalidSongCount: number;
+
+  @ApiProperty({ description: '퀴즈 출제곡으로 실제 저장된 수' })
   savedQuizSongCount: number;
 
   @ApiProperty({

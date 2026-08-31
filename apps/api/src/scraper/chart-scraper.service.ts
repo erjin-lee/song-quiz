@@ -12,6 +12,7 @@ import { QuizSong } from '../quiz/entities/quiz-song.entity';
 import { Quiz } from '../quiz/entities/quiz.entity';
 import { Song } from '../quiz/entities/song.entity';
 import { QuizSongReuseService } from '../quiz/quiz-song-reuse.service';
+import { ArtistLinkService } from './artist-link.service';
 import { ScrapeChartResultDto } from './dto/scrape-chart-result.dto';
 import {
   ChartType,
@@ -38,6 +39,7 @@ export class ChartScraperService {
     @InjectRepository(QuizSong)
     private readonly quizSongRepository: Repository<QuizSong>,
     private readonly quizSongReuseService: QuizSongReuseService,
+    private readonly artistLinkService: ArtistLinkService,
   ) {}
 
   async scrapeChart(
@@ -78,11 +80,17 @@ export class ChartScraperService {
     let savedArtistCount = 0;
     let savedSongCount = 0;
     let skippedSongCount = 0;
+    let skippedInvalidSongCount = 0;
     let reusedYoutubeCount = 0;
     let reusedAnswerCount = 0;
     let quizSeq = 1;
 
     for (const chartSong of chartSongs) {
+      if (chartSong.artists.length === 0) {
+        skippedInvalidSongCount++;
+        continue;
+      }
+
       const artists: Artist[] = [];
       for (const scrapedArtist of chartSong.artists) {
         const { artist, created } = await this.getOrCreateArtist(
@@ -112,6 +120,9 @@ export class ChartScraperService {
       } else {
         skippedSongCount++;
       }
+
+      await this.artistLinkService.linkAlbumArtists(album.albmId, artists);
+      await this.artistLinkService.linkSongArtists(song.songId, artists);
 
       const reusableYoutubeInfo =
         await this.quizSongReuseService.findReusableYoutubeInfo(song.songId);
@@ -148,7 +159,8 @@ export class ChartScraperService {
       savedArtistCount,
       savedSongCount,
       skippedSongCount,
-      savedQuizSongCount: chartSongs.length,
+      skippedInvalidSongCount,
+      savedQuizSongCount: quizSeq - 1,
       reusedYoutubeCount,
       reusedAnswerCount,
     };
