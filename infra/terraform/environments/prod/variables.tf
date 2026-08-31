@@ -241,6 +241,13 @@ variable "inquiry_slack_webhook_url" {
   default     = ""
 }
 
+variable "inquiry_slack_signing_secret" {
+  description = "문의 검토 Slack 앱의 Signing Secret - 승인/반려 버튼 클릭(Interactivity 요청)이 실제로 그 Slack 앱에서 왔는지 서명 검증하는 데 쓴다(SlackSignatureGuard). 비워두면(기본값) apps/api가 인터랙션 요청을 전부 거부한다(secure by default) - inquiry_slack_webhook_url과 동일하게, 값이 있을 때만 SSM 파라미터를 만든다(secrets.tf). 컨테이너 환경변수 이름은 SLACK_SIGNING_SECRET"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "mail_from_address" {
   description = "SES로 발신할 때 쓰는 From 주소 - SES에서 검증된 도메인/주소여야 한다. 기본값 없음"
   type        = string

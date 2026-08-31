@@ -32,6 +32,11 @@ mail_from_address       = "REPLACE_WITH_EXISTING_.ENV_VALUE"
 # 새로 발급한 Webhook URL을 넣는다.
 inquiry_slack_webhook_url = "REPLACE_WITH_SLACK_INCOMING_WEBHOOK_URL"
 
+# 문의 검토 Slack 앱의 Signing Secret(승인/반려 버튼 인터랙션 요청 서명 검증용).
+# 비워두면(기본값 "") apps/api가 인터랙션 요청을 전부 거부한다 - Slack 앱 관리
+# 콘솔의 "Basic Information > App Credentials > Signing Secret"에서 확인한다.
+inquiry_slack_signing_secret = "REPLACE_WITH_SLACK_APP_SIGNING_SECRET"
+
 # publish-ecr.yml로 push한 이미지의 git commit SHA(전체 40자). 배포할 때마다 갱신한다.
 api_image_git_sha = "REPLACE_WITH_PUSHED_IMAGE_SHA"
 game_image_git_sha = "REPLACE_WITH_PUSHED_IMAGE_SHA"

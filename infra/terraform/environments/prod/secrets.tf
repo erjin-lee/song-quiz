@@ -167,6 +167,22 @@ resource "aws_ssm_parameter" "api_inquiry_slack_webhook_url" {
   tags = { Name = "${var.project_name}-api-inquiry-slack-webhook-url" }
 }
 
+# 위 inquiry_slack_webhook_url과 동일한 조건부 생성 패턴 - Slack 앱을 아직 만들지
+# 않았거나 인터랙션(승인/반려 버튼) 기능이 필요 없는 환경에서는 값 없이 apply할 수
+# 있어야 한다(SlackSignatureGuard가 이 값이 없으면 인터랙션 요청을 전부 거부하도록
+# 이미 짜여 있다 - secure by default).
+resource "aws_ssm_parameter" "api_inquiry_slack_signing_secret" {
+  count = var.inquiry_slack_signing_secret != "" ? 1 : 0
+
+  name             = "${local.api_ssm_parameter_prefix}/inquiry-slack-signing-secret"
+  type             = "SecureString"
+  key_id           = aws_kms_key.api_secrets.key_id
+  value_wo         = var.inquiry_slack_signing_secret
+  value_wo_version = 1
+
+  tags = { Name = "${var.project_name}-api-inquiry-slack-signing-secret" }
+}
+
 locals {
   # 이름은 컨테이너 환경변수 이름(apps/api가 process.env로 읽는 이름)과 정확히 같아야
   # 한다 - modules/ecs가 이 map을 그대로 ECS secrets 블록의 name으로 쓴다.
@@ -184,6 +200,9 @@ locals {
     } : {},
     length(aws_ssm_parameter.api_inquiry_slack_webhook_url) > 0 ? {
       SLACK_WEBHOOK_URL = aws_ssm_parameter.api_inquiry_slack_webhook_url[0].arn
+    } : {},
+    length(aws_ssm_parameter.api_inquiry_slack_signing_secret) > 0 ? {
+      SLACK_SIGNING_SECRET = aws_ssm_parameter.api_inquiry_slack_signing_secret[0].arn
     } : {}
   )
 

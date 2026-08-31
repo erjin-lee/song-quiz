@@ -24,10 +24,15 @@ export type InquiryActionLogSource = 'AI' | 'ADMIN' | 'SLACK' | 'SYSTEM';
 /** SQ_INQUIRY_ACTION.REVIEWED_VIA */
 export type InquiryReviewedVia = 'ADMIN' | 'SLACK';
 
-/** 승인/반려를 실행한 주체. Slack 인터랙션 엔드포인트(후속 작업)도 이 타입을 그대로 쓴다. */
-export type InquiryReviewActor =
-  | { via: 'ADMIN'; userKey: string }
-  | { via: 'SLACK'; slackTeamId: string; slackUserId: string };
+/**
+ * 승인/반려를 실행한 관리자. Slack 인터랙션(apps/api/src/slack)도 SQ_USER_SLACK으로
+ * 실제 관리자 userKey를 해석한 뒤 이 타입 그대로 AdminService.approveInquiry/
+ * rejectInquiry를 호출한다 - REVIEWED_VIA는 Slack 경유 여부와 무관하게 항상 'ADMIN'으로
+ * 기록된다(ADR-0008 참고, "기존 관리자 API를 그대로 재사용" 결정).
+ */
+export interface InquiryReviewActor {
+  userKey: string;
+}
 
 export const INQUIRY_FUNCTION_NAMES = [
   'CHANGE_START_TIME',

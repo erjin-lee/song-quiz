@@ -52,8 +52,6 @@ interface ActionTransitionExtra {
   beforeValue?: Record<string, unknown> | null;
   afterValue?: Record<string, unknown> | null;
   actorUserKey?: string | null;
-  slackTeamId?: string | null;
-  slackUserId?: string | null;
   detail?: Record<string, unknown> | null;
   /** 지정하면 현재 STATUS가 이 목록 중 하나일 때만 UPDATE가 실제로 반영된다(원자적 CAS). */
   guardStatusIn?: InquiryActionStatus[];
@@ -113,7 +111,9 @@ export class InquiryService {
   }
 
   /**
-   * 관리자/Slack이 문의를 승인한다: 판별된 조치를 실제로 실행하고 완료 처리한다.
+   * 관리자가 문의를 승인한다(관리자 웹, Slack 인터랙션 모두 여기로 들어온다 - Slack은
+   * SQ_USER_SLACK으로 실제 관리자 userKey를 해석한 뒤 AdminService를 통해 호출한다):
+   * 판별된 조치를 실제로 실행하고 완료 처리한다.
    * CHANGE_START_TIME/CHANGE_LINK는 현재 액션 상태와 무관하게(재실행 포함) 승인할 수
    * 있다 - 의도된 동작이다(관리자가 몇 번이고 다시 반영할 수 있어야 함, 결과도
    * 멱등적이다). ADD_ANSWER만 재승인 시 정답이 중복으로 추가되므로 막아야 하는데,
@@ -126,13 +126,11 @@ export class InquiryService {
     const inquiry = await this.findInquiryOrThrow(inquiryId);
     const action = await this.findLatestActionOrThrow(inquiryId);
 
-    const claimed = await this.transitionAction(action, 'APPROVED', actor.via, {
-      reviewedVia: actor.via,
-      reviewedByUserKey: actor.via === 'ADMIN' ? actor.userKey : null,
+    const claimed = await this.transitionAction(action, 'APPROVED', 'ADMIN', {
+      reviewedVia: 'ADMIN',
+      reviewedByUserKey: actor.userKey,
       reviewedDt: new Date(),
-      actorUserKey: actor.via === 'ADMIN' ? actor.userKey : null,
-      slackTeamId: actor.via === 'SLACK' ? actor.slackTeamId : null,
-      slackUserId: actor.via === 'SLACK' ? actor.slackUserId : null,
+      actorUserKey: actor.userKey,
       guardStatusNotIn:
         action.actionType === 'ADD_ANSWER'
           ? ['APPROVED', 'EXECUTING', 'COMPLETED']
@@ -154,7 +152,8 @@ export class InquiryService {
   }
 
   /**
-   * 검토 대기 문의를 관리자/Slack이 반려한다. PENDING_REVIEW인지 먼저 확인하고 나서
+   * 검토 대기 문의를 관리자가 반려한다(approve와 동일하게 Slack도 이 경로로 들어온다).
+   * PENDING_REVIEW인지 먼저 확인하고 나서
    * REJECTED로 바꾸는 게 아니라, UPDATE의 WHERE 조건으로 원자적으로 처리한다 - 그렇지
    * 않으면 동시에 승인이 먼저 실행돼 버린 뒤에도 반려가 뒤늦게 성공해서(반려 우회)
    * "이미 실행된 조치가 REJECTED로 표시되는" 상태 불일치가 생길 수 있다.
@@ -164,13 +163,11 @@ export class InquiryService {
     const inquiry = await this.findInquiryOrThrow(inquiryId);
     const action = await this.findLatestActionOrThrow(inquiryId);
 
-    const claimed = await this.transitionAction(action, 'REJECTED', actor.via, {
-      reviewedVia: actor.via,
-      reviewedByUserKey: actor.via === 'ADMIN' ? actor.userKey : null,
+    const claimed = await this.transitionAction(action, 'REJECTED', 'ADMIN', {
+      reviewedVia: 'ADMIN',
+      reviewedByUserKey: actor.userKey,
       reviewedDt: new Date(),
-      actorUserKey: actor.via === 'ADMIN' ? actor.userKey : null,
-      slackTeamId: actor.via === 'SLACK' ? actor.slackTeamId : null,
-      slackUserId: actor.via === 'SLACK' ? actor.slackUserId : null,
+      actorUserKey: actor.userKey,
       guardStatusIn: ['PENDING_REVIEW'],
     });
     if (!claimed) {
@@ -445,8 +442,8 @@ export class InquiryService {
           eventType: status,
           source,
           actorUserKey: extra?.actorUserKey ?? null,
-          slackTeamId: extra?.slackTeamId ?? null,
-          slackUserId: extra?.slackUserId ?? null,
+          slackTeamId: null,
+          slackUserId: null,
           beforeValue: extra?.beforeValue ?? null,
           afterValue: extra?.afterValue ?? null,
           detail: extra?.detail ?? null,

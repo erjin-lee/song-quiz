@@ -24,6 +24,11 @@ const structuredLogger = new StructuredLogger({
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: structuredLogger,
+    // Slack Interactivity 요청 서명 검증(SlackSignatureGuard)에 원문 바이트가 필요하다 -
+    // 파싱된 객체를 재직렬화하면 원문과 바이트가 달라질 수 있어 서명이 안 맞을 위험이
+    // 있다. NestJS 10 공식 옵션으로, 기존 body parser 설정을 건드리지 않고
+    // request.rawBody(Buffer)만 추가로 채워준다.
+    rawBody: true,
   });
   // PM2 cluster reload/재시작 시 보내는 SIGINT/SIGTERM에 반응해 그레이스풀 셧다운한다.
   // 이 훅이 없으면 Node 기본 동작대로 신호를 받는 즉시 프로세스가 종료되어(OnModuleDestroy도
