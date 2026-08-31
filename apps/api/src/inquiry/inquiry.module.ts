@@ -10,6 +10,7 @@ import { InquiryActionService } from './inquiry-action.service';
 import { InquiryGptClient } from './inquiry-gpt.client';
 import { InquiryController } from './inquiry.controller';
 import { InquiryService } from './inquiry.service';
+import { SlackNotifierClient } from './slack-notifier.client';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Inquiry, QuizSong, QuizAnswer])],
@@ -21,6 +22,7 @@ import { InquiryService } from './inquiry.service';
     InquiryActionService,
     YoutubeScraperClient,
     GameNotifierClient,
+    SlackNotifierClient,
   ],
   exports: [InquiryService],
 })

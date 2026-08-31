@@ -164,6 +164,19 @@ resource "aws_security_group" "db" {
     security_groups = [aws_security_group.ecs_api.id]
   }
 
+  # app_a(WAS) EC2가 ECS Fargate 이관 이후 정지 상태라(2026-08-29), bastion -> app_a
+  # 2단 홉으로 DB에 접속하던 기존 터널링 경로(scripts/tunnel-db.sh)가 끊겼다. app_a를
+  # 매번 껐다 켜지 않고도 운영 접속이 가능하도록, bastion에서 직접 DB로 접속을 허용한다 -
+  # bastion은 애초에 이런 운영 접근 용도로 존재하는 인스턴스라 SSH(위 app 규칙)와 같은
+  # 성격의 허용이다.
+  ingress {
+    description     = "DB port from bastion"
+    from_port       = var.db_port
+    to_port         = var.db_port
+    protocol        = "tcp"
+    security_groups = [var.bastion_security_group_id]
+  }
+
   egress {
     description = "Allow all outbound"
     from_port   = 0

@@ -1,4 +1,4 @@
-import { parseYoutubeUrl, withStartSecParam } from './youtube-url.util';
+import { parseYoutubeUrl } from './youtube-url.util';
 
 describe('parseYoutubeUrl', () => {
   it('watch URL에서 videoId와 t 파라미터(초)를 추출한다', () => {
@@ -39,27 +39,5 @@ describe('parseYoutubeUrl', () => {
     expect(
       parseYoutubeUrl('https://www.youtube.com/results?search_query=x'),
     ).toEqual({ videoId: null, startSec: null });
-  });
-});
-
-describe('withStartSecParam', () => {
-  it('기존 t 파라미터를 새 값으로 교체한다', () => {
-    const result = withStartSecParam(
-      'https://www.youtube.com/watch?v=abc123&t=10',
-      99,
-    );
-    expect(result).toBe('https://www.youtube.com/watch?v=abc123&t=99');
-  });
-
-  it('t 파라미터가 없으면 새로 추가한다', () => {
-    const result = withStartSecParam(
-      'https://www.youtube.com/watch?v=abc123',
-      30,
-    );
-    expect(result).toBe('https://www.youtube.com/watch?v=abc123&t=30');
-  });
-
-  it('URL 형식이 아니면 원본 문자열을 그대로 반환한다', () => {
-    expect(withStartSecParam('이건 URL이 아님', 30)).toBe('이건 URL이 아님');
   });
 });

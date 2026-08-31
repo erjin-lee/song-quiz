@@ -7,6 +7,7 @@ import { GameNotifierClient } from './game-notifier.client';
 import { InquiryActionService } from './inquiry-action.service';
 import { InquiryGptClient } from './inquiry-gpt.client';
 import { InquiryService } from './inquiry.service';
+import { SlackNotifierClient } from './slack-notifier.client';
 
 describe('InquiryService', () => {
   let service: InquiryService;
@@ -52,6 +53,9 @@ describe('InquiryService', () => {
   const gameNotifierClientMock = {
     notifyInquiryResult: jest.fn(),
   };
+  const slackNotifierClientMock = {
+    send: jest.fn(),
+  };
 
   const callProcess = (inquiryId: string) =>
     (service as unknown as { process(id: string): Promise<void> }).process(
@@ -81,6 +85,7 @@ describe('InquiryService', () => {
         { provide: InquiryGptClient, useValue: gptClientMock },
         { provide: InquiryActionService, useValue: actionServiceMock },
         { provide: GameNotifierClient, useValue: gameNotifierClientMock },
+        { provide: SlackNotifierClient, useValue: slackNotifierClientMock },
       ],
     }).compile();
 
@@ -167,6 +172,7 @@ describe('InquiryService', () => {
       expect(gameNotifierClientMock.notifyInquiryResult).toHaveBeenCalledWith(
         expect.objectContaining({ userId: 'user1', status: 'REJECTED' }),
       );
+      expect(slackNotifierClientMock.send).not.toHaveBeenCalled();
     });
 
     it('신뢰도가 MEDIUM이면 조치를 실행하지 않고 PENDING_REVIEW로 종료한다', async () => {
@@ -188,6 +194,9 @@ describe('InquiryService', () => {
       );
       expect(gameNotifierClientMock.notifyInquiryResult).toHaveBeenCalledWith(
         expect.objectContaining({ userId: 'user1', status: 'PENDING_REVIEW' }),
+      );
+      expect(slackNotifierClientMock.send).toHaveBeenCalledWith(
+        expect.objectContaining({ text: expect.stringContaining('MEDIUM') }),
       );
     });
 

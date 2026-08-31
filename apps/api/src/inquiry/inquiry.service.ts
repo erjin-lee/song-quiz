@@ -7,12 +7,14 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
+import { buildInquiryReviewSlackMessage } from './build-inquiry-review-slack-message';
 import { SubmitInquiryRequestDto } from './dto/submit-inquiry-request.dto';
 import { SubmitInquiryResponseDto } from './dto/submit-inquiry-response.dto';
 import { Inquiry } from './entities/inquiry.entity';
 import { GameNotifierClient } from './game-notifier.client';
 import { InquiryActionService } from './inquiry-action.service';
 import { InquiryGptClient, InquirySongContext } from './inquiry-gpt.client';
+import { SlackNotifierClient } from './slack-notifier.client';
 import {
   AddAnswerArgs,
   ChangeLinkArgs,
@@ -44,6 +46,7 @@ export class InquiryService {
     private readonly gptClient: InquiryGptClient,
     private readonly actionService: InquiryActionService,
     private readonly gameNotifierClient: GameNotifierClient,
+    private readonly slackNotifierClient: SlackNotifierClient,
   ) {}
 
   async submit(
@@ -225,6 +228,15 @@ export class InquiryService {
         args,
         confidence,
         PENDING_REVIEW_MESSAGE,
+      );
+      await this.slackNotifierClient.send(
+        buildInquiryReviewSlackMessage({
+          inquiryId: inquiry.inquiryId,
+          content: inquiry.content,
+          song: songContext,
+          matchedFunction,
+          args,
+        }),
       );
       return;
     }

@@ -234,6 +234,13 @@ variable "api_docs_password" {
   default     = ""
 }
 
+variable "inquiry_slack_webhook_url" {
+  description = "문의(Inquiry) MEDIUM 신뢰도 검토 알림을 보낼 Slack Incoming Webhook URL - modules/notification이 쓰는 알람용 Webhook과는 별개의 전용 Webhook이다. 비워두면(기본값) apps/api가 Slack 알림을 건너뛴다(SlackNotifierClient) - api_docs_password와 동일하게, 값이 있을 때만 SSM 파라미터를 만든다(secrets.tf). 컨테이너 환경변수 이름 자체는 SLACK_WEBHOOK_URL을 그대로 쓴다(api에 Slack 웹훅이 이거 하나뿐이라 지금은 구분할 실익이 적음)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "mail_from_address" {
   description = "SES로 발신할 때 쓰는 From 주소 - SES에서 검증된 도메인/주소여야 한다. 기본값 없음"
   type        = string

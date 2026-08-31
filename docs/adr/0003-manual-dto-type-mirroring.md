@@ -1,6 +1,6 @@
 # ADR-0003: apps/api DTO의 수동 타입 미러링
 
-- 상태: Accepted (재검토 중 — 공유 타입 패키지 검토)
+- 상태: "공유 패키지를 도입할지"에 대한 방향 결정은 [0007](0007-shared-package-for-cross-app-code.md)로 Superseded(`packages/shared` 도입 확정). 다만 DTO 자체의 이관은 아직 하지 않아, 이 문서가 설명하는 수동 미러링 관행은 DTO에 한해 계속 유효하다 - DTO 이관은 ADR-0007의 "향후 재검토 조건"에서 별도로 다룬다.
 - 관련 코드: `apps/web/src/types/`, `apps/admin/src/types/`, `apps/api`의 각 도메인 `dto/`
 
 ## 배경

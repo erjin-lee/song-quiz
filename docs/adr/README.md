@@ -24,7 +24,8 @@
 |---|---|---|
 | [0001](0001-room-realtime-state-and-reconnect.md) | Room 실시간 상태 관리와 재접속 처리 | Accepted (멀티 인스턴스 대응 완료) |
 | [0002](0002-guest-mode-and-jwt-storage.md) | 게스트 모드 병행과 JWT localStorage 저장 | 결정 3은 [0005](0005-httponly-cookie-auth.md)로 Superseded, 게스트 모드는 Accepted |
-| [0003](0003-manual-dto-type-mirroring.md) | apps/api DTO의 수동 타입 미러링 | Accepted (재검토 중 — 공유 타입 패키지 검토) |
+| [0003](0003-manual-dto-type-mirroring.md) | apps/api DTO의 수동 타입 미러링 | 공유 패키지 도입 방향은 [0007](0007-shared-package-for-cross-app-code.md)로 Superseded, DTO 이관은 미완료 |
 | [0004](0004-game-service-split.md) | Room을 별도 서비스(apps/game)로 분리 | Accepted |
 | [0005](0005-httponly-cookie-auth.md) | 로그인 JWT를 httpOnly 쿠키로 전환(web/api/game, admin 제외) | Accepted |
 | [0006](0006-game-multi-instance-no-sticky-session.md) | Game multi-instance 환경에서 ALB sticky session을 쓰지 않는다 | Accepted |
+| [0007](0007-shared-package-for-cross-app-code.md) | apps/api ↔ 프런트엔드 공유 코드를 packages/shared로 이관 | Accepted (DTO 이관은 진행 중) |

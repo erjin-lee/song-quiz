@@ -17,6 +17,7 @@ on:
       - 'apps/api/**'
       - 'packages/logger/**'
       - 'packages/tracing/**'
+      - 'packages/shared/**'
       - 'package.json'
       - 'yarn.lock'
       - 'turbo.json'
