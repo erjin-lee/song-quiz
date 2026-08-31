@@ -38,7 +38,12 @@ export class QuizArtist {
   })
   atstId: string;
 
-  @Column({ name: 'CRT_DT', type: 'datetime', comment: '생성일시' })
+  @Column({
+    name: 'CRT_DT',
+    type: 'datetime',
+    default: () => 'CURRENT_TIMESTAMP',
+    comment: '생성일시',
+  })
   crtDt: Date;
 
   @ManyToOne(() => Quiz, { createForeignKeyConstraints: false })

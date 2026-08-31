@@ -41,6 +41,7 @@ export class InquiryAction {
     name: 'ACTION_SEQ',
     type: 'int',
     unsigned: true,
+    default: 1,
     comment: '문의 내 조치 순번',
   })
   actionSeq: number;
@@ -100,6 +101,7 @@ export class InquiryAction {
     name: 'STATUS',
     type: 'varchar',
     length: 20,
+    default: 'PROPOSED',
     comment:
       '조치 상태 (PROPOSED/PENDING_REVIEW/APPROVED/REJECTED/EXECUTING/COMPLETED/FAILED)',
   })
@@ -155,9 +157,20 @@ export class InquiryAction {
   })
   executedDt: Date | null;
 
-  @Column({ name: 'CRT_DT', type: 'datetime', comment: '생성 일시' })
+  @Column({
+    name: 'CRT_DT',
+    type: 'datetime',
+    default: () => 'CURRENT_TIMESTAMP',
+    comment: '생성 일시',
+  })
   crtDt: Date;
 
-  @Column({ name: 'UPD_DT', type: 'datetime', comment: '수정 일시' })
+  @Column({
+    name: 'UPD_DT',
+    type: 'datetime',
+    default: () => 'CURRENT_TIMESTAMP',
+    onUpdate: 'CURRENT_TIMESTAMP',
+    comment: '수정 일시',
+  })
   updDt: Date;
 }

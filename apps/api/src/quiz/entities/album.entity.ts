@@ -52,10 +52,21 @@ export class Album {
   @Column({ name: 'RLS_DT', type: 'date', nullable: true, comment: '발매일' })
   rlsDt: string | null;
 
-  @Column({ name: 'CRT_DT', type: 'datetime', comment: '생성일시' })
+  @Column({
+    name: 'CRT_DT',
+    type: 'datetime',
+    default: () => 'CURRENT_TIMESTAMP',
+    comment: '생성일시',
+  })
   crtDt: Date;
 
-  @Column({ name: 'UPD_DT', type: 'datetime', comment: '수정일시' })
+  @Column({
+    name: 'UPD_DT',
+    type: 'datetime',
+    default: () => 'CURRENT_TIMESTAMP',
+    onUpdate: 'CURRENT_TIMESTAMP',
+    comment: '수정일시',
+  })
   updDt: Date;
 
   @ManyToOne(() => Artist, { createForeignKeyConstraints: false })

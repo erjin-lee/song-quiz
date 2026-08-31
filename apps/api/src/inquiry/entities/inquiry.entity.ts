@@ -45,6 +45,7 @@ export class Inquiry {
     type: 'varchar',
     length: 5,
     nullable: true,
+    default: 'GUEST',
     comment: '유저 / 게스트 여부',
   })
   userType: string | null;
@@ -69,9 +70,20 @@ export class Inquiry {
   })
   resultMessage: string | null;
 
-  @Column({ name: 'CRT_DT', type: 'datetime', comment: '생성 일시' })
+  @Column({
+    name: 'CRT_DT',
+    type: 'datetime',
+    default: () => 'CURRENT_TIMESTAMP',
+    comment: '생성 일시',
+  })
   crtDt: Date;
 
-  @Column({ name: 'UPD_DT', type: 'datetime', comment: '수정 일시' })
+  @Column({
+    name: 'UPD_DT',
+    type: 'datetime',
+    default: () => 'CURRENT_TIMESTAMP',
+    onUpdate: 'CURRENT_TIMESTAMP',
+    comment: '수정 일시',
+  })
   updDt: Date;
 }

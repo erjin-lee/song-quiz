@@ -101,6 +101,11 @@ export class InquiryActionLog {
   })
   detail: Record<string, unknown> | null;
 
-  @Column({ name: 'CRT_DT', type: 'datetime', comment: '생성 일시' })
+  @Column({
+    name: 'CRT_DT',
+    type: 'datetime',
+    default: () => 'CURRENT_TIMESTAMP',
+    comment: '생성 일시',
+  })
   crtDt: Date;
 }

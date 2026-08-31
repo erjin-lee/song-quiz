@@ -88,6 +88,7 @@ export class QuizSong {
     name: 'START_SEC',
     type: 'int',
     unsigned: true,
+    nullable: true,
     default: 0,
     comment: '재생 시작 위치(초)',
   })
@@ -102,10 +103,21 @@ export class QuizSong {
   })
   endSec: number | null;
 
-  @Column({ name: 'CRT_DT', type: 'datetime', comment: '생성일시' })
+  @Column({
+    name: 'CRT_DT',
+    type: 'datetime',
+    default: () => 'CURRENT_TIMESTAMP',
+    comment: '생성일시',
+  })
   crtDt: Date;
 
-  @Column({ name: 'UPD_DT', type: 'datetime', comment: '수정일시' })
+  @Column({
+    name: 'UPD_DT',
+    type: 'datetime',
+    default: () => 'CURRENT_TIMESTAMP',
+    onUpdate: 'CURRENT_TIMESTAMP',
+    comment: '수정일시',
+  })
   updDt: Date;
 
   @ManyToOne(() => Quiz, { createForeignKeyConstraints: false })
