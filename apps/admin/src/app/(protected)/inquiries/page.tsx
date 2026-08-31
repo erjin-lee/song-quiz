@@ -18,7 +18,7 @@ import {
   getAdminInquiries,
   rejectInquiry,
 } from '@/lib/inquiries';
-import { withStartSecParam } from '@/lib/youtube-url';
+import { withStartSecParam } from 'shared';
 import type {
   AdminInquiryItemDto,
   InquiryConfidence,

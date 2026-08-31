@@ -30,7 +30,8 @@
 # Dependencies
 
 - `apps/api`에 REST(Admin JWT)로 의존한다. 전체 그래프는 [`ARCHITECTURE.md`](../../ARCHITECTURE.md) 참고.
-- 설계 배경: DTO 미러링([`ADR-0003`](../../docs/adr/0003-manual-dto-type-mirroring.md)).
+- `apps/api`와 공유하는 순수 유틸리티(예: 유튜브 링크의 `t` 파라미터 계산)는 [`packages/shared`](../../packages/shared)에서 import한다 - DTO처럼 `src/types/`에 수동 미러링하지 않는다.
+- 설계 배경: DTO 미러링([`ADR-0003`](../../docs/adr/0003-manual-dto-type-mirroring.md)), 공유 패키지 도입([`ADR-0007`](../../docs/adr/0007-shared-package-for-cross-app-code.md)).
 
 # Commands
 

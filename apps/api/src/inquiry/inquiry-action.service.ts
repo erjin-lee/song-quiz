@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { withStartSecParam } from 'shared';
 import { Repository } from 'typeorm';
 import { QuizAnswer } from '../quiz/entities/quiz-answer.entity';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
@@ -10,7 +11,7 @@ import {
   ChangeStartTimeArgs,
   InquiryConfidence,
 } from './inquiry.types';
-import { parseYoutubeUrl, withStartSecParam } from './youtube-url.util';
+import { parseYoutubeUrl } from './youtube-url.util';
 
 const MAX_ANSWER_TYPE_LENGTH = 12;
 /** 시작 시간 변경/링크 교체 시 종료 시간을 맞추는 클립 길이(초). quiz-generator.service.ts의 QUIZ_SONG_CLIP_SEC과 동일하게 맞춘다. */
