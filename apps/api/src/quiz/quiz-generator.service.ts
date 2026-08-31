@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { delay } from '../common/delay';
 import { FillQuizYoutubeLinksResultDto } from './dto/fill-quiz-youtube-links-result.dto';
 import { GenerateQuizResultDto } from './dto/generate-quiz-result.dto';
@@ -46,10 +46,17 @@ export class QuizGeneratorService {
       );
     }
 
-    const songs = await this.songRepository.find({
-      where: { atstId, ytbLink: IsNull() },
-      order: { songId: 'ASC' },
-    });
+    const songs = await this.songRepository
+      .createQueryBuilder('song')
+      .innerJoin(
+        'song.songArtists',
+        'songArtist',
+        'songArtist.atstId = :atstId',
+        { atstId },
+      )
+      .where('song.ytbLink IS NULL')
+      .orderBy('song.songId', 'ASC')
+      .getMany();
     if (songs.length === 0) {
       throw new BadRequestException(
         `유튜브 링크가 없는 곡이 없어 퀴즈를 생성할 수 없습니다. (atstId: ${atstId})`,
@@ -127,7 +134,13 @@ export class QuizGeneratorService {
     const quizSongs = await this.quizSongRepository
       .createQueryBuilder('quizSong')
       .innerJoinAndSelect('quizSong.song', 'song')
-      .innerJoinAndSelect('song.artist', 'artist')
+      .innerJoin(
+        'song.songArtists',
+        'songArtist',
+        'songArtist.mainYn = :mainYn',
+        { mainYn: 'Y' },
+      )
+      .innerJoinAndSelect('songArtist.artist', 'artist')
       .where('quizSong.quizId = :quizId', { quizId })
       .andWhere('quizSong.youtubeUrl = :emptyUrl', { emptyUrl: '' })
       .orderBy('quizSong.quizSeq', 'ASC')
@@ -176,7 +189,7 @@ export class QuizGeneratorService {
     for (let i = 0; i < remainingQuizSongs.length; i++) {
       const quizSong = remainingQuizSongs[i];
       const result = await this.searchSongVideo(
-        quizSong.song.artist.atstNm,
+        quizSong.song.songArtists[0].artist.atstNm,
         quizSong.song.songNm,
         `quizSongId: ${quizSong.quizSongId}`,
       );

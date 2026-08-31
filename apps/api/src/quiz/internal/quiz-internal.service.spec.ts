@@ -112,7 +112,7 @@ describe('QuizInternalService', () => {
           endSec: 40,
           song: {
             songNm: '노래1',
-            artist: { atstNm: '아이유' },
+            songArtists: [{ mainYn: 'Y', artist: { atstNm: '아이유' } }],
             album: { albmNm: '앨범1' },
           },
         },
@@ -123,7 +123,7 @@ describe('QuizInternalService', () => {
           endSec: 30,
           song: {
             songNm: '노래2',
-            artist: { atstNm: '아이유' },
+            songArtists: [{ mainYn: 'Y', artist: { atstNm: '아이유' } }],
             album: { albmNm: '앨범2' },
           },
         },
@@ -139,7 +139,7 @@ describe('QuizInternalService', () => {
       expect(quizSongRepositoryMock.find).toHaveBeenCalledWith({
         where: { quizId: '1' },
         order: { quizSeq: 'ASC' },
-        relations: { song: { artist: true, album: true } },
+        relations: { song: { songArtists: { artist: true }, album: true } },
       });
       expect(result).toEqual([
         {

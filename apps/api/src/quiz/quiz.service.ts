@@ -109,7 +109,13 @@ export class QuizService {
     const quizSongs = await this.quizSongRepository
       .createQueryBuilder('quizSong')
       .innerJoinAndSelect('quizSong.song', 'song')
-      .innerJoinAndSelect('song.artist', 'artist')
+      .innerJoin(
+        'song.songArtists',
+        'songArtist',
+        'songArtist.mainYn = :mainYn',
+        { mainYn: 'Y' },
+      )
+      .innerJoinAndSelect('songArtist.artist', 'artist')
       .innerJoinAndSelect('song.album', 'album')
       .leftJoinAndSelect('quizSong.answers', 'answer')
       .where('quizSong.quizId = :quizId', { quizId })
@@ -122,7 +128,7 @@ export class QuizService {
       quizSeq: quizSong.quizSeq,
       songId: quizSong.song.songId,
       songNm: quizSong.song.songNm,
-      atstNm: quizSong.song.artist.atstNm,
+      atstNm: quizSong.song.songArtists[0].artist.atstNm,
       albmNm: quizSong.song.album.albmNm,
       youtubeUrl: shiftYoutubeUrlStartSecEarlier(quizSong.youtubeUrl),
       youtubeVideoId: quizSong.youtubeVideoId,

@@ -216,7 +216,7 @@ export class InquiryService {
 
     const quizSong = await this.quizSongRepository.findOne({
       where: { quizSongId: inquiry.quizSongId },
-      relations: { song: { artist: true } },
+      relations: { song: { songArtists: { artist: true } } },
     });
     if (!quizSong) {
       await this.finish(inquiry, 'FAILED', null);
@@ -226,7 +226,8 @@ export class InquiryService {
     const songContext: InquirySongContext = {
       quizSongId: quizSong.quizSongId,
       songNm: quizSong.song.songNm,
-      atstNm: quizSong.song.artist.atstNm,
+      atstNm: quizSong.song.songArtists.find((sa) => sa.mainYn === 'Y')!.artist
+        .atstNm,
       startSec: quizSong.startSec,
       youtubeUrl: quizSong.youtubeUrl,
       durationSec: quizSong.durationSec,

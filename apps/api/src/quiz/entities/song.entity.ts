@@ -4,10 +4,12 @@ import {
   Index,
   JoinColumn,
   ManyToOne,
+  OneToMany,
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { Album } from './album.entity';
 import { Artist } from './artist.entity';
+import { SongArtist } from './song-artist.entity';
 
 @Entity('SQ_SONG', { comment: '노래 마스터' })
 @Index('UK_SQ_SONG_01', ['melonSongId'], { unique: true })
@@ -113,4 +115,7 @@ export class Song {
   @ManyToOne(() => Artist, { createForeignKeyConstraints: false })
   @JoinColumn({ name: 'ATST_ID' })
   artist: Artist;
+
+  @OneToMany(() => SongArtist, (songArtist) => songArtist.song)
+  songArtists: SongArtist[];
 }

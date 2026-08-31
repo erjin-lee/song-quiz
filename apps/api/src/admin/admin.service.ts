@@ -92,7 +92,7 @@ export class AdminService {
     const quizSongs = quizSongIds.length
       ? await this.quizSongRepository.find({
           where: { quizSongId: In(quizSongIds) },
-          relations: { song: { artist: true } },
+          relations: { song: { songArtists: { artist: true } } },
         })
       : [];
     const quizSongById = new Map(quizSongs.map((qs) => [qs.quizSongId, qs]));
@@ -120,7 +120,9 @@ export class AdminService {
         inquiryId: inquiry.inquiryId,
         quizSongId: inquiry.quizSongId,
         songNm: quizSong?.song.songNm ?? null,
-        atstNm: quizSong?.song.artist.atstNm ?? null,
+        atstNm:
+          quizSong?.song.songArtists.find((sa) => sa.mainYn === 'Y')?.artist
+            .atstNm ?? null,
         youtubeUrl: quizSong?.youtubeUrl ?? null,
         roomId: inquiry.roomId,
         userId: inquiry.userId,
