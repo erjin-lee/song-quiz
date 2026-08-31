@@ -34,6 +34,12 @@ export interface InquiryClassifyResult {
   args: Record<string, unknown> | null;
 }
 
+export interface InquiryVerifyResult {
+  confidence: InquiryConfidence;
+  /** GPT가 밝힌 판단 근거. 프롬프트가 지켜지지 않아 응답에 없으면 빈 문자열로 폴백한다. */
+  reason: string;
+}
+
 function parseClassifyResult(content: string): InquiryClassifyResult {
   let parsed: unknown;
   try {
@@ -68,7 +74,7 @@ function parseClassifyResult(content: string): InquiryClassifyResult {
   };
 }
 
-function parseVerifyResult(content: string): InquiryConfidence {
+function parseVerifyResult(content: string): InquiryVerifyResult {
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
@@ -86,7 +92,8 @@ function parseVerifyResult(content: string): InquiryConfidence {
     );
   }
 
-  return confidence as InquiryConfidence;
+  const reason = asString(parsed, 'reason');
+  return { confidence: confidence as InquiryConfidence, reason: reason ?? '' };
 }
 
 @Injectable()
@@ -109,7 +116,7 @@ export class InquiryGptClient {
     song: InquirySongContext,
     content: string,
     args: Record<string, unknown>,
-  ): Promise<InquiryConfidence> {
+  ): Promise<InquiryVerifyResult> {
     const messages: OpenAiChatMessage[] = [
       { role: 'system', content: VERIFY_SYSTEM_RULES[functionName] },
       {

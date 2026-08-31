@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { InquiryAction } from '../inquiry/entities/inquiry-action.entity';
 import { Inquiry } from '../inquiry/entities/inquiry.entity';
 import { InquiryModule } from '../inquiry/inquiry.module';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
@@ -16,7 +17,7 @@ import { AdminAuthGuard } from './guards/admin-auth.guard';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Inquiry, QuizSong, User]),
+    TypeOrmModule.forFeature([Inquiry, InquiryAction, QuizSong, User]),
     InquiryModule,
     JwtModule.register({}),
     ThrottlerModule.forRootAsync({

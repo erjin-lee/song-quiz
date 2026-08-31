@@ -21,6 +21,7 @@ import { CreateAdminRequestDto } from './dto/create-admin-request.dto';
 import { CreateAdminResponseDto } from './dto/create-admin-response.dto';
 import { GetAdminInquiriesQueryDto } from './dto/get-admin-inquiries-query.dto';
 import { UpdateAdminProfileRequestDto } from './dto/update-admin-profile-request.dto';
+import { InquiryAction } from '../inquiry/entities/inquiry-action.entity';
 import { Inquiry } from '../inquiry/entities/inquiry.entity';
 import { InquiryService } from '../inquiry/inquiry.service';
 import { AdminJwtPayload } from './admin-auth.types';
@@ -40,6 +41,8 @@ export class AdminService {
   constructor(
     @InjectRepository(Inquiry)
     private readonly inquiryRepository: Repository<Inquiry>,
+    @InjectRepository(InquiryAction)
+    private readonly inquiryActionRepository: Repository<InquiryAction>,
     @InjectRepository(QuizSong)
     private readonly quizSongRepository: Repository<QuizSong>,
     @InjectRepository(User)
@@ -54,13 +57,31 @@ export class AdminService {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 50;
 
+    // confidence/matchedFunction 필터는 이제 SQ_INQUIRY가 아니라 SQ_INQUIRY_ACTION 쪽
+    // 컬럼이라, 먼저 조건에 맞는 inquiryId를 액션 테이블에서 추려낸 뒤 Inquiry 조회의
+    // where 조건으로 좁힌다. 필터가 없으면 이 단계 자체를 건너뛴다.
+    let inquiryIdFilter: string[] | undefined;
+    if (query.confidence?.length || query.matchedFunction?.length) {
+      const matchingActions = await this.inquiryActionRepository.find({
+        where: {
+          ...(query.confidence?.length && { confidence: In(query.confidence) }),
+          ...(query.matchedFunction?.length && {
+            actionType: In(query.matchedFunction),
+          }),
+        },
+      });
+      inquiryIdFilter = [
+        ...new Set(matchingActions.map((action) => action.inquiryId)),
+      ];
+      if (inquiryIdFilter.length === 0) {
+        return { items: [], total: 0, page, pageSize };
+      }
+    }
+
     const [inquiries, total] = await this.inquiryRepository.findAndCount({
       where: {
         ...(query.status?.length && { status: In(query.status) }),
-        ...(query.confidence?.length && { confidence: In(query.confidence) }),
-        ...(query.matchedFunction?.length && {
-          matchedFunction: In(query.matchedFunction),
-        }),
+        ...(inquiryIdFilter && { inquiryId: In(inquiryIdFilter) }),
       },
       order: { crtDt: 'DESC' },
       skip: (page - 1) * pageSize,
@@ -76,8 +97,25 @@ export class AdminService {
       : [];
     const quizSongById = new Map(quizSongs.map((qs) => [qs.quizSongId, qs]));
 
+    const inquiryIds = inquiries.map((i) => i.inquiryId);
+    const actions = inquiryIds.length
+      ? await this.inquiryActionRepository.find({
+          where: { inquiryId: In(inquiryIds) },
+          order: { actionSeq: 'DESC' },
+        })
+      : [];
+    // 문의당 액션이 여러 건이어도(재분류 등, 지금은 발생하지 않음) actionSeq 내림차순으로
+    // 조회했으니 먼저 만난 것이 최신 액션이다.
+    const latestActionByInquiryId = new Map<string, InquiryAction>();
+    for (const action of actions) {
+      if (!latestActionByInquiryId.has(action.inquiryId)) {
+        latestActionByInquiryId.set(action.inquiryId, action);
+      }
+    }
+
     const items = inquiries.map((inquiry) => {
       const quizSong = quizSongById.get(inquiry.quizSongId);
+      const action = latestActionByInquiryId.get(inquiry.inquiryId);
       return {
         inquiryId: inquiry.inquiryId,
         quizSongId: inquiry.quizSongId,
@@ -87,9 +125,9 @@ export class AdminService {
         roomId: inquiry.roomId,
         userId: inquiry.userId,
         content: inquiry.content,
-        matchedFunction: inquiry.matchedFunction,
-        matchedArgs: inquiry.matchedArgs,
-        confidence: inquiry.confidence,
+        matchedFunction: action?.actionType ?? null,
+        matchedArgs: action?.actionArgs ?? null,
+        confidence: action?.confidence ?? null,
         status: inquiry.status,
         resultMessage: inquiry.resultMessage,
         crtDt: inquiry.crtDt,
@@ -99,12 +137,18 @@ export class AdminService {
     return { items, total, page, pageSize };
   }
 
-  approveInquiry(inquiryId: string): Promise<void> {
-    return this.inquiryService.approve(inquiryId);
+  approveInquiry(inquiryId: string, adminUserKey: string): Promise<void> {
+    return this.inquiryService.approve(inquiryId, {
+      via: 'ADMIN',
+      userKey: adminUserKey,
+    });
   }
 
-  rejectInquiry(inquiryId: string): Promise<void> {
-    return this.inquiryService.reject(inquiryId);
+  rejectInquiry(inquiryId: string, adminUserKey: string): Promise<void> {
+    return this.inquiryService.reject(inquiryId, {
+      via: 'ADMIN',
+      userKey: adminUserKey,
+    });
   }
 
   async createAdmin(

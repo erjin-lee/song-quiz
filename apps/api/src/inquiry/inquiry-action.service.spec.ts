@@ -25,6 +25,7 @@ describe('InquiryActionService', () => {
   const quizAnswerRepositoryMock = {
     create: jest.fn((data) => data),
     save: jest.fn(async (data: unknown) => data),
+    findOne: jest.fn(),
   };
   const youtubeScraperClientMock = {
     getDurationSec: jest.fn(),
@@ -33,6 +34,9 @@ describe('InquiryActionService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     quizSongRepositoryMock.findOne.mockResolvedValue({ ...baseQuizSong });
+    // addAnswer의 중복 방지 조회 - 기본값은 "기존 정답 없음"이고, 멱등성을 검증하는
+    // 테스트만 이 값을 덮어쓴다.
+    quizAnswerRepositoryMock.findOne.mockResolvedValue(null);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -181,6 +185,30 @@ describe('InquiryActionService', () => {
       expect(quizAnswerRepositoryMock.save).toHaveBeenCalledWith(
         expect.objectContaining({ answerType: 'ABCDEFGHIJKL' }),
       );
+    });
+
+    it('같은 quizSongId+answerTxt로 이미 활성화된 정답이 있으면 새로 추가하지 않는다(재승인 시 중복 삽입 방지)', async () => {
+      quizAnswerRepositoryMock.findOne.mockResolvedValue({
+        quizSongId: 'qs1',
+        answerTxt: '너에게 닿기를',
+        answerType: 'ORIGINAL',
+        isActive: 'Y',
+      });
+
+      const result = await service.addAnswer(
+        'qs1',
+        { answerTxt: '너에게 닿기를', answerType: 'ALIAS' },
+        'HIGH',
+      );
+
+      expect(quizAnswerRepositoryMock.findOne).toHaveBeenCalledWith({
+        where: { quizSongId: 'qs1', answerTxt: '너에게 닿기를', isActive: 'Y' },
+      });
+      expect(quizAnswerRepositoryMock.save).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        before: { answerTxt: '너에게 닿기를', answerType: 'ORIGINAL' },
+        after: { answerTxt: '너에게 닿기를', answerType: 'ORIGINAL' },
+      });
     });
   });
 });

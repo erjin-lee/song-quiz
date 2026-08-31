@@ -67,8 +67,11 @@ export class AdminController {
   @ApiParam({ name: 'inquiryId', description: '문의 ID' })
   @ApiOkResponse({ description: '승인 처리 완료' })
   @ApiNotFoundResponse({ description: '문의를 찾을 수 없음' })
-  approveInquiry(@Param('inquiryId') inquiryId: string): Promise<void> {
-    return this.adminService.approveInquiry(inquiryId);
+  approveInquiry(
+    @Param('inquiryId') inquiryId: string,
+    @Req() req: AdminAuthenticatedRequest,
+  ): Promise<void> {
+    return this.adminService.approveInquiry(inquiryId, req.admin.userId);
   }
 
   @Post('inquiries/:inquiryId/reject')
@@ -77,8 +80,11 @@ export class AdminController {
   @ApiParam({ name: 'inquiryId', description: '문의 ID' })
   @ApiOkResponse({ description: '반려 처리 완료' })
   @ApiNotFoundResponse({ description: '문의를 찾을 수 없음' })
-  rejectInquiry(@Param('inquiryId') inquiryId: string): Promise<void> {
-    return this.adminService.rejectInquiry(inquiryId);
+  rejectInquiry(
+    @Param('inquiryId') inquiryId: string,
+    @Req() req: AdminAuthenticatedRequest,
+  ): Promise<void> {
+    return this.adminService.rejectInquiry(inquiryId, req.admin.userId);
   }
 
   @Post('admins')

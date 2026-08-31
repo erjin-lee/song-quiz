@@ -9,6 +9,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { In } from 'typeorm';
 import { AdminService } from './admin.service';
+import { InquiryAction } from '../inquiry/entities/inquiry-action.entity';
 import { Inquiry } from '../inquiry/entities/inquiry.entity';
 import { InquiryService } from '../inquiry/inquiry.service';
 import { QuizSong } from '../quiz/entities/quiz-song.entity';
@@ -29,6 +30,10 @@ describe('AdminService', () => {
   const inquiryRepositoryMock = {
     find: jest.fn(),
     findAndCount: jest.fn(),
+  };
+
+  const inquiryActionRepositoryMock = {
+    find: jest.fn(),
   };
 
   const quizSongRepositoryMock = {
@@ -54,6 +59,7 @@ describe('AdminService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    inquiryActionRepositoryMock.find.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -61,6 +67,10 @@ describe('AdminService', () => {
         {
           provide: getRepositoryToken(Inquiry),
           useValue: inquiryRepositoryMock,
+        },
+        {
+          provide: getRepositoryToken(InquiryAction),
+          useValue: inquiryActionRepositoryMock,
         },
         {
           provide: getRepositoryToken(QuizSong),
@@ -76,28 +86,61 @@ describe('AdminService', () => {
   });
 
   describe('getInquiries', () => {
-    it('필터 조건을 Inquiry 리포지토리 조회에 그대로 전달하고 최신순으로 조회한다', async () => {
+    it('status 필터를 Inquiry 리포지토리 조회에 전달하고 최신순으로 조회한다', async () => {
       inquiryRepositoryMock.findAndCount.mockResolvedValue([[], 0]);
       quizSongRepositoryMock.find.mockResolvedValue([]);
 
       await service.getInquiries({
         status: ['PENDING_REVIEW', 'REJECTED'],
+        page: 1,
+        pageSize: 50,
+      });
+
+      expect(inquiryRepositoryMock.findAndCount).toHaveBeenCalledWith({
+        where: { status: In(['PENDING_REVIEW', 'REJECTED']) },
+        order: { crtDt: 'DESC' },
+        skip: 0,
+        take: 50,
+      });
+    });
+
+    it('confidence/matchedFunction 필터는 먼저 InquiryAction에서 inquiryId를 추려 Inquiry 조회를 좁힌다', async () => {
+      inquiryActionRepositoryMock.find.mockResolvedValue([
+        { inquiryId: '1' },
+        { inquiryId: '2' },
+        { inquiryId: '1' },
+      ]);
+      inquiryRepositoryMock.findAndCount.mockResolvedValue([[], 0]);
+      quizSongRepositoryMock.find.mockResolvedValue([]);
+
+      await service.getInquiries({
         confidence: ['MEDIUM'],
         matchedFunction: ['ADD_ANSWER'],
         page: 1,
         pageSize: 50,
       });
 
-      expect(inquiryRepositoryMock.findAndCount).toHaveBeenCalledWith({
+      expect(inquiryActionRepositoryMock.find).toHaveBeenCalledWith({
         where: {
-          status: In(['PENDING_REVIEW', 'REJECTED']),
           confidence: In(['MEDIUM']),
-          matchedFunction: In(['ADD_ANSWER']),
+          actionType: In(['ADD_ANSWER']),
         },
+      });
+      expect(inquiryRepositoryMock.findAndCount).toHaveBeenCalledWith({
+        where: { inquiryId: In(['1', '2']) },
         order: { crtDt: 'DESC' },
         skip: 0,
         take: 50,
       });
+    });
+
+    it('confidence/matchedFunction 필터에 해당하는 액션이 없으면 Inquiry 조회 없이 빈 목록을 반환한다', async () => {
+      inquiryActionRepositoryMock.find.mockResolvedValue([]);
+
+      const result = await service.getInquiries({ confidence: ['LOW'] });
+
+      expect(inquiryRepositoryMock.findAndCount).not.toHaveBeenCalled();
+      expect(result).toEqual({ items: [], total: 0, page: 1, pageSize: 50 });
     });
 
     it('필터 배열이 비어 있으면 해당 조건을 where에 포함하지 않는다', async () => {
@@ -112,6 +155,7 @@ describe('AdminService', () => {
         pageSize: 50,
       });
 
+      expect(inquiryActionRepositoryMock.find).not.toHaveBeenCalled();
       expect(inquiryRepositoryMock.findAndCount).toHaveBeenCalledWith({
         where: {},
         order: { crtDt: 'DESC' },
@@ -131,7 +175,7 @@ describe('AdminService', () => {
       );
     });
 
-    it('출제곡을 찾을 수 있으면 곡명/아티스트명을 채워 반환한다', async () => {
+    it('출제곡을 찾을 수 있으면 곡명/아티스트명을 채워 반환하고, 최신 InquiryAction 정보도 함께 채운다', async () => {
       inquiryRepositoryMock.findAndCount.mockResolvedValue([
         [
           {
@@ -140,9 +184,6 @@ describe('AdminService', () => {
             roomId: 'room-1',
             userId: 'user-1',
             content: '시작 지점이 이상해요',
-            matchedFunction: 'CHANGE_START_TIME',
-            matchedArgs: { startSec: 10 },
-            confidence: 'HIGH',
             status: 'COMPLETED',
             resultMessage: '반영되었습니다.',
             crtDt: new Date('2026-01-01'),
@@ -157,12 +198,25 @@ describe('AdminService', () => {
           song: { songNm: '바이, 썸머', artist: { atstNm: '아이유' } },
         },
       ]);
+      inquiryActionRepositoryMock.find.mockResolvedValue([
+        {
+          inquiryId: '1',
+          actionSeq: 1,
+          actionType: 'CHANGE_START_TIME',
+          actionArgs: { startSec: 10 },
+          confidence: 'HIGH',
+        },
+      ]);
 
       const result = await service.getInquiries({});
 
       expect(quizSongRepositoryMock.find).toHaveBeenCalledWith({
         where: { quizSongId: expect.anything() },
         relations: { song: { artist: true } },
+      });
+      expect(inquiryActionRepositoryMock.find).toHaveBeenCalledWith({
+        where: { inquiryId: In(['1']) },
+        order: { actionSeq: 'DESC' },
       });
       expect(result).toEqual(
         expect.objectContaining({
@@ -176,6 +230,9 @@ describe('AdminService', () => {
               songNm: '바이, 썸머',
               atstNm: '아이유',
               youtubeUrl: 'https://www.youtube.com/watch?v=abc123&t=10',
+              matchedFunction: 'CHANGE_START_TIME',
+              matchedArgs: { startSec: 10 },
+              confidence: 'HIGH',
             }),
           ],
         }),
@@ -191,9 +248,6 @@ describe('AdminService', () => {
             roomId: 'room-1',
             userId: 'user-1',
             content: '문의',
-            matchedFunction: null,
-            matchedArgs: null,
-            confidence: null,
             status: 'NO_MATCH',
             resultMessage: null,
             crtDt: new Date('2026-01-01'),
@@ -210,30 +264,40 @@ describe('AdminService', () => {
           songNm: null,
           atstNm: null,
           youtubeUrl: null,
+          matchedFunction: null,
+          matchedArgs: null,
+          confidence: null,
         }),
       ]);
     });
 
-    it('문의가 없으면 QuizSong 조회를 생략한다', async () => {
+    it('문의가 없으면 QuizSong/InquiryAction 조회를 생략한다', async () => {
       inquiryRepositoryMock.findAndCount.mockResolvedValue([[], 0]);
 
       const result = await service.getInquiries({});
 
       expect(quizSongRepositoryMock.find).not.toHaveBeenCalled();
+      expect(inquiryActionRepositoryMock.find).not.toHaveBeenCalled();
       expect(result.items).toEqual([]);
       expect(result.total).toBe(0);
     });
   });
 
   describe('approveInquiry / rejectInquiry', () => {
-    it('InquiryService.approve에 위임한다', async () => {
-      await service.approveInquiry('1');
-      expect(inquiryServiceMock.approve).toHaveBeenCalledWith('1');
+    it('InquiryService.approve에 ADMIN 액터로 위임한다', async () => {
+      await service.approveInquiry('1', 'admin-key-1');
+      expect(inquiryServiceMock.approve).toHaveBeenCalledWith('1', {
+        via: 'ADMIN',
+        userKey: 'admin-key-1',
+      });
     });
 
-    it('InquiryService.reject에 위임한다', async () => {
-      await service.rejectInquiry('1');
-      expect(inquiryServiceMock.reject).toHaveBeenCalledWith('1');
+    it('InquiryService.reject에 ADMIN 액터로 위임한다', async () => {
+      await service.rejectInquiry('1', 'admin-key-1');
+      expect(inquiryServiceMock.reject).toHaveBeenCalledWith('1', {
+        via: 'ADMIN',
+        userKey: 'admin-key-1',
+      });
     });
   });
 
