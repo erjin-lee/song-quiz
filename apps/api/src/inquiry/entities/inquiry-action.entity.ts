@@ -10,8 +10,8 @@ import {
  * 문의(SQ_INQUIRY) 하나에 대해 AI가 제안한 조치의 생명주기를 담는다
  * (PROPOSED -> PENDING_REVIEW/APPROVED/REJECTED -> EXECUTING -> COMPLETED/FAILED).
  * SQ_INQUIRY의 MATCHED_FUNCTION/MATCHED_ARGS/CONFIDENCE를 대체한다 - 이 테이블 도입
- * 이후 그 컬럼들은 코드에서 더 이상 쓰지 않는다(추후 DROP COLUMN 예정, docs/adr 없음 -
- * DB_INFO.txt가 실제 스키마의 source of truth).
+ * 이후 그 컬럼들은 코드에서 더 이상 쓰지 않았고, DropInquiryLegacyClassificationColumns
+ * 마이그레이션으로 실제 DB에서도 제거했다.
  */
 @Entity('SQ_INQUIRY_ACTION', { comment: '문의 AI 조치' })
 @Index('UK_SQ_INQUIRY_ACTION_01', ['inquiryId', 'actionSeq'], { unique: true })
