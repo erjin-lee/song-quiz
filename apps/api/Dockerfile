@@ -5,7 +5,7 @@
 #   docker build -f apps/api/Dockerfile -t song-quiz-api .
 #
 # 모노레포 전체를 COPY하는 이유: yarn workspaces focus가 대상 워크스페이스(api)뿐 아니라
-# 그 워크스페이스가 의존하는 다른 워크스페이스(logger, tracing)의 package.json도
+# 그 워크스페이스가 의존하는 다른 워크스페이스(logger, tracing, shared)의 package.json도
 # 참조해야 의존성 그래프를 올바르게 계산한다 - 일부만 골라 복사하면 immutable install이
 # 깨진다. glibc 기반(node:24-slim, 2026-08 기준 Latest LTS)을 쓰는 이유: bcrypt(네이티브 addon)가 musl(alpine)용
 # 프리빌드 바이너리를 제공하지 않아 alpine에서는 빌드 툴체인을 추가로 설치해야 한다 -
@@ -22,6 +22,7 @@ RUN corepack enable \
   && YARN_ENABLE_IMMUTABLE_INSTALLS=true yarn workspaces focus api \
   && yarn workspace logger build \
   && yarn workspace tracing build \
+  && yarn workspace shared build \
   && yarn workspace api build
 
 FROM node:24-slim AS runtime
@@ -29,13 +30,16 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 # 루트에서 하나로 hoist된 node_modules를 그대로 옮긴다(nodeLinker: node-modules) -
-# packages/logger, packages/tracing으로의 상대경로 symlink가 깨지지 않도록 원래와
-# 같은 디렉토리 구조(/app/packages/*, /app/apps/api)를 runtime 스테이지에도 유지한다.
+# packages/logger, packages/tracing, packages/shared으로의 상대경로 symlink가 깨지지
+# 않도록 원래와 같은 디렉토리 구조(/app/packages/*, /app/apps/api)를 runtime 스테이지에도
+# 유지한다.
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages/logger/dist ./packages/logger/dist
 COPY --from=build /app/packages/logger/package.json ./packages/logger/package.json
 COPY --from=build /app/packages/tracing/dist ./packages/tracing/dist
 COPY --from=build /app/packages/tracing/package.json ./packages/tracing/package.json
+COPY --from=build /app/packages/shared/dist ./packages/shared/dist
+COPY --from=build /app/packages/shared/package.json ./packages/shared/package.json
 COPY --from=build /app/apps/api/dist ./apps/api/dist
 COPY --from=build /app/apps/api/package.json ./apps/api/package.json
 
