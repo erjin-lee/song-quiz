@@ -32,7 +32,10 @@ function formatSec(sec: number): string {
  * 검토 채널에 원치 않는 멘션이 발생할 수 있다.
  */
 function escapeMrkdwn(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 const YOUTUBE_HOSTNAMES = new Set([
@@ -105,7 +108,10 @@ function buildBeforeAfter(
           song.youtubeUrl,
         ),
         after: afterIsSafe
-          ? slackLink(withStartSecParam(rawAfterUrl, song.startSec), rawAfterUrl)
+          ? slackLink(
+              withStartSecParam(rawAfterUrl, song.startSec),
+              rawAfterUrl,
+            )
           : rawAfterUrl
             ? `(유효하지 않은 링크) ${escapeMrkdwn(rawAfterUrl)}`
             : '(링크 없음)',
@@ -144,7 +150,10 @@ export function buildInquiryReviewSlackMessage(
       type: 'section',
       fields: [
         { type: 'mrkdwn', text: `*원곡*\n${songLabel}` },
-        { type: 'mrkdwn', text: `*문의 유형*\n${REQUEST_TYPE_LABELS[matchedFunction]}` },
+        {
+          type: 'mrkdwn',
+          text: `*문의 유형*\n${REQUEST_TYPE_LABELS[matchedFunction]}`,
+        },
       ],
     },
     {

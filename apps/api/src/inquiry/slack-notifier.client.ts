@@ -29,16 +29,15 @@ export class SlackNotifierClient {
         body: JSON.stringify(message),
       });
       if (!response.ok) {
-        this.logger.error(
-          `Slack 알림 전송 실패(status: ${response.status})`,
-          { event: 'slack_notify_failed', errorCode: String(response.status) },
-        );
+        this.logger.error(`Slack 알림 전송 실패(status: ${response.status})`, {
+          event: 'slack_notify_failed',
+          errorCode: String(response.status),
+        });
       }
     } catch (err) {
-      this.logger.error(
-        `Slack 알림 전송 실패: ${(err as Error).message}`,
-        { event: 'slack_notify_failed' },
-      );
+      this.logger.error(`Slack 알림 전송 실패: ${(err as Error).message}`, {
+        event: 'slack_notify_failed',
+      });
     }
   }
 }

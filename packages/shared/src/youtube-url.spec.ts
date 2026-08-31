@@ -8,9 +8,9 @@ describe('withStartSecParam', () => {
   });
 
   it('URL에 t 파라미터가 이미 있으면 새 값으로 교체한다', () => {
-    expect(
-      withStartSecParam('https://youtu.be/abc123?t=10&foo=bar', 52),
-    ).toBe('https://youtu.be/abc123?t=52&foo=bar');
+    expect(withStartSecParam('https://youtu.be/abc123?t=10&foo=bar', 52)).toBe(
+      'https://youtu.be/abc123?t=52&foo=bar',
+    );
   });
 
   it('음수는 0으로, 소수점은 반올림해서 넣는다', () => {
