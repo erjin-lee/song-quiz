@@ -120,6 +120,7 @@ export class InquiryService {
    * 동시에 두 번 승인 요청이 들어오는 경우까지 막으려면 "이미 완료됐는지 확인 후
    * 승인 처리"가 아니라 DB UPDATE 자체의 WHERE 조건으로 원자적으로 막아야 한다
    * (그렇지 않으면 두 요청이 모두 확인을 통과한 뒤 둘 다 정답을 추가할 수 있다).
+   * 설계 배경: ADR-0008.
    */
   async approve(inquiryId: string, actor: InquiryReviewActor): Promise<void> {
     const inquiry = await this.findInquiryOrThrow(inquiryId);
@@ -157,6 +158,7 @@ export class InquiryService {
    * REJECTED로 바꾸는 게 아니라, UPDATE의 WHERE 조건으로 원자적으로 처리한다 - 그렇지
    * 않으면 동시에 승인이 먼저 실행돼 버린 뒤에도 반려가 뒤늦게 성공해서(반려 우회)
    * "이미 실행된 조치가 REJECTED로 표시되는" 상태 불일치가 생길 수 있다.
+   * 설계 배경: ADR-0008.
    */
   async reject(inquiryId: string, actor: InquiryReviewActor): Promise<void> {
     const inquiry = await this.findInquiryOrThrow(inquiryId);

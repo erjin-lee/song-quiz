@@ -29,3 +29,4 @@
 | [0005](0005-httponly-cookie-auth.md) | 로그인 JWT를 httpOnly 쿠키로 전환(web/api/game, admin 제외) | Accepted |
 | [0006](0006-game-multi-instance-no-sticky-session.md) | Game multi-instance 환경에서 ALB sticky session을 쓰지 않는다 | Accepted |
 | [0007](0007-shared-package-for-cross-app-code.md) | apps/api ↔ 프런트엔드 공유 코드를 packages/shared로 이관 | Accepted (DTO 이관은 진행 중) |
+| [0008](0008-inquiry-action-reapproval-and-atomic-guard.md) | 문의 조치 재승인 시 중복 실행 허용(ADD_ANSWER만 예외) + 원자적 상태 검증 | Accepted |
