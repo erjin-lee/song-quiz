@@ -39,6 +39,15 @@ export class QuizSong {
   })
   youtubeVideoId: string | null;
 
+  /** 현재 앱에서는 사용하지 않지만 추후 사용 가능성으로 DB에 남겨둔 컬럼이다. */
+  @Column({
+    name: 'YTB_THUMB_IMG_URL',
+    type: 'varchar',
+    length: 512,
+    nullable: true,
+  })
+  youtubeThumbnailUrl: string | null;
+
   @Column({ name: 'DURATION', type: 'int', unsigned: true, nullable: true })
   durationSec: number | null;
 
