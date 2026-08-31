@@ -12,6 +12,7 @@ import { QuizSong } from '../quiz/entities/quiz-song.entity';
 import { Quiz } from '../quiz/entities/quiz.entity';
 import { Song } from '../quiz/entities/song.entity';
 import { QuizSongReuseService } from '../quiz/quiz-song-reuse.service';
+import { ArtistLinkService } from './artist-link.service';
 import { ScrapeChartResultDto } from './dto/scrape-chart-result.dto';
 import {
   ChartType,
@@ -38,6 +39,7 @@ export class ChartScraperService {
     @InjectRepository(QuizSong)
     private readonly quizSongRepository: Repository<QuizSong>,
     private readonly quizSongReuseService: QuizSongReuseService,
+    private readonly artistLinkService: ArtistLinkService,
   ) {}
 
   async scrapeChart(
@@ -112,6 +114,9 @@ export class ChartScraperService {
       } else {
         skippedSongCount++;
       }
+
+      await this.artistLinkService.linkAlbumArtists(album.albmId, artists);
+      await this.artistLinkService.linkSongArtists(song.songId, artists);
 
       const reusableYoutubeInfo =
         await this.quizSongReuseService.findReusableYoutubeInfo(song.songId);

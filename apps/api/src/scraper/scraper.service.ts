@@ -8,6 +8,7 @@ import { Repository } from 'typeorm';
 import { Album } from '../quiz/entities/album.entity';
 import { Artist } from '../quiz/entities/artist.entity';
 import { Song } from '../quiz/entities/song.entity';
+import { ArtistLinkService } from './artist-link.service';
 import { ScrapeArtistResultDto } from './dto/scrape-artist-result.dto';
 import {
   MelonFetchError,
@@ -26,6 +27,7 @@ export class ScraperService {
     private readonly albumRepository: Repository<Album>,
     @InjectRepository(Song)
     private readonly songRepository: Repository<Song>,
+    private readonly artistLinkService: ArtistLinkService,
   ) {}
 
   async scrapeArtist(melonArtistId: string): Promise<ScrapeArtistResultDto> {
@@ -43,19 +45,29 @@ export class ScraperService {
       scrapedArtist.thumbImgUrl,
     );
 
+    const artistCache = new Map<string, Artist>([[melonArtistId, artist]]);
+
     const scrapedAlbums = await this.wrapMelonCall(() =>
       this.melonScraperClient.fetchAlbums(melonArtistId),
     );
-    const soloAlbums = scrapedAlbums.filter(
-      (album) =>
-        album.artistIds.length === 1 && album.artistIds[0] === melonArtistId,
-    );
-    const skippedAlbumCount = scrapedAlbums.length - soloAlbums.length;
 
     const savedAlbumByMelonId = new Map<string, Album>();
-    for (const scrapedAlbum of soloAlbums) {
-      const savedAlbum = await this.saveAlbum(artist.atstId, scrapedAlbum);
+    const albumArtistsByMelonId = new Map<string, Artist[]>();
+    for (const scrapedAlbum of scrapedAlbums) {
+      const albumArtists = await this.getOrCreateArtists(
+        scrapedAlbum.artistIds,
+        artistCache,
+      );
+      const savedAlbum = await this.saveAlbum(
+        albumArtists[0].atstId,
+        scrapedAlbum,
+      );
+      await this.artistLinkService.linkAlbumArtists(
+        savedAlbum.albmId,
+        albumArtists,
+      );
       savedAlbumByMelonId.set(scrapedAlbum.melonAlbmId, savedAlbum);
+      albumArtistsByMelonId.set(scrapedAlbum.melonAlbmId, albumArtists);
     }
 
     const scrapedSongs = await this.wrapMelonCall(() =>
@@ -67,11 +79,22 @@ export class ScraperService {
       const album = scrapedSong.melonAlbmId
         ? savedAlbumByMelonId.get(scrapedSong.melonAlbmId)
         : undefined;
-      if (!album) {
+      const songArtists = scrapedSong.melonAlbmId
+        ? albumArtistsByMelonId.get(scrapedSong.melonAlbmId)
+        : undefined;
+      if (!album || !songArtists) {
         skippedSongCount++;
         continue;
       }
-      await this.saveSong(artist.atstId, album, scrapedSong);
+      const savedSong = await this.saveSong(
+        songArtists[0].atstId,
+        album,
+        scrapedSong,
+      );
+      await this.artistLinkService.linkSongArtists(
+        savedSong.songId,
+        songArtists,
+      );
       savedSongCount++;
     }
 
@@ -79,11 +102,51 @@ export class ScraperService {
       atstId: artist.atstId,
       melonAtstId: artist.melonAtstId,
       atstNm: artist.atstNm,
-      savedAlbumCount: soloAlbums.length,
-      skippedAlbumCount,
+      savedAlbumCount: scrapedAlbums.length,
+      skippedAlbumCount: 0,
       savedSongCount,
       skippedSongCount,
     };
+  }
+
+  private async getOrCreateArtists(
+    melonArtistIds: string[],
+    cache: Map<string, Artist>,
+  ): Promise<Artist[]> {
+    const artists: Artist[] = [];
+    for (const melonArtistId of melonArtistIds) {
+      artists.push(await this.getOrCreateArtistByMelonId(melonArtistId, cache));
+    }
+    return artists;
+  }
+
+  private async getOrCreateArtistByMelonId(
+    melonArtistId: string,
+    cache: Map<string, Artist>,
+  ): Promise<Artist> {
+    const cached = cache.get(melonArtistId);
+    if (cached) {
+      return cached;
+    }
+
+    const existing = await this.artistRepository.findOne({
+      where: { melonAtstId: melonArtistId },
+    });
+    if (existing) {
+      cache.set(melonArtistId, existing);
+      return existing;
+    }
+
+    const fetched = await this.wrapMelonCall(() =>
+      this.melonScraperClient.fetchArtist(melonArtistId),
+    );
+    const created = await this.saveArtist(
+      melonArtistId,
+      fetched?.atstNm ?? melonArtistId,
+      fetched?.thumbImgUrl ?? null,
+    );
+    cache.set(melonArtistId, created);
+    return created;
   }
 
   private async saveArtist(

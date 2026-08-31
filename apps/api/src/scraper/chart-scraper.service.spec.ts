@@ -7,6 +7,7 @@ import { QuizSong } from '../quiz/entities/quiz-song.entity';
 import { Quiz } from '../quiz/entities/quiz.entity';
 import { Song } from '../quiz/entities/song.entity';
 import { QuizSongReuseService } from '../quiz/quiz-song-reuse.service';
+import { ArtistLinkService } from './artist-link.service';
 import { ChartScraperService } from './chart-scraper.service';
 import {
   ChartType,
@@ -92,6 +93,11 @@ describe('ChartScraperService', () => {
     copyReusableAnswers: jest.fn(),
   };
 
+  const artistLinkServiceMock = {
+    linkAlbumArtists: jest.fn(),
+    linkSongArtists: jest.fn(),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
     quizSongSeq = 0;
@@ -131,6 +137,10 @@ describe('ChartScraperService', () => {
         {
           provide: QuizSongReuseService,
           useValue: quizSongReuseServiceMock,
+        },
+        {
+          provide: ArtistLinkService,
+          useValue: artistLinkServiceMock,
         },
       ],
     }).compile();
@@ -271,5 +281,31 @@ describe('ChartScraperService', () => {
       'quiz-song-1',
     );
     expect(result.reusedAnswerCount).toBe(2);
+  });
+
+  it('곡의 아티스트 전원을 SongArtist/AlbumArtist로 연결하고, 첫 번째 아티스트를 대표로 넘긴다', async () => {
+    await service.scrapeChart(ChartType.AG, 2010);
+
+    expect(artistLinkServiceMock.linkSongArtists).toHaveBeenNthCalledWith(
+      1,
+      'new-song-1',
+      [expect.objectContaining({ melonAtstId: 'ar1' })],
+    );
+    expect(artistLinkServiceMock.linkSongArtists).toHaveBeenNthCalledWith(
+      2,
+      'existing-song-2',
+      [
+        expect.objectContaining({ melonAtstId: 'ar1' }),
+        expect.objectContaining(existingArtist2),
+      ],
+    );
+    expect(artistLinkServiceMock.linkAlbumArtists).toHaveBeenNthCalledWith(
+      2,
+      'new-albm-1',
+      [
+        expect.objectContaining({ melonAtstId: 'ar1' }),
+        expect.objectContaining(existingArtist2),
+      ],
+    );
   });
 });
