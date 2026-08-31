@@ -27,6 +27,11 @@ mail_from_address       = "REPLACE_WITH_EXISTING_.ENV_VALUE"
 # api_docs_user/api_docs_password는 비워두면(기본값 "") Swagger 문서가 인증 없이
 # 열린다 - 기존 .env에 API_DOCS_USER/PASSWORD가 설정돼 있었다면 그 값을 그대로 옮긴다.
 
+# 문의(Inquiry) MEDIUM 신뢰도 검토 알림용 Slack Incoming Webhook URL(알람용과는 별개의
+# 전용 Webhook). 비워두면(기본값 "") apps/api가 Slack 알림을 건너뛴다 - 알림용 채널에서
+# 새로 발급한 Webhook URL을 넣는다.
+inquiry_slack_webhook_url = "REPLACE_WITH_SLACK_INCOMING_WEBHOOK_URL"
+
 # publish-ecr.yml로 push한 이미지의 git commit SHA(전체 40자). 배포할 때마다 갱신한다.
 api_image_git_sha = "REPLACE_WITH_PUSHED_IMAGE_SHA"
 game_image_git_sha = "REPLACE_WITH_PUSHED_IMAGE_SHA"

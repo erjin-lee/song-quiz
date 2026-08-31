@@ -150,6 +150,23 @@ resource "aws_ssm_parameter" "api_docs_password" {
   tags = { Name = "${var.project_name}-api-docs-password" }
 }
 
+# api_docs_password와 동일한 이유로 count 기반 조건부 생성 - Slack Webhook을 아직 발급하지
+# 않았거나 알림이 필요 없는 환경에서는 값 없이 apply할 수 있어야 한다(SlackNotifierClient가
+# 이 값이 없으면 알림을 건너뛰도록 이미 짜여 있다). 이름에 inquiry를 박아두는 이유:
+# modules/notification의 알람용 Slack Webhook과는 다른 별개의 전용 Webhook이라, 나중에
+# apps/api에 다른 용도 Slack 알림이 추가되어도 헷갈리지 않게 구분한다.
+resource "aws_ssm_parameter" "api_inquiry_slack_webhook_url" {
+  count = var.inquiry_slack_webhook_url != "" ? 1 : 0
+
+  name             = "${local.api_ssm_parameter_prefix}/inquiry-slack-webhook-url"
+  type             = "SecureString"
+  key_id           = aws_kms_key.api_secrets.key_id
+  value_wo         = var.inquiry_slack_webhook_url
+  value_wo_version = 1
+
+  tags = { Name = "${var.project_name}-api-inquiry-slack-webhook-url" }
+}
+
 locals {
   # 이름은 컨테이너 환경변수 이름(apps/api가 process.env로 읽는 이름)과 정확히 같아야
   # 한다 - modules/ecs가 이 map을 그대로 ECS secrets 블록의 name으로 쓴다.
@@ -164,6 +181,9 @@ locals {
     },
     length(aws_ssm_parameter.api_docs_password) > 0 ? {
       API_DOCS_PASSWORD = aws_ssm_parameter.api_docs_password[0].arn
+    } : {},
+    length(aws_ssm_parameter.api_inquiry_slack_webhook_url) > 0 ? {
+      SLACK_WEBHOOK_URL = aws_ssm_parameter.api_inquiry_slack_webhook_url[0].arn
     } : {}
   )
 
