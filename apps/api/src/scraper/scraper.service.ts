@@ -53,7 +53,12 @@ export class ScraperService {
 
     const savedAlbumByMelonId = new Map<string, Album>();
     const albumArtistsByMelonId = new Map<string, Artist[]>();
+    let skippedAlbumCount = 0;
     for (const scrapedAlbum of scrapedAlbums) {
+      if (scrapedAlbum.artistIds.length === 0) {
+        skippedAlbumCount++;
+        continue;
+      }
       const albumArtists = await this.getOrCreateArtists(
         scrapedAlbum.artistIds,
         artistCache,
@@ -102,8 +107,8 @@ export class ScraperService {
       atstId: artist.atstId,
       melonAtstId: artist.melonAtstId,
       atstNm: artist.atstNm,
-      savedAlbumCount: scrapedAlbums.length,
-      skippedAlbumCount: 0,
+      savedAlbumCount: scrapedAlbums.length - skippedAlbumCount,
+      skippedAlbumCount,
       savedSongCount,
       skippedSongCount,
     };

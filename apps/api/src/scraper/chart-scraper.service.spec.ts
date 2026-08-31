@@ -308,4 +308,15 @@ describe('ChartScraperService', () => {
       ],
     );
   });
+
+  it('아티스트 목록이 빈 곡은 예외 없이 건너뛴다', async () => {
+    melonScraperClientMock.fetchAgeChartSongs.mockResolvedValueOnce([
+      { ...chartSongFixture[0], artists: [] },
+    ]);
+
+    const result = await service.scrapeChart(ChartType.AG, 2010);
+
+    expect(songRepositoryMock.save).not.toHaveBeenCalled();
+    expect(result.skippedSongCount).toBe(1);
+  });
 });

@@ -85,6 +85,11 @@ export class ChartScraperService {
     let quizSeq = 1;
 
     for (const chartSong of chartSongs) {
+      if (chartSong.artists.length === 0) {
+        skippedSongCount++;
+        continue;
+      }
+
       const artists: Artist[] = [];
       for (const scrapedArtist of chartSong.artists) {
         const { artist, created } = await this.getOrCreateArtist(

@@ -177,6 +177,18 @@ describe('ScraperService', () => {
     );
   });
 
+  it('아티스트 목록이 빈 앨범은 예외 없이 건너뛴다', async () => {
+    melonScraperClientMock.fetchAlbums.mockResolvedValueOnce([
+      { ...albumFixtures[0], artistIds: [] },
+    ]);
+
+    const result = await service.scrapeArtist('ar1');
+
+    expect(result.savedAlbumCount).toBe(0);
+    expect(result.skippedAlbumCount).toBe(1);
+    expect(albumRepositoryMock.create).not.toHaveBeenCalled();
+  });
+
   it('앨범 정보가 없는 곡은 건너뛴다', async () => {
     melonScraperClientMock.fetchSongs.mockResolvedValueOnce([
       { melonSongId: 's3', songNm: 'Orphan', titleYn: 'N', melonAlbmId: null },
