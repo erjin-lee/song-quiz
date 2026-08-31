@@ -55,6 +55,10 @@ interface ActionTransitionExtra {
   slackTeamId?: string | null;
   slackUserId?: string | null;
   detail?: Record<string, unknown> | null;
+  /** 지정하면 현재 STATUS가 이 목록 중 하나일 때만 UPDATE가 실제로 반영된다(원자적 CAS). */
+  guardStatusIn?: InquiryActionStatus[];
+  /** 지정하면 현재 STATUS가 이 목록에 없을 때만 UPDATE가 실제로 반영된다(원자적 CAS). */
+  guardStatusNotIn?: InquiryActionStatus[];
 }
 
 @Injectable()
@@ -108,26 +112,36 @@ export class InquiryService {
     return { inquiryId: inquiry.inquiryId, message: RECEIVED_MESSAGE };
   }
 
-  /** 관리자/Slack이 문의를 승인한다: 판별된 조치를 실제로 실행하고 완료 처리한다. 현재 액션 상태와 무관하게 승인할 수 있다. */
+  /**
+   * 관리자/Slack이 문의를 승인한다: 판별된 조치를 실제로 실행하고 완료 처리한다.
+   * CHANGE_START_TIME/CHANGE_LINK는 현재 액션 상태와 무관하게(재실행 포함) 승인할 수
+   * 있다 - 의도된 동작이다(관리자가 몇 번이고 다시 반영할 수 있어야 함, 결과도
+   * 멱등적이다). ADD_ANSWER만 재승인 시 정답이 중복으로 추가되므로 막아야 하는데,
+   * 동시에 두 번 승인 요청이 들어오는 경우까지 막으려면 "이미 완료됐는지 확인 후
+   * 승인 처리"가 아니라 DB UPDATE 자체의 WHERE 조건으로 원자적으로 막아야 한다
+   * (그렇지 않으면 두 요청이 모두 확인을 통과한 뒤 둘 다 정답을 추가할 수 있다).
+   */
   async approve(inquiryId: string, actor: InquiryReviewActor): Promise<void> {
     const inquiry = await this.findInquiryOrThrow(inquiryId);
     const action = await this.findLatestActionOrThrow(inquiryId);
 
-    // ADD_ANSWER는 재승인 시 정답이 중복으로 추가되므로, 이미 완료된 건은 재승인을 막는다.
-    if (action.actionType === 'ADD_ANSWER' && action.status === 'COMPLETED') {
-      throw new BadRequestException(
-        `이미 완료된 정답 추가 문의는 다시 승인할 수 없습니다. (inquiryId: ${inquiryId})`,
-      );
-    }
-
-    await this.transitionAction(action, 'APPROVED', actor.via, {
+    const claimed = await this.transitionAction(action, 'APPROVED', actor.via, {
       reviewedVia: actor.via,
       reviewedByUserKey: actor.via === 'ADMIN' ? actor.userKey : null,
       reviewedDt: new Date(),
       actorUserKey: actor.via === 'ADMIN' ? actor.userKey : null,
       slackTeamId: actor.via === 'SLACK' ? actor.slackTeamId : null,
       slackUserId: actor.via === 'SLACK' ? actor.slackUserId : null,
+      guardStatusNotIn:
+        action.actionType === 'ADD_ANSWER'
+          ? ['APPROVED', 'EXECUTING', 'COMPLETED']
+          : undefined,
     });
+    if (!claimed) {
+      throw new BadRequestException(
+        `이미 완료된 정답 추가 문의는 다시 승인할 수 없습니다. (inquiryId: ${inquiryId})`,
+      );
+    }
 
     try {
       await this.executeAndFinish(inquiry, action, inquiry.quizSongId);
@@ -138,24 +152,30 @@ export class InquiryService {
     }
   }
 
-  /** 검토 대기 문의를 관리자/Slack이 반려한다. */
+  /**
+   * 검토 대기 문의를 관리자/Slack이 반려한다. PENDING_REVIEW인지 먼저 확인하고 나서
+   * REJECTED로 바꾸는 게 아니라, UPDATE의 WHERE 조건으로 원자적으로 처리한다 - 그렇지
+   * 않으면 동시에 승인이 먼저 실행돼 버린 뒤에도 반려가 뒤늦게 성공해서(반려 우회)
+   * "이미 실행된 조치가 REJECTED로 표시되는" 상태 불일치가 생길 수 있다.
+   */
   async reject(inquiryId: string, actor: InquiryReviewActor): Promise<void> {
     const inquiry = await this.findInquiryOrThrow(inquiryId);
     const action = await this.findLatestActionOrThrow(inquiryId);
-    if (action.status !== 'PENDING_REVIEW') {
-      throw new BadRequestException(
-        `검토 대기 상태의 문의만 처리할 수 있습니다. (inquiryId: ${inquiryId})`,
-      );
-    }
 
-    await this.transitionAction(action, 'REJECTED', actor.via, {
+    const claimed = await this.transitionAction(action, 'REJECTED', actor.via, {
       reviewedVia: actor.via,
       reviewedByUserKey: actor.via === 'ADMIN' ? actor.userKey : null,
       reviewedDt: new Date(),
       actorUserKey: actor.via === 'ADMIN' ? actor.userKey : null,
       slackTeamId: actor.via === 'SLACK' ? actor.slackTeamId : null,
       slackUserId: actor.via === 'SLACK' ? actor.slackUserId : null,
+      guardStatusIn: ['PENDING_REVIEW'],
     });
+    if (!claimed) {
+      throw new BadRequestException(
+        `검토 대기 상태의 문의만 처리할 수 있습니다. (inquiryId: ${inquiryId})`,
+      );
+    }
 
     await this.finish(inquiry, 'REJECTED', ADMIN_REJECTED_MESSAGE);
   }
@@ -319,13 +339,60 @@ export class InquiryService {
     }
   }
 
-  /** InquiryAction의 상태를 바꿔 저장하고, 같은 전이를 감사 로그(SQ_INQUIRY_ACTION_LOG) 한 건으로 남긴다. */
+  /**
+   * InquiryAction의 상태를 바꿔 저장하고, 같은 전이를 감사 로그(SQ_INQUIRY_ACTION_LOG)
+   * 한 건으로 남긴다. guardStatusIn/guardStatusNotIn을 주면 "현재 상태 확인 후 저장"이
+   * 아니라 UPDATE 문 자체의 WHERE 조건으로 원자적으로 처리한다 - MySQL은 UPDATE 실행
+   * 중 해당 행에 락을 걸므로, 동시에 들어온 다른 요청은 이 트랜잭션이 끝날 때까지
+   * 대기했다가 바뀐 상태 기준으로 WHERE를 다시 평가받는다(TOCTOU 경쟁 상태 방지).
+   * 가드 조건 때문에 실제로 반영되지 않았으면 false를 반환하고 아무것도 하지 않는다.
+   */
   private async transitionAction(
     action: InquiryAction,
     status: InquiryActionStatus,
     source: InquiryActionLogSource,
     extra?: ActionTransitionExtra,
-  ): Promise<void> {
+  ): Promise<boolean> {
+    const qb = this.actionRepository
+      .createQueryBuilder()
+      .update(InquiryAction)
+      .set({
+        status,
+        ...(extra?.reviewedVia !== undefined && {
+          reviewedVia: extra.reviewedVia,
+        }),
+        ...(extra?.reviewedByUserKey !== undefined && {
+          reviewedByUserKey: extra.reviewedByUserKey,
+        }),
+        ...(extra?.reviewedDt !== undefined && {
+          reviewedDt: extra.reviewedDt,
+        }),
+        ...(extra?.executedDt !== undefined && {
+          executedDt: extra.executedDt,
+        }),
+        ...(extra?.beforeValue !== undefined && {
+          beforeValue: extra.beforeValue,
+        }),
+        ...(extra?.afterValue !== undefined && {
+          afterValue: extra.afterValue,
+        }),
+      })
+      .where('actionId = :id', { id: action.actionId });
+    if (extra?.guardStatusIn) {
+      qb.andWhere('status IN (:...statusIn)', {
+        statusIn: extra.guardStatusIn,
+      });
+    }
+    if (extra?.guardStatusNotIn) {
+      qb.andWhere('status NOT IN (:...statusNotIn)', {
+        statusNotIn: extra.guardStatusNotIn,
+      });
+    }
+    const result = await qb.execute();
+    if (!result.affected) {
+      return false;
+    }
+
     action.status = status;
     if (extra?.reviewedVia !== undefined)
       action.reviewedVia = extra.reviewedVia;
@@ -336,7 +403,6 @@ export class InquiryService {
     if (extra?.beforeValue !== undefined)
       action.beforeValue = extra.beforeValue;
     if (extra?.afterValue !== undefined) action.afterValue = extra.afterValue;
-    await this.actionRepository.save(action);
 
     await this.actionLogRepository.save(
       this.actionLogRepository.create({
@@ -352,6 +418,7 @@ export class InquiryService {
         detail: extra?.detail ?? null,
       }),
     );
+    return true;
   }
 
   private async executeAction(

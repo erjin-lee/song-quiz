@@ -47,6 +47,17 @@ describe('InquiryService', () => {
       ...(data as object),
     })),
     findOne: jest.fn(),
+    createQueryBuilder: jest.fn(),
+  };
+  // transitionAction이 쓰는 원자적 UPDATE(createQueryBuilder().update().set().where()...
+  // .execute())를 흉내낸 fluent 체인. execute()의 기본 반환값은 성공(affected: 1)이고,
+  // 원자적 가드 실패를 재현하고 싶은 테스트만 execute를 덮어쓴다.
+  const actionUpdateQueryBuilderMock = {
+    update: jest.fn().mockReturnThis(),
+    set: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    execute: jest.fn(),
   };
   const actionLogRepositoryMock = {
     create: jest.fn((data) => data),
@@ -78,6 +89,10 @@ describe('InquiryService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    actionRepositoryMock.createQueryBuilder.mockReturnValue(
+      actionUpdateQueryBuilderMock,
+    );
+    actionUpdateQueryBuilderMock.execute.mockResolvedValue({ affected: 1 });
     inquiryRepositoryMock.count.mockResolvedValue(0);
     inquiryRepositoryMock.findOne.mockResolvedValue({ ...baseInquiry });
     quizSongRepositoryMock.findOne.mockResolvedValue({
@@ -201,9 +216,8 @@ describe('InquiryService', () => {
       await callProcess('iq1');
 
       expect(actionServiceMock.changeStartTime).not.toHaveBeenCalled();
-      // 1) PROPOSED로 생성 2) REJECTED로 전이
-      expect(actionRepositoryMock.save).toHaveBeenNthCalledWith(
-        1,
+      // PROPOSED로 생성(.save)한 뒤 REJECTED로 원자적 전이(.createQueryBuilder().update())한다.
+      expect(actionRepositoryMock.save).toHaveBeenCalledWith(
         expect.objectContaining({
           status: 'PROPOSED',
           actionType: 'CHANGE_START_TIME',
@@ -211,8 +225,7 @@ describe('InquiryService', () => {
           aiReason: '근거 불충분',
         }),
       );
-      expect(actionRepositoryMock.save).toHaveBeenNthCalledWith(
-        2,
+      expect(actionUpdateQueryBuilderMock.set).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'REJECTED' }),
       );
       expect(actionLogRepositoryMock.save).toHaveBeenCalledWith(
@@ -244,8 +257,7 @@ describe('InquiryService', () => {
       await callProcess('iq1');
 
       expect(actionServiceMock.changeStartTime).not.toHaveBeenCalled();
-      expect(actionRepositoryMock.save).toHaveBeenNthCalledWith(
-        2,
+      expect(actionUpdateQueryBuilderMock.set).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'PENDING_REVIEW' }),
       );
       expect(inquiryRepositoryMock.save).toHaveBeenCalledWith(
@@ -282,9 +294,9 @@ describe('InquiryService', () => {
       expect(actionServiceMock.changeStartTime).toHaveBeenCalledWith('qs1', {
         startSec: 30,
       });
-      // PROPOSED -> APPROVED -> EXECUTING -> COMPLETED
-      expect(actionRepositoryMock.save).toHaveBeenNthCalledWith(
-        4,
+      // PROPOSED는 .save()로 생성, APPROVED -> EXECUTING -> COMPLETED는 원자적 UPDATE 3회.
+      expect(actionUpdateQueryBuilderMock.set).toHaveBeenNthCalledWith(
+        3,
         expect.objectContaining({
           status: 'COMPLETED',
           beforeValue: { startSec: 10 },
@@ -311,7 +323,7 @@ describe('InquiryService', () => {
       await callProcess('iq1');
 
       expect(actionServiceMock.changeStartTime).not.toHaveBeenCalled();
-      expect(actionRepositoryMock.save).toHaveBeenLastCalledWith(
+      expect(actionUpdateQueryBuilderMock.set).toHaveBeenLastCalledWith(
         expect.objectContaining({ status: 'FAILED' }),
       );
       expect(inquiryRepositoryMock.save).toHaveBeenCalledWith(
@@ -328,7 +340,7 @@ describe('InquiryService', () => {
 
       await callProcess('iq1');
 
-      expect(actionRepositoryMock.save).toHaveBeenLastCalledWith(
+      expect(actionUpdateQueryBuilderMock.set).toHaveBeenLastCalledWith(
         expect.objectContaining({ status: 'FAILED' }),
       );
       expect(inquiryRepositoryMock.save).toHaveBeenCalledWith(
@@ -387,18 +399,43 @@ describe('InquiryService', () => {
       );
     });
 
-    it('이미 완료된 정답 추가 문의는 재승인 시 400을 던진다', async () => {
+    it('ADD_ANSWER는 원자적 가드(WHERE status NOT IN (...))를 건다', async () => {
+      actionRepositoryMock.findOne.mockResolvedValue({
+        ...pendingAction,
+        actionType: 'ADD_ANSWER',
+        actionArgs: { answerTxt: '너닿', answerType: null },
+      });
+
+      await service.approve('iq1', adminActor);
+
+      expect(actionUpdateQueryBuilderMock.andWhere).toHaveBeenCalledWith(
+        'status NOT IN (:...statusNotIn)',
+        { statusNotIn: ['APPROVED', 'EXECUTING', 'COMPLETED'] },
+      );
+    });
+
+    it('CHANGE_START_TIME/CHANGE_LINK는 원자적 가드를 걸지 않는다(중복 실행 허용)', async () => {
+      await service.approve('iq1', adminActor);
+
+      expect(actionUpdateQueryBuilderMock.andWhere).not.toHaveBeenCalled();
+    });
+
+    it('ADD_ANSWER 승인이 동시 요청과 경쟁해 원자적 가드에 걸리면(affected: 0) 400을 던지고 조치를 실행하지 않는다', async () => {
       actionRepositoryMock.findOne.mockResolvedValue({
         ...pendingAction,
         status: 'COMPLETED',
         actionType: 'ADD_ANSWER',
         actionArgs: { answerTxt: '너닿', answerType: null },
       });
+      // 실제 DB에서는 이미 다른 요청이 먼저 COMPLETED로 바꿔버린 상황을 흉내낸다 -
+      // WHERE 조건이 더 이상 만족되지 않아 UPDATE가 0행에 반영된다.
+      actionUpdateQueryBuilderMock.execute.mockResolvedValue({ affected: 0 });
 
       await expect(service.approve('iq1', adminActor)).rejects.toThrow(
         BadRequestException,
       );
       expect(actionServiceMock.addAnswer).not.toHaveBeenCalled();
+      expect(actionLogRepositoryMock.save).not.toHaveBeenCalled();
     });
 
     it('완료된 시간/링크 변경 문의는 재승인할 수 있다', async () => {
@@ -420,14 +457,20 @@ describe('InquiryService', () => {
       expect(actionServiceMock.changeStartTime).toHaveBeenCalledWith('qs1', {
         startSec: 30,
       });
-      // transitionAction이 같은 action 인스턴스를 계속 mutate하며 저장하므로, save에
-      // 기록된 마지막 호출 인자가 (reviewedVia 등 이전 단계에서 세팅된 값을 유지한 채)
-      // 최종 상태를 담고 있다.
-      expect(actionRepositoryMock.save).toHaveBeenLastCalledWith(
+      // APPROVED 전이 때만 reviewedVia/reviewedByUserKey를 SET한다(이후 EXECUTING/
+      // COMPLETED UPDATE에는 그 컬럼을 다시 포함하지 않아도 DB에는 이미 반영된 값이
+      // 그대로 남아있다 - 매번 SET하지 않아도 되는 이유).
+      expect(actionUpdateQueryBuilderMock.set).toHaveBeenNthCalledWith(
+        1,
         expect.objectContaining({
-          status: 'COMPLETED',
+          status: 'APPROVED',
           reviewedVia: 'ADMIN',
           reviewedByUserKey: 'admin1',
+        }),
+      );
+      expect(actionUpdateQueryBuilderMock.set).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          status: 'COMPLETED',
           executedDt: expect.any(Date),
         }),
       );
@@ -502,22 +545,31 @@ describe('InquiryService', () => {
       );
     });
 
-    it('검토 대기 상태가 아니면 400을 던진다', async () => {
-      actionRepositoryMock.findOne.mockResolvedValue({
-        ...pendingAction,
-        status: 'REJECTED',
-      });
+    it('원자적 가드(WHERE status IN (PENDING_REVIEW))를 건다', async () => {
+      await service.reject('iq1', adminActor);
+
+      expect(actionUpdateQueryBuilderMock.andWhere).toHaveBeenCalledWith(
+        'status IN (:...statusIn)',
+        { statusIn: ['PENDING_REVIEW'] },
+      );
+    });
+
+    it('검토 대기 상태가 아니어서 원자적 가드에 걸리면(affected: 0) 400을 던진다', async () => {
+      // 실제 DB에서는 이미 다른 요청이 승인/실행을 먼저 끝낸 상황을 흉내낸다.
+      actionUpdateQueryBuilderMock.execute.mockResolvedValue({ affected: 0 });
 
       await expect(service.reject('iq1', adminActor)).rejects.toThrow(
         BadRequestException,
       );
+      expect(actionLogRepositoryMock.save).not.toHaveBeenCalled();
+      expect(inquiryRepositoryMock.save).not.toHaveBeenCalled();
     });
 
     it('REJECTED로 종료하고 소켓으로 알리며 검토자 정보를 남긴다', async () => {
       await service.reject('iq1', adminActor);
 
       expect(actionServiceMock.addAnswer).not.toHaveBeenCalled();
-      expect(actionRepositoryMock.save).toHaveBeenCalledWith(
+      expect(actionUpdateQueryBuilderMock.set).toHaveBeenCalledWith(
         expect.objectContaining({
           status: 'REJECTED',
           reviewedVia: 'ADMIN',
