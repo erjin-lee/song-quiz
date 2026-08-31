@@ -33,6 +33,16 @@ WHERE ACTION_ID = ? AND STATUS IN ('PENDING_REVIEW');
 
 `UPDATE`가 0행에 반영되면(`affected === 0`) 그 사이 다른 요청이 먼저 상태를 바꿔버렸다는 뜻이므로 400 에러로 응답한다. `CHANGE_START_TIME`/`CHANGE_LINK`의 `approve`는 이 가드를 걸지 않는다(위 1번 결정대로 항상 성공해야 하므로).
 
+**3) 실제 조치(`executeAction`)와 그 결과 기록(`InquiryAction` 상태 전이 + 감사 로그) 사이의 비원자성도 별도로 보강했다.**
+
+CAS 가드를 적용한 뒤에도 다른 리뷰에서 "`executeAction()`이 먼저 실제 DB 변경을 수행한 뒤 별도로 `COMPLETED` 전환/감사 로그를 저장하므로, 그 후속 저장만 실패해도 실제 변경은 반영된 채 액션은 `FAILED`로 남는다"는 지적이 나왔다 - `ADD_ANSWER`처럼 재시도 시 `FAILED`도 재승인 가능한(위 CAS가 막는 상태가 아닌) 액션은 재시도 시 정답이 중복 추가될 수 있었다. 두 가지로 보강했다.
+
+- `transitionAction`이 `SQ_INQUIRY_ACTION` UPDATE와 `SQ_INQUIRY_ACTION_LOG` INSERT를 하나의 DB 트랜잭션으로 묶는다 - 로그 저장만 실패해서 이미 반영된 `COMPLETED` 상태가 뒤이어 `FAILED`로 잘못 덮어써지는 경우를 막는다.
+- `InquiryActionService.addAnswer`가 실행 전에 같은 `quizSongId`+`answerTxt`로 이미 활성화된 정답이 있는지 확인하고, 있으면 새로 넣지 않는다 - `executeAction()` 자체는 성공했지만 그 이후 상태 기록이 실패해 재시도되는 경우에도 안전하다(idempotent). `CHANGE_START_TIME`/`CHANGE_LINK`는 위 1번 결정대로 이미 멱등적이라 추가 조치가 필요 없다.
+- `executeAndFinish`는 "실제 조치 자체가 실패"(`stage: 'EXECUTE'`)와 "조치는 성공했지만 기록이 실패"(`stage: 'RECORD'`)를 감사 로그의 `DETAIL`에 구분해 남긴다 - 둘 다 액션 상태는 `FAILED`로 같지만(새 상태값을 추가하려면 `SQ_INQUIRY_ACTION`의 `CK_SQ_INQUIRY_ACTION_STATUS` CHECK 제약을 DDL로 바꿔야 해서 이번 범위에서는 하지 않았다), 운영자가 `DETAIL.stage`로 실제 부작용 발생 여부를 구분할 수 있다.
+
+`executeAction()`이 실제로 호출하는 `InquiryActionService`의 DB 쓰기(`QuizSong`/`QuizAnswer` 저장) 자체는 `transitionAction`의 트랜잭션에 포함되지 않는다 - `CHANGE_LINK`가 그 사이에 유튜브 스크래핑(외부 네트워크 호출)을 하므로, 트랜잭션 안에 외부 I/O를 두지 않기 위한 의도적인 경계다.
+
 ## 근거
 
 - MySQL은 `UPDATE` 실행 중 대상 행에 락을 건다. 동시에 들어온 두 번째 요청의 `UPDATE`는 첫 번째 트랜잭션이 끝날 때까지 대기했다가, 바뀐 상태를 기준으로 `WHERE` 조건을 다시 평가받는다 - 별도의 분산 락이나 `SELECT ... FOR UPDATE` 없이 단일 조건부 `UPDATE`만으로 경쟁 상태를 막을 수 있다.

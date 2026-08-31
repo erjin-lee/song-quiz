@@ -40,18 +40,13 @@ describe('InquiryService', () => {
     })),
     findOne: jest.fn(),
   };
-  const actionRepositoryMock = {
+  const actionLogRepositoryMock = {
     create: jest.fn((data) => data),
-    save: jest.fn(async (data: unknown) => ({
-      actionId: 'act1',
-      ...(data as object),
-    })),
-    findOne: jest.fn(),
-    createQueryBuilder: jest.fn(),
+    save: jest.fn(async (data: unknown) => data),
   };
-  // transitionAction이 쓰는 원자적 UPDATE(createQueryBuilder().update().set().where()...
-  // .execute())를 흉내낸 fluent 체인. execute()의 기본 반환값은 성공(affected: 1)이고,
-  // 원자적 가드 실패를 재현하고 싶은 테스트만 execute를 덮어쓴다.
+  // transitionAction이 쓰는 원자적 UPDATE(manager.createQueryBuilder().update().set()
+  // .where()....execute())를 흉내낸 fluent 체인. execute()의 기본 반환값은 성공
+  // (affected: 1)이고, 원자적 가드 실패를 재현하고 싶은 테스트만 execute를 덮어쓴다.
   const actionUpdateQueryBuilderMock = {
     update: jest.fn().mockReturnThis(),
     set: jest.fn().mockReturnThis(),
@@ -59,9 +54,24 @@ describe('InquiryService', () => {
     andWhere: jest.fn().mockReturnThis(),
     execute: jest.fn(),
   };
-  const actionLogRepositoryMock = {
+  // transitionAction이 actionRepository.manager.transaction(...)으로 액션 UPDATE와
+  // 로그 INSERT를 하나의 트랜잭션에 묶는다 - 콜백에 넘겨주는 manager를 흉내낸다.
+  const transactionManagerMock = {
+    createQueryBuilder: jest.fn(() => actionUpdateQueryBuilderMock),
+    getRepository: jest.fn(() => actionLogRepositoryMock),
+  };
+  const actionRepositoryMock = {
     create: jest.fn((data) => data),
-    save: jest.fn(async (data: unknown) => data),
+    save: jest.fn(async (data: unknown) => ({
+      actionId: 'act1',
+      ...(data as object),
+    })),
+    findOne: jest.fn(),
+    manager: {
+      transaction: jest.fn(async (cb: (manager: unknown) => Promise<unknown>) =>
+        cb(transactionManagerMock),
+      ),
+    },
   };
   const quizSongRepositoryMock = {
     findOne: jest.fn(),
@@ -89,9 +99,6 @@ describe('InquiryService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    actionRepositoryMock.createQueryBuilder.mockReturnValue(
-      actionUpdateQueryBuilderMock,
-    );
     actionUpdateQueryBuilderMock.execute.mockResolvedValue({ affected: 1 });
     inquiryRepositoryMock.count.mockResolvedValue(0);
     inquiryRepositoryMock.findOne.mockResolvedValue({ ...baseInquiry });
@@ -517,6 +524,34 @@ describe('InquiryService', () => {
       );
       expect(inquiryRepositoryMock.save).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'FAILED' }),
+      );
+      expect(actionLogRepositoryMock.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: 'FAILED',
+          detail: expect.objectContaining({ stage: 'EXECUTE' }),
+        }),
+      );
+    });
+
+    it('실제 조치는 성공했지만 COMPLETED 기록이 실패하면 detail에 RECORD 단계로 남긴다', async () => {
+      // APPROVED, EXECUTING까지는 성공하고 COMPLETED 전이(세 번째 UPDATE)만 실패시킨다.
+      actionUpdateQueryBuilderMock.execute
+        .mockResolvedValueOnce({ affected: 1 })
+        .mockResolvedValueOnce({ affected: 1 })
+        .mockRejectedValueOnce(new Error('DB 커넥션 끊김'));
+
+      await expect(service.approve('iq1', adminActor)).rejects.toThrow(
+        BadRequestException,
+      );
+
+      expect(actionServiceMock.changeStartTime).toHaveBeenCalledWith('qs1', {
+        startSec: 30,
+      });
+      expect(actionLogRepositoryMock.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: 'FAILED',
+          detail: expect.objectContaining({ stage: 'RECORD' }),
+        }),
       );
     });
   });

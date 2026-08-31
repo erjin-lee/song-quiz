@@ -311,17 +311,33 @@ export class InquiryService {
     quizSongId: string,
   ): Promise<void> {
     await this.transitionAction(action, 'EXECUTING', 'SYSTEM');
+
+    let snapshot: InquiryActionSnapshot;
     try {
-      const { before, after } = await this.executeAction(
+      snapshot = await this.executeAction(
         action.actionType,
         quizSongId,
         action.actionArgs ?? {},
         action.confidence ?? 'HIGH',
       );
+    } catch (error) {
+      // 실제 조치 자체가 실패했다 - 부작용이 없으니 그대로 FAILED 처리한다.
+      this.logger.error(
+        `문의 조치 실행 실패(inquiryId: ${inquiry.inquiryId})`,
+        error,
+      );
+      await this.transitionAction(action, 'FAILED', 'SYSTEM', {
+        detail: { stage: 'EXECUTE', error: (error as Error).message },
+      });
+      await this.finish(inquiry, 'FAILED', null);
+      throw error;
+    }
+
+    try {
       await this.transitionAction(action, 'COMPLETED', 'SYSTEM', {
         executedDt: new Date(),
-        beforeValue: before,
-        afterValue: after,
+        beforeValue: snapshot.before,
+        afterValue: snapshot.after,
       });
       await this.finish(
         inquiry,
@@ -329,12 +345,21 @@ export class InquiryService {
         this.buildSuccessMessage(action.actionType),
       );
     } catch (error) {
+      // 실제 조치(QuizSong/QuizAnswer 변경)는 이미 반영됐지만, 그걸 기록하는 단계에서
+      // 실패했다 - FAILED로 남기되 실제로는 부작용이 있었다는 걸 detail에 명시한다.
+      // ADD_ANSWER는 이 상태에서 재승인해도 addAnswer()가 동일 정답 존재 여부를
+      // 확인해 중복 삽입하지 않는다(InquiryActionService.addAnswer 참고).
       this.logger.error(
-        `문의 조치 실행 실패(inquiryId: ${inquiry.inquiryId})`,
+        `조치는 반영됐지만 상태 기록에 실패했습니다(inquiryId: ${inquiry.inquiryId})`,
         error,
       );
       await this.transitionAction(action, 'FAILED', 'SYSTEM', {
-        detail: { error: (error as Error).message },
+        afterValue: snapshot.after,
+        detail: {
+          stage: 'RECORD',
+          error: (error as Error).message,
+          note: '실제 조치는 반영되었으나 상태 기록에 실패함 - 재승인 시 부작용 없이 재시도되는지 확인 필요',
+        },
       });
       await this.finish(inquiry, 'FAILED', null);
       throw error;
@@ -355,72 +380,80 @@ export class InquiryService {
     source: InquiryActionLogSource,
     extra?: ActionTransitionExtra,
   ): Promise<boolean> {
-    const qb = this.actionRepository
-      .createQueryBuilder()
-      .update(InquiryAction)
-      .set({
-        status,
-        ...(extra?.reviewedVia !== undefined && {
-          reviewedVia: extra.reviewedVia,
-        }),
-        ...(extra?.reviewedByUserKey !== undefined && {
-          reviewedByUserKey: extra.reviewedByUserKey,
-        }),
-        ...(extra?.reviewedDt !== undefined && {
-          reviewedDt: extra.reviewedDt,
-        }),
-        ...(extra?.executedDt !== undefined && {
-          executedDt: extra.executedDt,
-        }),
-        ...(extra?.beforeValue !== undefined && {
-          beforeValue: extra.beforeValue,
-        }),
-        ...(extra?.afterValue !== undefined && {
-          afterValue: extra.afterValue,
-        }),
-      })
-      .where('actionId = :id', { id: action.actionId });
-    if (extra?.guardStatusIn) {
-      qb.andWhere('status IN (:...statusIn)', {
-        statusIn: extra.guardStatusIn,
-      });
-    }
-    if (extra?.guardStatusNotIn) {
-      qb.andWhere('status NOT IN (:...statusNotIn)', {
-        statusNotIn: extra.guardStatusNotIn,
-      });
-    }
-    const result = await qb.execute();
-    if (!result.affected) {
-      return false;
-    }
+    // 액션 UPDATE와 감사 로그 INSERT를 하나의 트랜잭션으로 묶는다 - 둘을 따로 저장하면
+    // UPDATE는 성공했는데 로그 INSERT만 실패하는 경우 호출부(executeAndFinish)가 이를
+    // 실행 실패로 오인해 이미 COMPLETED로 반영된 액션을 다시 FAILED로 덮어써버릴 수
+    // 있다(ADR-0008 후속 리뷰에서 지적된 문제). 트랜잭션이 실패하면 둘 다 롤백되므로
+    // 액션 상태는 이 호출 이전 상태 그대로 남는다.
+    return this.actionRepository.manager.transaction(async (manager) => {
+      const qb = manager
+        .createQueryBuilder()
+        .update(InquiryAction)
+        .set({
+          status,
+          ...(extra?.reviewedVia !== undefined && {
+            reviewedVia: extra.reviewedVia,
+          }),
+          ...(extra?.reviewedByUserKey !== undefined && {
+            reviewedByUserKey: extra.reviewedByUserKey,
+          }),
+          ...(extra?.reviewedDt !== undefined && {
+            reviewedDt: extra.reviewedDt,
+          }),
+          ...(extra?.executedDt !== undefined && {
+            executedDt: extra.executedDt,
+          }),
+          ...(extra?.beforeValue !== undefined && {
+            beforeValue: extra.beforeValue,
+          }),
+          ...(extra?.afterValue !== undefined && {
+            afterValue: extra.afterValue,
+          }),
+        })
+        .where('actionId = :id', { id: action.actionId });
+      if (extra?.guardStatusIn) {
+        qb.andWhere('status IN (:...statusIn)', {
+          statusIn: extra.guardStatusIn,
+        });
+      }
+      if (extra?.guardStatusNotIn) {
+        qb.andWhere('status NOT IN (:...statusNotIn)', {
+          statusNotIn: extra.guardStatusNotIn,
+        });
+      }
+      const result = await qb.execute();
+      if (!result.affected) {
+        return false;
+      }
 
-    action.status = status;
-    if (extra?.reviewedVia !== undefined)
-      action.reviewedVia = extra.reviewedVia;
-    if (extra?.reviewedByUserKey !== undefined)
-      action.reviewedByUserKey = extra.reviewedByUserKey;
-    if (extra?.reviewedDt !== undefined) action.reviewedDt = extra.reviewedDt;
-    if (extra?.executedDt !== undefined) action.executedDt = extra.executedDt;
-    if (extra?.beforeValue !== undefined)
-      action.beforeValue = extra.beforeValue;
-    if (extra?.afterValue !== undefined) action.afterValue = extra.afterValue;
+      action.status = status;
+      if (extra?.reviewedVia !== undefined)
+        action.reviewedVia = extra.reviewedVia;
+      if (extra?.reviewedByUserKey !== undefined)
+        action.reviewedByUserKey = extra.reviewedByUserKey;
+      if (extra?.reviewedDt !== undefined) action.reviewedDt = extra.reviewedDt;
+      if (extra?.executedDt !== undefined) action.executedDt = extra.executedDt;
+      if (extra?.beforeValue !== undefined)
+        action.beforeValue = extra.beforeValue;
+      if (extra?.afterValue !== undefined) action.afterValue = extra.afterValue;
 
-    await this.actionLogRepository.save(
-      this.actionLogRepository.create({
-        actionId: action.actionId,
-        inquiryId: action.inquiryId,
-        eventType: status,
-        source,
-        actorUserKey: extra?.actorUserKey ?? null,
-        slackTeamId: extra?.slackTeamId ?? null,
-        slackUserId: extra?.slackUserId ?? null,
-        beforeValue: extra?.beforeValue ?? null,
-        afterValue: extra?.afterValue ?? null,
-        detail: extra?.detail ?? null,
-      }),
-    );
-    return true;
+      const logRepository = manager.getRepository(InquiryActionLog);
+      await logRepository.save(
+        logRepository.create({
+          actionId: action.actionId,
+          inquiryId: action.inquiryId,
+          eventType: status,
+          source,
+          actorUserKey: extra?.actorUserKey ?? null,
+          slackTeamId: extra?.slackTeamId ?? null,
+          slackUserId: extra?.slackUserId ?? null,
+          beforeValue: extra?.beforeValue ?? null,
+          afterValue: extra?.afterValue ?? null,
+          detail: extra?.detail ?? null,
+        }),
+      );
+      return true;
+    });
   }
 
   private async executeAction(
