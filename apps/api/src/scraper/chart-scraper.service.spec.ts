@@ -309,14 +309,20 @@ describe('ChartScraperService', () => {
     );
   });
 
-  it('아티스트 목록이 빈 곡은 예외 없이 건너뛴다', async () => {
+  it('아티스트 목록이 빈 곡은 예외 없이 건너뛰고, 이미 존재해 건너뛴 곡과 별도로 집계한다', async () => {
     melonScraperClientMock.fetchAgeChartSongs.mockResolvedValueOnce([
       { ...chartSongFixture[0], artists: [] },
+      chartSongFixture[1],
     ]);
 
     const result = await service.scrapeChart(ChartType.AG, 2010);
 
     expect(songRepositoryMock.save).not.toHaveBeenCalled();
-    expect(result.skippedSongCount).toBe(1);
+    expect(quizSongRepositoryMock.save).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      skippedInvalidSongCount: 1,
+      skippedSongCount: 1,
+      savedQuizSongCount: 1,
+    });
   });
 });

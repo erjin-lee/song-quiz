@@ -80,13 +80,14 @@ export class ChartScraperService {
     let savedArtistCount = 0;
     let savedSongCount = 0;
     let skippedSongCount = 0;
+    let skippedInvalidSongCount = 0;
     let reusedYoutubeCount = 0;
     let reusedAnswerCount = 0;
     let quizSeq = 1;
 
     for (const chartSong of chartSongs) {
       if (chartSong.artists.length === 0) {
-        skippedSongCount++;
+        skippedInvalidSongCount++;
         continue;
       }
 
@@ -158,7 +159,8 @@ export class ChartScraperService {
       savedArtistCount,
       savedSongCount,
       skippedSongCount,
-      savedQuizSongCount: chartSongs.length,
+      skippedInvalidSongCount,
+      savedQuizSongCount: quizSeq - 1,
       reusedYoutubeCount,
       reusedAnswerCount,
     };
