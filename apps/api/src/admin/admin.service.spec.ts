@@ -284,18 +284,16 @@ describe('AdminService', () => {
   });
 
   describe('approveInquiry / rejectInquiry', () => {
-    it('InquiryService.approve에 ADMIN 액터로 위임한다', async () => {
+    it('InquiryService.approve에 위임한다', async () => {
       await service.approveInquiry('1', 'admin-key-1');
       expect(inquiryServiceMock.approve).toHaveBeenCalledWith('1', {
-        via: 'ADMIN',
         userKey: 'admin-key-1',
       });
     });
 
-    it('InquiryService.reject에 ADMIN 액터로 위임한다', async () => {
+    it('InquiryService.reject에 위임한다', async () => {
       await service.rejectInquiry('1', 'admin-key-1');
       expect(inquiryServiceMock.reject).toHaveBeenCalledWith('1', {
-        via: 'ADMIN',
         userKey: 'admin-key-1',
       });
     });

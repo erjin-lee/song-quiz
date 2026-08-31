@@ -138,17 +138,11 @@ export class AdminService {
   }
 
   approveInquiry(inquiryId: string, adminUserKey: string): Promise<void> {
-    return this.inquiryService.approve(inquiryId, {
-      via: 'ADMIN',
-      userKey: adminUserKey,
-    });
+    return this.inquiryService.approve(inquiryId, { userKey: adminUserKey });
   }
 
   rejectInquiry(inquiryId: string, adminUserKey: string): Promise<void> {
-    return this.inquiryService.reject(inquiryId, {
-      via: 'ADMIN',
-      userKey: adminUserKey,
-    });
+    return this.inquiryService.reject(inquiryId, { userKey: adminUserKey });
   }
 
   async createAdmin(

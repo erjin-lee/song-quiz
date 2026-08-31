@@ -31,5 +31,8 @@ import { AdminAuthGuard } from './guards/admin-auth.guard';
   ],
   controllers: [AdminController, AdminAuthController],
   providers: [AdminService, AdminAuthGuard, AdminSeedService],
+  // SlackModule이 Slack 인터랙션에서 관리자 웹과 동일한 승인/반려 경로(AdminService)를
+  // 그대로 재사용한다(ADR-0008).
+  exports: [AdminService],
 })
 export class AdminModule {}

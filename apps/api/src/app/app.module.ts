@@ -17,6 +17,7 @@ import { AccessLogMiddleware } from '../logging/access-log.middleware';
 import { LoggingModule } from '../logging/logging.module';
 import { QuizModule } from '../quiz/quiz.module';
 import { ScraperModule } from '../scraper/scraper.module';
+import { SlackModule } from '../slack/slack.module';
 import { UserModule } from '../user/user.module';
 
 @Module({
@@ -38,6 +39,7 @@ import { UserModule } from '../user/user.module';
     LoggingModule,
     QuizModule,
     ScraperModule,
+    SlackModule,
     UserModule,
   ],
   controllers: [AppController],

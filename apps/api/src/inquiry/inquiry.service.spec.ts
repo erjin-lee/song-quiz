@@ -367,7 +367,7 @@ describe('InquiryService', () => {
       confidence: 'MEDIUM',
       status: 'PENDING_REVIEW',
     };
-    const adminActor = { via: 'ADMIN' as const, userKey: 'admin1' };
+    const adminActor = { userKey: 'admin1' };
 
     beforeEach(() => {
       actionRepositoryMock.findOne.mockResolvedValue({ ...pendingAction });
@@ -499,23 +499,6 @@ describe('InquiryService', () => {
       );
     });
 
-    it('Slack 액터로 승인하면 slackUserId/slackTeamId를 로그에 남긴다', async () => {
-      await service.approve('iq1', {
-        via: 'SLACK',
-        slackTeamId: 'T1',
-        slackUserId: 'U1',
-      });
-
-      expect(actionLogRepositoryMock.save).toHaveBeenCalledWith(
-        expect.objectContaining({
-          eventType: 'APPROVED',
-          source: 'SLACK',
-          slackTeamId: 'T1',
-          slackUserId: 'U1',
-        }),
-      );
-    });
-
     it('조치 실행 중 예외가 발생하면 FAILED로 종료하고 400을 던진다', async () => {
       actionServiceMock.changeStartTime.mockRejectedValue(new Error('DB 오류'));
 
@@ -566,7 +549,7 @@ describe('InquiryService', () => {
       confidence: 'MEDIUM',
       status: 'PENDING_REVIEW',
     };
-    const adminActor = { via: 'ADMIN' as const, userKey: 'admin1' };
+    const adminActor = { userKey: 'admin1' };
 
     beforeEach(() => {
       actionRepositoryMock.findOne.mockResolvedValue({ ...pendingAction });
