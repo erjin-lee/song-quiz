@@ -15,12 +15,7 @@ export class User {
   })
   userKey: string;
 
-  @Column({
-    name: 'USER_ID',
-    type: 'varchar',
-    length: 255,
-    comment: '유저 고유 랜덤 문자열 아이디',
-  })
+  @Column({ name: 'USER_ID', type: 'varchar', length: 255 })
   userId: string;
 
   @Column({
