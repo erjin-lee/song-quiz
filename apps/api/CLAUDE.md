@@ -15,7 +15,7 @@
 - DTO에는 class-validator를 사용한다.
 - 트랜잭션이 필요한 경우 실패 시 rollback과 release 경로를 확인한다.
 - DB 쿼리 변경 시 N+1과 인덱스 영향을 확인한다.
-- 테이블 스키마(컬럼, 인덱스, 코멘트 등)를 확인해야 할 때는 `apps/api/DB_INFO.txt`(전체 테이블 CREATE TABLE DDL 모음, git에는 포함되지 않는 로컬 참조 파일)를 참고한다.
+- 테이블 스키마(컬럼, 인덱스, 코멘트 등)를 확인해야 할 때는 `apps/api/DB_INFO.txt`(전체 테이블 CREATE TABLE DDL 모음, git에는 포함되지 않는 로컬 참조 파일)를 참고한다. "지금 스키마가 어떤지"는 이 파일이, "왜/언제 바뀌었는지"는 `src/migrations/`의 마이그레이션 파일이 담당한다.
 - 기존 API 응답 형식과 공개 인터페이스를 임의로 변경하지 않는다.
 - `.env`, `.env.local`에는 실제 자격 증명(AWS, DB, JWT, Firebase 등)이 들어있다. 수정하지 않고, 로그나 응답에 노출하지 않는다.
 
@@ -31,6 +31,7 @@
 - 신규 도메인 추가: `src/<domain>/` 아래 module/controller/service/dto 구조로 만든다(`src/app/` 참고).
 - 비즈니스 로직 변경: Controller가 아니라 Service에 작성한다. Controller는 요청 검증과 응답 전달만 담당한다.
 - DB 쿼리 변경: N+1과 인덱스 영향을 확인하고, 필요하면 `apps/api/DB_INFO.txt`로 스키마를 먼저 확인한다.
+- DB 스키마 변경(컬럼/테이블 추가·변경 등): 엔티티를 먼저 수정한 뒤 `yarn workspace api migration:generate src/migrations/<이름>`으로 DDL diff를 생성하고, 생성된 `up()`/`down()`을 리뷰한 뒤 커밋한다(자세한 흐름은 아래 Migrations 참고).
 
 # Dependencies
 
@@ -65,6 +66,28 @@ yarn workspace api start:dev:local
 yarn workspace api build
 yarn workspace api test
 yarn workspace api lint
+```
+
+# Migrations
+
+TypeORM 공식 마이그레이션(`src/data-source.ts`, `src/migrations/`)을 쓴다. `app.module.ts`의 `TypeOrmModule.forRoot()`는 `synchronize: false`를 그대로 유지하고, 앱 부팅 시 마이그레이션을 자동 실행하지도 않는다(ECS가 태스크를 여러 개 띄울 수 있어 부팅 시점 동시 실행 경쟁을 피하고, 스키마 변경을 배포 타이밍과 분리해 항상 의도적으로만 실행하기 위함). 적용은 지금까지처럼 `scripts/tunnel-db.sh`로 bastion을 거쳐 DB에 직접 붙어서 사람이 실행한다 - CI(`deploy-api.yml`)는 자동으로 마이그레이션을 실행하지 않는다(RDS가 private 서브넷이라 GitHub Actions가 애초에 못 닿는다).
+
+```bash
+# 1) 엔티티 수정
+# 2) 다른 터미널에서 bastion 터널을 연다
+infra/terraform/environments/prod/scripts/tunnel-db.sh
+# 3) .env.local의 DB_HOST_NAME/DB_PORT가 터널 쪽(127.0.0.1:<로컬 포트>)을 가리키는 상태에서
+yarn workspace api migration:generate src/migrations/<설명적인이름>
+# 4) 생성된 파일의 up()/down() SQL을 리뷰(코드 리뷰와 동일한 감각) 후 커밋 + PR
+# 5) merge 후 실제 DB에 반영할 시점에 사람이 직접
+yarn workspace api migration:run
+```
+
+기타 명령:
+```bash
+yarn workspace api migration:show      # 적용/미적용 마이그레이션 목록
+yarn workspace api migration:revert    # 마지막 마이그레이션 되돌리기
+yarn workspace api migration:create src/migrations/<이름>   # DB 접속 없이 빈 마이그레이션 파일만 생성(수기 DDL이 필요할 때)
 ```
 
 # Verification
