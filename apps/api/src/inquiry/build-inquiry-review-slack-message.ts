@@ -24,9 +24,42 @@ function formatSec(sec: number): string {
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
-/** Slack mrkdwn 링크 문법(<url|label>)에서 label에 |, <, >가 섞이면 깨지므로 이스케이프한다. */
+/**
+ * Slack mrkdwn 예약 문자(&, <, >)를 이스케이프한다(Slack 공식 권장 순서 - &를 가장 먼저
+ * 치환해야 뒤에서 넣는 &lt;/&gt; 안의 &까지 다시 치환되지 않는다). content/곡명/답변
+ * 텍스트처럼 사용자가 통제할 수 있는 값을 mrkdwn에 넣기 전에는 반드시 거쳐야 한다 -
+ * 그렇지 않으면 <!channel>/<!here>/<@USERID> 같은 Slack 특수 멘션 문법으로 해석되어
+ * 검토 채널에 원치 않는 멘션이 발생할 수 있다.
+ */
+function escapeMrkdwn(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+const YOUTUBE_HOSTNAMES = new Set([
+  'youtube.com',
+  'www.youtube.com',
+  'm.youtube.com',
+  'youtu.be',
+]);
+
+/**
+ * https 스킴의 유튜브 호스트만 안전한 링크로 취급한다. CHANGE_LINK의 "처리후" URL은
+ * 문의 내용에서 GPT가 그대로 추출한 값이라(사용자가 사실상 통제 가능) 검증 없이 클릭
+ * 가능한 링크로 노출하면 피싱 링크를 검토자가 클릭하게 만들 수 있다.
+ */
+function isSafeYoutubeUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    return url.protocol === 'https:' && YOUTUBE_HOSTNAMES.has(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** Slack mrkdwn 링크 문법(<url|label>) - label은 mrkdwn 이스케이프 후 |까지 제거해 링크
+ *  문법이 깨지지 않게 한다. url은 호출부에서 이미 안전한 값만 넘긴다고 가정한다. */
 function slackLink(url: string, label: string): string {
-  const escapedLabel = label.replace(/[<>|]/g, '');
+  const escapedLabel = escapeMrkdwn(label).replace(/\|/g, '');
   return `<${url}|${escapedLabel}>`;
 }
 
@@ -65,14 +98,17 @@ function buildBeforeAfter(
     case 'CHANGE_LINK': {
       const rawAfterUrl =
         typeof args.youtubeUrl === 'string' ? args.youtubeUrl.trim() : '';
+      const afterIsSafe = rawAfterUrl !== '' && isSafeYoutubeUrl(rawAfterUrl);
       return {
         before: slackLink(
           withStartSecParam(song.youtubeUrl, song.startSec),
           song.youtubeUrl,
         ),
-        after: rawAfterUrl
+        after: afterIsSafe
           ? slackLink(withStartSecParam(rawAfterUrl, song.startSec), rawAfterUrl)
-          : '(링크 없음)',
+          : rawAfterUrl
+            ? `(유효하지 않은 링크) ${escapeMrkdwn(rawAfterUrl)}`
+            : '(링크 없음)',
       };
     }
     case 'ADD_ANSWER': {
@@ -80,11 +116,11 @@ function buildBeforeAfter(
         typeof args.answerTxt === 'string' ? args.answerTxt.trim() : '';
       const answerType =
         typeof args.answerType === 'string' && args.answerType.trim().length > 0
-          ? ` (${args.answerType.trim()})`
+          ? ` (${escapeMrkdwn(args.answerType.trim())})`
           : '';
       return {
         before: '-',
-        after: answerTxt ? `${answerTxt}${answerType}` : '-',
+        after: answerTxt ? `${escapeMrkdwn(answerTxt)}${answerType}` : '-',
       };
     }
   }
@@ -96,7 +132,8 @@ export function buildInquiryReviewSlackMessage(
   const { inquiryId, content, song, matchedFunction, args } = params;
   const { before, after } = buildBeforeAfter(matchedFunction, song, args);
   const headerText = '🔍 문의 검토 필요 (신뢰도: MEDIUM)';
-  const songLabel = `${song.songNm} - ${song.atstNm}`;
+  const songLabel = `${escapeMrkdwn(song.songNm)} - ${escapeMrkdwn(song.atstNm)}`;
+  const escapedContent = escapeMrkdwn(content);
 
   const blocks: unknown[] = [
     {
@@ -112,7 +149,7 @@ export function buildInquiryReviewSlackMessage(
     },
     {
       type: 'section',
-      text: { type: 'mrkdwn', text: `*문의 내용*\n> ${content}` },
+      text: { type: 'mrkdwn', text: `*문의 내용*\n> ${escapedContent}` },
     },
     {
       type: 'section',
