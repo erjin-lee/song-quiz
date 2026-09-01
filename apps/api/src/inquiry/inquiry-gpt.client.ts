@@ -164,13 +164,23 @@ export class InquiryGptClient {
       return result;
     }
 
+    // linkAccessible: false는 "웹 검색으로 실제 내용을 확인하지 못했다"는 뜻이므로,
+    // 이 시점부터는 confidence를 신뢰할 수 없다 - 프롬프트를 어기고 HIGH를 함께
+    // 반환했더라도(예: { confidence: "HIGH", linkAccessible: false}) 여기서 먼저
+    // MEDIUM으로 낮춰서, 이후 스크래핑/2차 요청이 실패해 이 값을 그대로 쓰게 되는
+    // 모든 경로에서 검증되지 않은 HIGH가 새어나가지 않게 한다.
+    const cappedPrimaryResult: InquiryVerifyResult =
+      result.confidence === 'HIGH'
+        ? { ...result, confidence: 'MEDIUM' }
+        : result;
+
     // 웹 검색으로 새 링크에 접근하지 못했을 때만, 우리가 직접 스크래핑한 정보를
     // 근거로 재판단한다(별도 웹 검색 재시도는 하지 않는다).
     return this.verifyChangeLinkWithScrapedFallback(
       song,
       content,
       args,
-      result,
+      cappedPrimaryResult,
     );
   }
 

@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { QuizAnswer } from '../quiz/entities/quiz-answer.entity';
@@ -132,17 +132,23 @@ describe('InquiryActionService', () => {
       );
     });
 
-    it('videoId를 파싱할 수 없는 링크는 영상 길이를 스크래핑하지 않는다', async () => {
-      await service.changeLink('qs1', { youtubeUrl: '유효하지 않은 URL' });
+    it('videoId를 파싱할 수 없는 링크는 저장하지 않고 거부한다', async () => {
+      await expect(
+        service.changeLink('qs1', { youtubeUrl: '유효하지 않은 URL' }),
+      ).rejects.toThrow(BadRequestException);
 
       expect(youtubeScraperClientMock.getDurationSec).not.toHaveBeenCalled();
-      expect(quizSongRepositoryMock.save).toHaveBeenCalledWith(
-        expect.objectContaining({
-          youtubeVideoId: null,
-          durationSec: null,
-          startSec: baseQuizSong.startSec,
+      expect(quizSongRepositoryMock.save).not.toHaveBeenCalled();
+    });
+
+    it('유튜브가 아닌 호스트의 링크(v 파라미터가 있어도)는 저장하지 않고 거부한다', async () => {
+      await expect(
+        service.changeLink('qs1', {
+          youtubeUrl: 'https://example.com/?v=abc123',
         }),
-      );
+      ).rejects.toThrow(BadRequestException);
+
+      expect(quizSongRepositoryMock.save).not.toHaveBeenCalled();
     });
 
     it('출제곡을 찾을 수 없으면 404를 반환한다', async () => {

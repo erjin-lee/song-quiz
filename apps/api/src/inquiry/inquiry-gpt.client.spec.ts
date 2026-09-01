@@ -364,6 +364,61 @@ describe('InquiryGptClient', () => {
         });
       });
 
+      it('1차 응답이 모순되게 HIGH+linkAccessible:false를 반환하고 스크래핑도 실패하면, HIGH가 아니라 MEDIUM으로 낮춰서 반환한다', async () => {
+        openAiChatClientMock.requestJson.mockResolvedValueOnce(
+          JSON.stringify({
+            confidence: 'HIGH',
+            reason: '프롬프트를 어긴 모순된 응답',
+            linkAccessible: false,
+          }),
+        );
+        youtubeScraperClientMock.getVideoInfo.mockRejectedValue(
+          new Error('유튜브 요청 실패'),
+        );
+
+        const result = await client.verifyConfidence(
+          'CHANGE_LINK',
+          song,
+          '링크가 잘못됐어요',
+          newLinkArgs,
+        );
+
+        expect(result).toEqual({
+          confidence: 'MEDIUM',
+          reason: '프롬프트를 어긴 모순된 응답',
+          linkAccessible: false,
+        });
+      });
+
+      it('1차 응답이 모순되게 HIGH+linkAccessible:false를 반환하고 2차 요청도 실패하면, HIGH가 아니라 MEDIUM으로 낮춰서 반환한다', async () => {
+        openAiChatClientMock.requestJson
+          .mockResolvedValueOnce(
+            JSON.stringify({
+              confidence: 'HIGH',
+              reason: '프롬프트를 어긴 모순된 응답',
+              linkAccessible: false,
+            }),
+          )
+          .mockRejectedValueOnce(new Error('GPT 요청 타임아웃'));
+        youtubeScraperClientMock.getVideoInfo.mockResolvedValue({
+          title: '아이유 - 너에게 닿기를',
+          durationSec: 210,
+        });
+
+        const result = await client.verifyConfidence(
+          'CHANGE_LINK',
+          song,
+          '링크가 잘못됐어요',
+          newLinkArgs,
+        );
+
+        expect(result).toEqual({
+          confidence: 'MEDIUM',
+          reason: '프롬프트를 어긴 모순된 응답',
+          linkAccessible: false,
+        });
+      });
+
       it('linkAccessible이 false가 아니면(true/미포함) 재검증하지 않는다', async () => {
         openAiChatClientMock.requestJson.mockResolvedValueOnce(
           JSON.stringify({ confidence: 'HIGH', reason: '확인 완료' }),

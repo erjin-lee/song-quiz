@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { withStartSecParam } from 'shared';
 import { Repository } from 'typeorm';
@@ -58,7 +62,9 @@ export class InquiryActionService {
    * 새 링크의 영상 길이를 스크래핑해 DURATION을 갱신한다. 새 링크에 t 파라미터가
    * 있으면 그 값을 시작 시간으로, 없으면 스크래핑한 재생시간의 절반을 시작 시간으로
    * 쓴다. 종료 시간은 시작 시간 + QUIZ_SONG_CLIP_SEC으로 고정한다
-   * (quiz-generator.service.ts와 동일한 클립 길이).
+   * (quiz-generator.service.ts와 동일한 클립 길이). videoId를 파싱할 수 없는(유튜브
+   * 호스트가 아니거나 https가 아닌) 링크는 저장하지 않고 거부한다 - 그대로 저장하면
+   * youtubeVideoId가 없어 게임에서 플레이어가 아예 렌더링되지 않는 깨진 상태가 된다.
    */
   async changeLink(
     quizSongId: string,
@@ -73,13 +79,16 @@ export class InquiryActionService {
     const { videoId, startSec: startSecFromUrl } = parseYoutubeUrl(
       args.youtubeUrl,
     );
+    if (!videoId) {
+      throw new BadRequestException(
+        `유효한 유튜브 링크가 아닙니다. (quizSongId: ${quizSongId})`,
+      );
+    }
 
-    const durationSec = videoId
-      ? await this.youtubeScraperClient.getDurationSec(
-          videoId,
-          `quizSongId: ${quizSongId}`,
-        )
-      : null;
+    const durationSec = await this.youtubeScraperClient.getDurationSec(
+      videoId,
+      `quizSongId: ${quizSongId}`,
+    );
 
     const startSec =
       startSecFromUrl ??
