@@ -90,10 +90,17 @@ export class InquiryActionService {
       `quizSongId: ${quizSongId}`,
     );
 
-    const startSec =
+    const rawStartSec =
       startSecFromUrl ??
       (durationSec !== null ? Math.round(durationSec / 2) : null) ??
       quizSong.startSec;
+    // t 파라미터는 이미 0 이상으로 보정돼 있지만(parseYoutubeUrl), 영상 길이를
+    // 알고 있으면 그 범위도 넘지 않도록 한 번 더 막는다 - 그렇지 않으면 재생 시작
+    // 지점이 영상 길이를 넘어서는 깨진 상태로 저장될 수 있다.
+    const startSec =
+      durationSec !== null
+        ? Math.min(rawStartSec, Math.max(durationSec - 1, 0))
+        : rawStartSec;
 
     // 사용자가 제출한 원본 URL을 그대로 저장하지 않고, 검증된 videoId로 정규화한
     // URL을 저장한다 - 그래야 실제로 스크래핑/재생에 쓰이는 videoId와 DB에 저장되는

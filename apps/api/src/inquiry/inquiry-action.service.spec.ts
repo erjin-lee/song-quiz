@@ -176,6 +176,38 @@ describe('InquiryActionService', () => {
       );
     });
 
+    it('새 링크의 t가 음수면 youtubeUrl/startSec/endSec 모두 0으로 일관되게 보정한다', async () => {
+      youtubeScraperClientMock.getDurationSec.mockResolvedValue(180);
+
+      await service.changeLink('qs1', {
+        youtubeUrl: 'https://www.youtube.com/watch?v=new&t=-60',
+      });
+
+      expect(quizSongRepositoryMock.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          youtubeUrl: 'https://www.youtube.com/watch?v=new&t=0',
+          startSec: 0,
+          endSec: 30,
+        }),
+      );
+    });
+
+    it('t가 스크래핑된 영상 길이를 넘으면 영상 길이 안쪽으로 보정한다', async () => {
+      youtubeScraperClientMock.getDurationSec.mockResolvedValue(100);
+
+      await service.changeLink('qs1', {
+        youtubeUrl: 'https://www.youtube.com/watch?v=new&t=99999',
+      });
+
+      expect(quizSongRepositoryMock.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          youtubeUrl: 'https://www.youtube.com/watch?v=new&t=99',
+          startSec: 99,
+          endSec: 129,
+        }),
+      );
+    });
+
     it('출제곡을 찾을 수 없으면 404를 반환한다', async () => {
       quizSongRepositoryMock.findOne.mockResolvedValueOnce(null);
 

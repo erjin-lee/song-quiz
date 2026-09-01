@@ -21,6 +21,13 @@ describe('parseYoutubeUrl', () => {
     });
   });
 
+  it('t 파라미터가 음수면 0으로 보정한다', () => {
+    expect(parseYoutubeUrl('https://youtu.be/abc123?t=-60')).toEqual({
+      videoId: 'abc123',
+      startSec: 0,
+    });
+  });
+
   it('t 파라미터가 없으면 startSec은 null이다', () => {
     expect(parseYoutubeUrl('https://www.youtube.com/watch?v=abc123')).toEqual({
       videoId: 'abc123',
@@ -105,6 +112,12 @@ describe('buildYoutubeWatchUrl', () => {
     );
     expect(buildYoutubeWatchUrl('abc123')).toBe(
       'https://www.youtube.com/watch?v=abc123',
+    );
+  });
+
+  it('startSec이 음수로 들어와도(방어적으로) 0으로 보정한다', () => {
+    expect(buildYoutubeWatchUrl('abc123', -60)).toBe(
+      'https://www.youtube.com/watch?v=abc123&t=0',
     );
   });
 });

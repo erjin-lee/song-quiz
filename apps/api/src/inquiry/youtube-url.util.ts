@@ -13,7 +13,9 @@ export interface ParsedYoutubeUrl {
 
 function parseTimeParam(raw: string): number | null {
   const value = Number(raw.replace(/s$/i, ''));
-  return Number.isFinite(value) ? Math.round(value) : null;
+  // 음수는 0으로 보정한다 - 여기서 보정하지 않으면 이 값을 쓰는 곳마다(정규화된
+  // URL, DB의 startSec/endSec) 따로 보정해야 해서 서로 다른 값으로 어긋나기 쉽다.
+  return Number.isFinite(value) ? Math.max(0, Math.round(value)) : null;
 }
 
 /**
