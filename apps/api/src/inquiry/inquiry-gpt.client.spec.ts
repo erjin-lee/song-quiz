@@ -217,7 +217,7 @@ describe('InquiryGptClient', () => {
             }),
           )
           .mockResolvedValueOnce(
-            JSON.stringify({ confidence: 'HIGH', reason: '제목이 일치함' }),
+            JSON.stringify({ confidence: 'MEDIUM', reason: '제목이 일치함' }),
           );
         youtubeScraperClientMock.getVideoInfo.mockResolvedValue({
           title: '아이유 - 너에게 닿기를',
@@ -243,7 +243,98 @@ describe('InquiryGptClient', () => {
             content: expect.stringContaining('아이유 - 너에게 닿기를'),
           }),
         ]);
-        expect(result).toEqual({ confidence: 'HIGH', reason: '제목이 일치함' });
+        expect(result).toEqual({
+          confidence: 'MEDIUM',
+          reason: '제목이 일치함',
+        });
+      });
+
+      it('폴백 결과가 HIGH여도(프롬프트 미준수) 코드에서 MEDIUM으로 낮춘다 - 제목만으로는 확신할 수 없어 반드시 관리자 검토를 거치게 한다', async () => {
+        openAiChatClientMock.requestJson
+          .mockResolvedValueOnce(
+            JSON.stringify({
+              confidence: 'LOW',
+              reason: '웹에서 새 링크를 찾지 못함',
+              linkAccessible: false,
+            }),
+          )
+          .mockResolvedValueOnce(
+            JSON.stringify({ confidence: 'HIGH', reason: '완전히 일치함' }),
+          );
+        youtubeScraperClientMock.getVideoInfo.mockResolvedValue({
+          title: '아이유 - 너에게 닿기를',
+          durationSec: 210,
+        });
+
+        const result = await client.verifyConfidence(
+          'CHANGE_LINK',
+          song,
+          '링크가 잘못됐어요',
+          newLinkArgs,
+        );
+
+        expect(result).toEqual({
+          confidence: 'MEDIUM',
+          reason: '완전히 일치함',
+        });
+      });
+
+      it('2차(스크래핑 기반) GPT 요청이 실패하면 1차 결과를 그대로 반환한다', async () => {
+        openAiChatClientMock.requestJson
+          .mockResolvedValueOnce(
+            JSON.stringify({
+              confidence: 'LOW',
+              reason: '웹에서 새 링크를 찾지 못함',
+              linkAccessible: false,
+            }),
+          )
+          .mockRejectedValueOnce(new Error('GPT 요청 타임아웃'));
+        youtubeScraperClientMock.getVideoInfo.mockResolvedValue({
+          title: '아이유 - 너에게 닿기를',
+          durationSec: 210,
+        });
+
+        const result = await client.verifyConfidence(
+          'CHANGE_LINK',
+          song,
+          '링크가 잘못됐어요',
+          newLinkArgs,
+        );
+
+        expect(result).toEqual({
+          confidence: 'LOW',
+          reason: '웹에서 새 링크를 찾지 못함',
+          linkAccessible: false,
+        });
+      });
+
+      it('2차 GPT 응답이 유효하지 않은 JSON이어도 예외를 던지지 않고 1차 결과를 반환한다', async () => {
+        openAiChatClientMock.requestJson
+          .mockResolvedValueOnce(
+            JSON.stringify({
+              confidence: 'LOW',
+              reason: '웹에서 새 링크를 찾지 못함',
+              linkAccessible: false,
+            }),
+          )
+          .mockResolvedValueOnce('이건 JSON이 아님');
+        youtubeScraperClientMock.getVideoInfo.mockResolvedValue({
+          title: '아이유 - 너에게 닿기를',
+          durationSec: 210,
+        });
+
+        const result = await client.verifyConfidence(
+          'CHANGE_LINK',
+          song,
+          '링크가 잘못됐어요',
+          newLinkArgs,
+        );
+
+        expect(result).toEqual({
+          confidence: 'LOW',
+          reason: '웹에서 새 링크를 찾지 못함',
+          linkAccessible: false,
+        });
       });
 
       it('스크래핑도 실패하면 재검증 없이 1차 결과를 그대로 반환한다', async () => {

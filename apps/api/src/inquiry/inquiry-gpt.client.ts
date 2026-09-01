@@ -188,19 +188,33 @@ export class InquiryGptClient {
       return primaryResult;
     }
 
-    const raw = await this.openAiChatClient.requestJson([
-      { role: 'system', content: CHANGE_LINK_FALLBACK_SYSTEM_RULES },
-      {
-        role: 'user',
-        content: buildChangeLinkFallbackUserMessage(
-          song,
-          content,
-          args,
-          scraped,
-        ),
-      },
-    ]);
-    return parseVerifyResult(raw);
+    try {
+      const raw = await this.openAiChatClient.requestJson([
+        { role: 'system', content: CHANGE_LINK_FALLBACK_SYSTEM_RULES },
+        {
+          role: 'user',
+          content: buildChangeLinkFallbackUserMessage(
+            song,
+            content,
+            args,
+            scraped,
+          ),
+        },
+      ]);
+      const result = parseVerifyResult(raw);
+      // 실제 페이지 접근 없이 제목 텍스트만으로 판단한 결과라 조작 가능성이 있다
+      // (영상 제목은 업로더가 임의로 정할 수 있다) - 프롬프트가 지켜지지 않아도
+      // 코드에서 한 번 더 HIGH를 막아 반드시 관리자 검토(MEDIUM 이하)로 보낸다.
+      return result.confidence === 'HIGH'
+        ? { ...result, confidence: 'MEDIUM' }
+        : result;
+    } catch (error) {
+      this.logger.warn(
+        `CHANGE_LINK 검증 폴백(스크래핑 정보 기반 재판단) 실패(quizSongId: ${song.quizSongId})`,
+        error,
+      );
+      return primaryResult;
+    }
   }
 
   private async scrapeNewLinkInfo(

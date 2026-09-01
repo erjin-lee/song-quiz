@@ -2,7 +2,7 @@ import type { InquiryFunctionName } from './inquiry.types';
 import type { InquirySongContext } from './inquiry-gpt.client';
 
 /** 프롬프트를 실질적으로 바꿀 때마다 사람이 수동으로 올린다(SQ_INQUIRY_ACTION.PROMPT_VERSION에 기록). */
-export const INQUIRY_PROMPT_VERSION = 'v1';
+export const INQUIRY_PROMPT_VERSION = 'v2';
 
 export const CLASSIFY_SYSTEM_RULES = `너는 음악 퀴즈 게임에서 유저가 남긴 곡 관련 문의를 보고, 사전에 정의된 조치 함수 중 어떤 것을 사용해야 할지 판별하는 역할이다.
 
@@ -151,15 +151,20 @@ export const CHANGE_LINK_FALLBACK_SYSTEM_RULES = `너는 한국 음악 퀴즈 �
 - 기존 링크와 새 링크가 같은 곡을 가리키는가
 - 새 링크가 기존 링크보다 적절한가
 
-HIGH: 스크래핑된 정보가 곡 정보와 명확히 일치하여 교체가 타당하다고 판단되는 경우.
-MEDIUM: 스크래핑된 정보가 곡 정보와 대체로 일치하지만 완전히 확신하기는 어려운 경우.
+주의: 영상 제목은 업로더가 임의로 정할 수 있어 실제 영상 내용을 보장하지 않는다. 실제
+페이지에 접근해 확인한 게 아니라 제목/재생시간 텍스트만으로 판단하는 것이므로, confidence는
+MEDIUM 또는 LOW만 사용한다(HIGH는 절대 쓰지 않는다) - 사람 관리자의 최종 검토가 반드시
+필요하다.
+
+MEDIUM: 스크래핑된 제목/재생시간이 곡 정보와 일치해 새 링크가 맞는 곡으로 보이는 경우.
 LOW: 스크래핑된 정보가 곡/아티스트와 다르거나, 제목조차 확인하지 못했거나, 교체 요청이 명백히 부적절한 경우.
 
 ## 출력 형식
 
 설명 없이 반드시 아래 JSON 형식만 출력한다. reason에는 판단 근거를 한두 문장으로 요약한다.
+confidence는 "MEDIUM" 또는 "LOW"만 가능하다.
 
-{ "confidence": "HIGH", "reason": "판단 근거" }`;
+{ "confidence": "MEDIUM", "reason": "판단 근거" }`;
 
 export function buildClassifyUserMessage(
   song: InquirySongContext,

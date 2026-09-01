@@ -40,4 +40,27 @@ describe('parseYoutubeUrl', () => {
       parseYoutubeUrl('https://www.youtube.com/results?search_query=x'),
     ).toEqual({ videoId: null, startSec: null });
   });
+
+  it('유튜브가 아닌 호스트는 v 파라미터가 있어도 videoId가 null이다', () => {
+    expect(parseYoutubeUrl('https://example.com/?v=abc123')).toEqual({
+      videoId: null,
+      startSec: null,
+    });
+  });
+
+  it('유튜브 호스트를 부분 문자열로만 포함하는 호스트는 거부한다', () => {
+    expect(parseYoutubeUrl('https://youtu.be.evil.com/watch?v=abc123')).toEqual(
+      { videoId: null, startSec: null },
+    );
+    expect(
+      parseYoutubeUrl('https://evil-www.youtube.com/watch?v=abc123'),
+    ).toEqual({ videoId: null, startSec: null });
+  });
+
+  it('https가 아니면 videoId가 null이다', () => {
+    expect(parseYoutubeUrl('http://www.youtube.com/watch?v=abc123')).toEqual({
+      videoId: null,
+      startSec: null,
+    });
+  });
 });
