@@ -18,7 +18,7 @@ describe('QuizAnswerGeneratorService.fillAnswers', () => {
       youtubeUrl: `https://www.youtube.com/watch?v=${i + 1}`,
       song: {
         songNm: i === 0 ? 'Song A' : `Song ${i + 1}`,
-        artist: { atstNm: `Artist${i + 1}` },
+        songArtists: [{ mainYn: 'Y', artist: { atstNm: `Artist${i + 1}` } }],
       },
     }));
   }
@@ -27,6 +27,7 @@ describe('QuizAnswerGeneratorService.fillAnswers', () => {
 
   const queryBuilderMock: {
     innerJoinAndSelect: jest.Mock;
+    innerJoin: jest.Mock;
     leftJoin: jest.Mock;
     where: jest.Mock;
     andWhere: jest.Mock;
@@ -34,6 +35,7 @@ describe('QuizAnswerGeneratorService.fillAnswers', () => {
     getMany: jest.Mock;
   } = {
     innerJoinAndSelect: jest.fn(),
+    innerJoin: jest.fn(),
     leftJoin: jest.fn(),
     where: jest.fn(),
     andWhere: jest.fn(),
@@ -60,6 +62,7 @@ describe('QuizAnswerGeneratorService.fillAnswers', () => {
     jest.clearAllMocks();
     quizSongReuseServiceMock.copyReusableAnswers.mockResolvedValue(0);
     queryBuilderMock.innerJoinAndSelect.mockReturnValue(queryBuilderMock);
+    queryBuilderMock.innerJoin.mockReturnValue(queryBuilderMock);
     queryBuilderMock.leftJoin.mockReturnValue(queryBuilderMock);
     queryBuilderMock.where.mockReturnValue(queryBuilderMock);
     queryBuilderMock.andWhere.mockReturnValue(queryBuilderMock);
@@ -67,7 +70,7 @@ describe('QuizAnswerGeneratorService.fillAnswers', () => {
     queryBuilderMock.getMany.mockResolvedValue(
       quizSongFixture.map((quizSong) => ({
         ...quizSong,
-        song: { ...quizSong.song, artist: { ...quizSong.song.artist } },
+        song: { ...quizSong.song, songArtists: quizSong.song.songArtists },
       })),
     );
     gptAnswerClientMock.generateAnswersBatch.mockImplementation(

@@ -71,7 +71,7 @@ export class QuizInternalService {
     const quizSongs = await this.quizSongRepository.find({
       where: { quizId },
       order: { quizSeq: 'ASC' },
-      relations: { song: { artist: true, album: true } },
+      relations: { song: { songArtists: { artist: true }, album: true } },
     });
     if (quizSongs.length === 0) {
       return [];
@@ -95,7 +95,8 @@ export class QuizInternalService {
       startSec: quizSong.startSec,
       endSec: quizSong.endSec,
       songNm: quizSong.song.songNm,
-      atstNm: quizSong.song.artist.atstNm,
+      atstNm: quizSong.song.songArtists.find((sa) => sa.mainYn === 'Y')!.artist
+        .atstNm,
       albmNm: quizSong.song.album.albmNm,
       answers: answersByQuizSongId.get(quizSong.quizSongId) ?? [],
     }));

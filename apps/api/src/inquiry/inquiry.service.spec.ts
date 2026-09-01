@@ -28,7 +28,10 @@ describe('InquiryService', () => {
     startSec: 10,
     durationSec: 200,
     youtubeUrl: 'https://www.youtube.com/watch?v=abc',
-    song: { songNm: '너에게 닿기를', artist: { atstNm: '아이유' } },
+    song: {
+      songNm: '너에게 닿기를',
+      songArtists: [{ mainYn: 'Y', artist: { atstNm: '아이유' } }],
+    },
   };
 
   const inquiryRepositoryMock = {
@@ -104,7 +107,10 @@ describe('InquiryService', () => {
     inquiryRepositoryMock.findOne.mockResolvedValue({ ...baseInquiry });
     quizSongRepositoryMock.findOne.mockResolvedValue({
       ...baseQuizSong,
-      song: { ...baseQuizSong.song, artist: { ...baseQuizSong.song.artist } },
+      song: {
+        ...baseQuizSong.song,
+        songArtists: baseQuizSong.song.songArtists,
+      },
     });
     gptClientMock.verifyConfidence.mockResolvedValue({
       confidence: 'HIGH',

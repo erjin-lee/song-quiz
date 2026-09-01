@@ -36,7 +36,13 @@ export class QuizAnswerGeneratorService {
     const quizSongs = await this.quizSongRepository
       .createQueryBuilder('quizSong')
       .innerJoinAndSelect('quizSong.song', 'song')
-      .innerJoinAndSelect('song.artist', 'artist')
+      .innerJoin(
+        'song.songArtists',
+        'songArtist',
+        'songArtist.mainYn = :mainYn',
+        { mainYn: 'Y' },
+      )
+      .innerJoinAndSelect('songArtist.artist', 'artist')
       .leftJoin('quizSong.answers', 'answer')
       .where('answer.quizAnswerId IS NULL')
       .andWhere('quizSong.youtubeUrl != :emptyUrl', { emptyUrl: '' })
@@ -123,7 +129,7 @@ export class QuizAnswerGeneratorService {
         songChunk.map((quizSong) => ({
           quizSongId: quizSong.quizSongId,
           songNm: quizSong.song.songNm,
-          atstNm: quizSong.song.artist.atstNm,
+          atstNm: quizSong.song.songArtists[0].artist.atstNm,
         })),
       );
     } catch (error) {

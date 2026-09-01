@@ -26,7 +26,7 @@ describe('QuizGeneratorService.fillYoutubeLinks', () => {
         songId: 's1',
         songNm: 'Song A',
         ytbLink: null,
-        artist: { atstNm: 'Artist1' },
+        songArtists: [{ mainYn: 'Y', artist: { atstNm: 'Artist1' } }],
       },
     },
     {
@@ -42,19 +42,21 @@ describe('QuizGeneratorService.fillYoutubeLinks', () => {
         songId: 's2',
         songNm: 'Song B',
         ytbLink: null,
-        artist: { atstNm: 'Artist2' },
+        songArtists: [{ mainYn: 'Y', artist: { atstNm: 'Artist2' } }],
       },
     },
   ];
 
   const queryBuilderMock: {
     innerJoinAndSelect: jest.Mock;
+    innerJoin: jest.Mock;
     where: jest.Mock;
     andWhere: jest.Mock;
     orderBy: jest.Mock;
     getMany: jest.Mock;
   } = {
     innerJoinAndSelect: jest.fn(),
+    innerJoin: jest.fn(),
     where: jest.fn(),
     andWhere: jest.fn(),
     orderBy: jest.fn(),
@@ -84,13 +86,14 @@ describe('QuizGeneratorService.fillYoutubeLinks', () => {
     quizSongReuseServiceMock.findReusableYoutubeInfo.mockResolvedValue(null);
     quizSongReuseServiceMock.copyReusableAnswers.mockResolvedValue(0);
     queryBuilderMock.innerJoinAndSelect.mockReturnValue(queryBuilderMock);
+    queryBuilderMock.innerJoin.mockReturnValue(queryBuilderMock);
     queryBuilderMock.where.mockReturnValue(queryBuilderMock);
     queryBuilderMock.andWhere.mockReturnValue(queryBuilderMock);
     queryBuilderMock.orderBy.mockReturnValue(queryBuilderMock);
     queryBuilderMock.getMany.mockResolvedValue(
       quizSongFixture.map((quizSong) => ({
         ...quizSong,
-        song: { ...quizSong.song, artist: { ...quizSong.song.artist } },
+        song: { ...quizSong.song, songArtists: quizSong.song.songArtists },
       })),
     );
     quizSongRepositoryMock.createQueryBuilder.mockReturnValue(queryBuilderMock);
@@ -172,7 +175,7 @@ describe('QuizGeneratorService.fillYoutubeLinks', () => {
         song: {
           ...quizSongFixture[0].song,
           ytbLink: 'https://www.youtube.com/watch?v=existing',
-          artist: { ...quizSongFixture[0].song.artist },
+          songArtists: quizSongFixture[0].song.songArtists,
         },
       },
     ]);
@@ -223,5 +226,104 @@ describe('QuizGeneratorService.fillYoutubeLinks', () => {
       savedSongCount: 0,
       skippedSongCount: 1,
     });
+  });
+});
+
+describe('QuizGeneratorService.generateQuiz', () => {
+  let service: QuizGeneratorService;
+
+  const songQueryBuilderMock = {
+    innerJoin: jest.fn(),
+    where: jest.fn(),
+    orderBy: jest.fn(),
+    getMany: jest.fn(),
+  };
+
+  const artistRepositoryMock = { findOne: jest.fn() };
+  const songRepositoryMock = {
+    createQueryBuilder: jest.fn().mockReturnValue(songQueryBuilderMock),
+    save: jest.fn(async (data: unknown) => data),
+  };
+  const quizRepositoryMock = {
+    save: jest.fn(async (data: unknown) => ({
+      quizId: 'quiz-1',
+      ...(data as object),
+    })),
+    create: jest.fn((data: unknown) => data),
+  };
+  const quizSongRepositoryMock = {
+    create: jest.fn((data: unknown) => data),
+    save: jest.fn(async (data: unknown) => data),
+  };
+  const youtubeScraperClientMock = { search: jest.fn() };
+  const quizSongReuseServiceMock = {
+    findReusableYoutubeInfo: jest.fn(),
+    copyReusableAnswers: jest.fn(),
+  };
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    songQueryBuilderMock.innerJoin.mockReturnValue(songQueryBuilderMock);
+    songQueryBuilderMock.where.mockReturnValue(songQueryBuilderMock);
+    songQueryBuilderMock.orderBy.mockReturnValue(songQueryBuilderMock);
+    artistRepositoryMock.findOne.mockResolvedValue({
+      atstId: 'atst-1',
+      atstNm: 'Artist1',
+    });
+    songQueryBuilderMock.getMany.mockResolvedValue([
+      { songId: 's1', songNm: 'Song A' },
+    ]);
+    youtubeScraperClientMock.search.mockResolvedValue({
+      videoId: 'vid-a',
+      durationSec: 200,
+    });
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        QuizGeneratorService,
+        { provide: YoutubeScraperClient, useValue: youtubeScraperClientMock },
+        { provide: getRepositoryToken(Artist), useValue: artistRepositoryMock },
+        { provide: getRepositoryToken(Song), useValue: songRepositoryMock },
+        { provide: getRepositoryToken(Quiz), useValue: quizRepositoryMock },
+        {
+          provide: getRepositoryToken(QuizSong),
+          useValue: quizSongRepositoryMock,
+        },
+        {
+          provide: QuizSongReuseService,
+          useValue: quizSongReuseServiceMock,
+        },
+      ],
+    }).compile();
+
+    service = module.get<QuizGeneratorService>(QuizGeneratorService);
+  });
+
+  it('아티스트를 찾을 수 없으면 404를 반환한다', async () => {
+    artistRepositoryMock.findOne.mockResolvedValueOnce(null);
+
+    await expect(service.generateQuiz('missing')).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+
+  it('SongArtist 조인으로 그 아티스트가 참여한 곡(대표 여부 무관)을 찾는다', async () => {
+    await service.generateQuiz('atst-1');
+
+    expect(songRepositoryMock.createQueryBuilder).toHaveBeenCalledWith('song');
+    expect(songQueryBuilderMock.innerJoin).toHaveBeenCalledWith(
+      'song.songArtists',
+      'songArtist',
+      'songArtist.atstId = :atstId',
+      { atstId: 'atst-1' },
+    );
+  });
+
+  it('유튜브 링크가 없는 곡이 없으면 400을 반환한다', async () => {
+    songQueryBuilderMock.getMany.mockResolvedValueOnce([]);
+
+    await expect(service.generateQuiz('atst-1')).rejects.toThrow(
+      BadRequestException,
+    );
   });
 });

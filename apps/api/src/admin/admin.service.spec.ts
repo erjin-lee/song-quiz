@@ -195,7 +195,10 @@ describe('AdminService', () => {
         {
           quizSongId: 'qs-1',
           youtubeUrl: 'https://www.youtube.com/watch?v=abc123&t=10',
-          song: { songNm: '바이, 썸머', artist: { atstNm: '아이유' } },
+          song: {
+            songNm: '바이, 썸머',
+            songArtists: [{ mainYn: 'Y', artist: { atstNm: '아이유' } }],
+          },
         },
       ]);
       inquiryActionRepositoryMock.find.mockResolvedValue([
@@ -212,7 +215,7 @@ describe('AdminService', () => {
 
       expect(quizSongRepositoryMock.find).toHaveBeenCalledWith({
         where: { quizSongId: expect.anything() },
-        relations: { song: { artist: true } },
+        relations: { song: { songArtists: { artist: true } } },
       });
       expect(inquiryActionRepositoryMock.find).toHaveBeenCalledWith({
         where: { inquiryId: In(['1']) },
