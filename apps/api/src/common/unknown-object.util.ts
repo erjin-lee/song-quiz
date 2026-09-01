@@ -16,6 +16,11 @@ export function asArray(obj: unknown, key: string): unknown[] | undefined {
   return Array.isArray(value) ? value : undefined;
 }
 
+export function asBoolean(obj: unknown, key: string): boolean | undefined {
+  const value = getField(obj, key);
+  return typeof value === 'boolean' ? value : undefined;
+}
+
 export function asRecord(
   obj: unknown,
   key: string,

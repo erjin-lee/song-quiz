@@ -4,6 +4,7 @@ import {
   InquirySongContext,
 } from './inquiry-gpt.client';
 import { OpenAiChatClient } from '../openai/openai-chat.client';
+import { YoutubeScraperClient } from '../quiz/youtube-scraper.client';
 
 describe('InquiryGptClient', () => {
   let client: InquiryGptClient;
@@ -20,11 +21,15 @@ describe('InquiryGptClient', () => {
   const openAiChatClientMock = {
     requestJson: jest.fn(),
   };
+  const youtubeScraperClientMock = {
+    getVideoInfo: jest.fn(),
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
     client = new InquiryGptClient(
       openAiChatClientMock as unknown as OpenAiChatClient,
+      youtubeScraperClientMock as unknown as YoutubeScraperClient,
     );
   });
 
@@ -197,6 +202,92 @@ describe('InquiryGptClient', () => {
           answerTxt: '너닿',
         }),
       ).rejects.toThrow(InquiryGptError);
+    });
+
+    describe('CHANGE_LINK - 웹 검색으로 새 링크에 접근하지 못했을 때(linkAccessible: false)', () => {
+      const newLinkArgs = { youtubeUrl: 'https://www.youtube.com/watch?v=new' };
+
+      it('우리가 스크래핑한 정보로 웹 검색 없이 재검증한다', async () => {
+        openAiChatClientMock.requestJson
+          .mockResolvedValueOnce(
+            JSON.stringify({
+              confidence: 'LOW',
+              reason: '웹에서 새 링크를 찾지 못함',
+              linkAccessible: false,
+            }),
+          )
+          .mockResolvedValueOnce(
+            JSON.stringify({ confidence: 'HIGH', reason: '제목이 일치함' }),
+          );
+        youtubeScraperClientMock.getVideoInfo.mockResolvedValue({
+          title: '아이유 - 너에게 닿기를',
+          durationSec: 210,
+        });
+
+        const result = await client.verifyConfidence(
+          'CHANGE_LINK',
+          song,
+          '링크가 잘못됐어요',
+          newLinkArgs,
+        );
+
+        expect(youtubeScraperClientMock.getVideoInfo).toHaveBeenCalledWith(
+          'new',
+          expect.stringContaining('qs1'),
+        );
+        expect(openAiChatClientMock.requestJson).toHaveBeenCalledTimes(2);
+        expect(openAiChatClientMock.requestJson).toHaveBeenLastCalledWith([
+          expect.objectContaining({ role: 'system' }),
+          expect.objectContaining({
+            role: 'user',
+            content: expect.stringContaining('아이유 - 너에게 닿기를'),
+          }),
+        ]);
+        expect(result).toEqual({ confidence: 'HIGH', reason: '제목이 일치함' });
+      });
+
+      it('스크래핑도 실패하면 재검증 없이 1차 결과를 그대로 반환한다', async () => {
+        openAiChatClientMock.requestJson.mockResolvedValueOnce(
+          JSON.stringify({
+            confidence: 'LOW',
+            reason: '웹에서 새 링크를 찾지 못함',
+            linkAccessible: false,
+          }),
+        );
+        youtubeScraperClientMock.getVideoInfo.mockRejectedValue(
+          new Error('유튜브 요청 실패'),
+        );
+
+        const result = await client.verifyConfidence(
+          'CHANGE_LINK',
+          song,
+          '링크가 잘못됐어요',
+          newLinkArgs,
+        );
+
+        expect(openAiChatClientMock.requestJson).toHaveBeenCalledTimes(1);
+        expect(result).toEqual({
+          confidence: 'LOW',
+          reason: '웹에서 새 링크를 찾지 못함',
+          linkAccessible: false,
+        });
+      });
+
+      it('linkAccessible이 false가 아니면(true/미포함) 재검증하지 않는다', async () => {
+        openAiChatClientMock.requestJson.mockResolvedValueOnce(
+          JSON.stringify({ confidence: 'HIGH', reason: '확인 완료' }),
+        );
+
+        await client.verifyConfidence(
+          'CHANGE_LINK',
+          song,
+          '링크가 잘못됐어요',
+          newLinkArgs,
+        );
+
+        expect(youtubeScraperClientMock.getVideoInfo).not.toHaveBeenCalled();
+        expect(openAiChatClientMock.requestJson).toHaveBeenCalledTimes(1);
+      });
     });
   });
 });

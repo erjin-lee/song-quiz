@@ -1,12 +1,20 @@
-import { Injectable } from '@nestjs/common';
-import { asRecord, asString, getField } from '../common/unknown-object.util';
+import { Injectable, Logger } from '@nestjs/common';
+import { YoutubeScraperClient } from '../quiz/youtube-scraper.client';
+import {
+  asBoolean,
+  asRecord,
+  asString,
+  getField,
+} from '../common/unknown-object.util';
 import {
   OpenAiChatClient,
   OpenAiChatMessage,
 } from '../openai/openai-chat.client';
 import {
+  buildChangeLinkFallbackUserMessage,
   buildClassifyUserMessage,
   buildVerifyUserMessage,
+  CHANGE_LINK_FALLBACK_SYSTEM_RULES,
   CLASSIFY_SYSTEM_RULES,
   VERIFY_SYSTEM_RULES,
 } from './inquiry-gpt.prompt';
@@ -15,6 +23,7 @@ import {
   InquiryConfidence,
   InquiryFunctionName,
 } from './inquiry.types';
+import { parseYoutubeUrl } from './youtube-url.util';
 
 const CONFIDENCE_VALUES: InquiryConfidence[] = ['LOW', 'MEDIUM', 'HIGH'];
 
@@ -38,6 +47,12 @@ export interface InquiryVerifyResult {
   confidence: InquiryConfidence;
   /** GPT가 밝힌 판단 근거. 프롬프트가 지켜지지 않아 응답에 없으면 빈 문자열로 폴백한다. */
   reason: string;
+  /**
+   * CHANGE_LINK 1차 검증(웹 검색)에서만 채워진다 - 웹 검색으로 새 링크의 실제 내용을
+   * 확인했는지 여부. false면 스크래핑 정보로 2차 검증을 시도한다. 그 외 함수/2차
+   * 검증 결과에는 없다(undefined).
+   */
+  linkAccessible?: boolean;
 }
 
 function parseClassifyResult(content: string): InquiryClassifyResult {
@@ -93,12 +108,22 @@ function parseVerifyResult(content: string): InquiryVerifyResult {
   }
 
   const reason = asString(parsed, 'reason');
-  return { confidence: confidence as InquiryConfidence, reason: reason ?? '' };
+  const linkAccessible = asBoolean(parsed, 'linkAccessible');
+  return {
+    confidence: confidence as InquiryConfidence,
+    reason: reason ?? '',
+    ...(linkAccessible !== undefined ? { linkAccessible } : {}),
+  };
 }
 
 @Injectable()
 export class InquiryGptClient {
-  constructor(private readonly openAiChatClient: OpenAiChatClient) {}
+  private readonly logger = new Logger(InquiryGptClient.name);
+
+  constructor(
+    private readonly openAiChatClient: OpenAiChatClient,
+    private readonly youtubeScraperClient: YoutubeScraperClient,
+  ) {}
 
   async classify(
     song: InquirySongContext,
@@ -126,12 +151,77 @@ export class InquiryGptClient {
     ];
     // CHANGE_LINK 검증 규칙은 기존/새 유튜브 링크를 실제로 확인하도록
     // 요구하므로, 이 경우에만 웹 검색 도구를 켠다.
-    const raw =
-      functionName === 'CHANGE_LINK'
-        ? await this.openAiChatClient.requestJson(messages, {
-            webSearch: true,
-          })
-        : await this.openAiChatClient.requestJson(messages);
+    if (functionName !== 'CHANGE_LINK') {
+      const raw = await this.openAiChatClient.requestJson(messages);
+      return parseVerifyResult(raw);
+    }
+
+    const raw = await this.openAiChatClient.requestJson(messages, {
+      webSearch: true,
+    });
+    const result = parseVerifyResult(raw);
+    if (result.linkAccessible !== false) {
+      return result;
+    }
+
+    // 웹 검색으로 새 링크에 접근하지 못했을 때만, 우리가 직접 스크래핑한 정보를
+    // 근거로 재판단한다(별도 웹 검색 재시도는 하지 않는다).
+    return this.verifyChangeLinkWithScrapedFallback(
+      song,
+      content,
+      args,
+      result,
+    );
+  }
+
+  private async verifyChangeLinkWithScrapedFallback(
+    song: InquirySongContext,
+    content: string,
+    args: Record<string, unknown>,
+    primaryResult: InquiryVerifyResult,
+  ): Promise<InquiryVerifyResult> {
+    const scraped = await this.scrapeNewLinkInfo(
+      String(args.youtubeUrl),
+      song.quizSongId,
+    );
+    if (!scraped) {
+      return primaryResult;
+    }
+
+    const raw = await this.openAiChatClient.requestJson([
+      { role: 'system', content: CHANGE_LINK_FALLBACK_SYSTEM_RULES },
+      {
+        role: 'user',
+        content: buildChangeLinkFallbackUserMessage(
+          song,
+          content,
+          args,
+          scraped,
+        ),
+      },
+    ]);
     return parseVerifyResult(raw);
+  }
+
+  private async scrapeNewLinkInfo(
+    youtubeUrl: string,
+    quizSongId: string,
+  ): Promise<{ title: string | null; durationSec: number | null } | null> {
+    const { videoId } = parseYoutubeUrl(youtubeUrl);
+    if (!videoId) {
+      return null;
+    }
+    try {
+      return await this.youtubeScraperClient.getVideoInfo(
+        videoId,
+        `quizSongId: ${quizSongId} (CHANGE_LINK 검증 폴백)`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `CHANGE_LINK 검증 폴백용 스크래핑 실패(quizSongId: ${quizSongId})`,
+        error,
+      );
+      return null;
+    }
   }
 }

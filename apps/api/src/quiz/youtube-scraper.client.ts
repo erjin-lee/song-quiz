@@ -10,6 +10,12 @@ const MAX_FETCH_ATTEMPTS = 4;
 const FETCH_RETRY_DELAY_MS = 1500;
 const FETCH_TIMEOUT_MS = 10_000;
 const LENGTH_SECONDS_PATTERN = /"lengthSeconds":"(\d+)"/;
+const OG_TITLE_PATTERN = /<meta property="og:title" content="([^"]*)"/;
+
+export interface YoutubeVideoInfo {
+  title: string | null;
+  durationSec: number | null;
+}
 
 export interface YoutubeSearchResult {
   videoId: string;
@@ -20,6 +26,15 @@ export class YoutubeFetchError extends Error {}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function unescapeHtml(text: string): string {
+  return text
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
 }
 
 function parseDurationText(text: string): number | null {
@@ -152,6 +167,35 @@ export class YoutubeScraperClient {
     }
     const seconds = Number(match[1]);
     return Number.isFinite(seconds) ? seconds : null;
+  }
+
+  /**
+   * 특정 videoId의 재생 페이지에서 제목과 재생 길이(초)를 함께 조회한다. GPT의
+   * 웹 검색 도구가 해당 링크에 접근하지 못했을 때, 대신 참고할 근거로 쓴다
+   * (inquiry-gpt.client.ts). 실패한 항목은 null.
+   */
+  async getVideoInfo(
+    videoId: string,
+    logContext?: string,
+  ): Promise<YoutubeVideoInfo> {
+    const html = await this.getHtml(
+      `${YOUTUBE_BASE_URL}/watch?v=${videoId}`,
+      logContext,
+    );
+
+    const titleMatch = html.match(OG_TITLE_PATTERN);
+    const title = titleMatch ? unescapeHtml(titleMatch[1]) : null;
+
+    const durationMatch = html.match(LENGTH_SECONDS_PATTERN);
+    const durationSec = durationMatch ? Number(durationMatch[1]) : null;
+
+    return {
+      title,
+      durationSec:
+        durationSec !== null && Number.isFinite(durationSec)
+          ? durationSec
+          : null,
+    };
   }
 
   private async getHtml(url: string, logContext?: string): Promise<string> {
