@@ -192,7 +192,7 @@ describe('InquiryActionService', () => {
       );
     });
 
-    it('t가 스크래핑된 영상 길이를 넘으면 영상 길이 안쪽으로 보정한다', async () => {
+    it('t가 스크래핑된 영상 길이를 넘으면 30초 클립이 전부 영상 안에 들어가도록 보정한다', async () => {
       youtubeScraperClientMock.getDurationSec.mockResolvedValue(100);
 
       await service.changeLink('qs1', {
@@ -201,9 +201,25 @@ describe('InquiryActionService', () => {
 
       expect(quizSongRepositoryMock.save).toHaveBeenCalledWith(
         expect.objectContaining({
-          youtubeUrl: 'https://www.youtube.com/watch?v=new&t=99',
-          startSec: 99,
-          endSec: 129,
+          youtubeUrl: 'https://www.youtube.com/watch?v=new&t=70',
+          startSec: 70,
+          endSec: 100,
+        }),
+      );
+    });
+
+    it('영상이 30초보다 짧으면 0부터 시작한다', async () => {
+      youtubeScraperClientMock.getDurationSec.mockResolvedValue(20);
+
+      await service.changeLink('qs1', {
+        youtubeUrl: 'https://www.youtube.com/watch?v=new&t=15',
+      });
+
+      expect(quizSongRepositoryMock.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          youtubeUrl: 'https://www.youtube.com/watch?v=new&t=0',
+          startSec: 0,
+          endSec: 30,
         }),
       );
     });
