@@ -15,7 +15,7 @@ import {
   ChangeStartTimeArgs,
   InquiryConfidence,
 } from './inquiry.types';
-import { parseYoutubeUrl } from './youtube-url.util';
+import { buildYoutubeWatchUrl, parseYoutubeUrl } from './youtube-url.util';
 
 const MAX_ANSWER_TYPE_LENGTH = 12;
 /** 시작 시간 변경/링크 교체 시 종료 시간을 맞추는 클립 길이(초). quiz-generator.service.ts의 QUIZ_SONG_CLIP_SEC과 동일하게 맞춘다. */
@@ -95,7 +95,11 @@ export class InquiryActionService {
       (durationSec !== null ? Math.round(durationSec / 2) : null) ??
       quizSong.startSec;
 
-    quizSong.youtubeUrl = args.youtubeUrl;
+    // 사용자가 제출한 원본 URL을 그대로 저장하지 않고, 검증된 videoId로 정규화한
+    // URL을 저장한다 - 그래야 실제로 스크래핑/재생에 쓰이는 videoId와 DB에 저장되는
+    // URL이 항상 일치한다(예: 같은 호스트라도 /results?v=x 같은 비영상 경로가 그대로
+    // 저장되는 것을 막는다).
+    quizSong.youtubeUrl = buildYoutubeWatchUrl(videoId, startSec);
     quizSong.youtubeVideoId = videoId;
     quizSong.durationSec = durationSec;
     quizSong.startSec = startSec;

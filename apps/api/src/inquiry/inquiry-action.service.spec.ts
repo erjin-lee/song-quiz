@@ -151,6 +151,31 @@ describe('InquiryActionService', () => {
       expect(quizSongRepositoryMock.save).not.toHaveBeenCalled();
     });
 
+    it('유튜브 호스트라도 /watch 경로가 아닌 링크(예: 검색결과/홈)는 저장하지 않고 거부한다', async () => {
+      await expect(
+        service.changeLink('qs1', {
+          youtubeUrl: 'https://www.youtube.com/results?v=abc123',
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(quizSongRepositoryMock.save).not.toHaveBeenCalled();
+    });
+
+    it('저장되는 youtubeUrl은 검증된 videoId/startSec으로 정규화한 URL이다(제출한 URL에 불필요한 파라미터가 섞여 있어도)', async () => {
+      youtubeScraperClientMock.getDurationSec.mockResolvedValue(180);
+
+      await service.changeLink('qs1', {
+        youtubeUrl:
+          'https://www.youtube.com/watch?v=new&t=50&list=PLxxxx&index=3',
+      });
+
+      expect(quizSongRepositoryMock.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          youtubeUrl: 'https://www.youtube.com/watch?v=new&t=50',
+        }),
+      );
+    });
+
     it('출제곡을 찾을 수 없으면 404를 반환한다', async () => {
       quizSongRepositoryMock.findOne.mockResolvedValueOnce(null);
 

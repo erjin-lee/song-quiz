@@ -1,4 +1,4 @@
-import { parseYoutubeUrl } from './youtube-url.util';
+import { buildYoutubeWatchUrl, parseYoutubeUrl } from './youtube-url.util';
 
 describe('parseYoutubeUrl', () => {
   it('watch URL에서 videoId와 t 파라미터(초)를 추출한다', () => {
@@ -62,5 +62,49 @@ describe('parseYoutubeUrl', () => {
       videoId: null,
       startSec: null,
     });
+  });
+
+  it('유튜브 호스트라도 /watch 경로가 아니면 v 파라미터가 있어도 videoId가 null이다', () => {
+    expect(parseYoutubeUrl('https://www.youtube.com/results?v=abc123')).toEqual(
+      { videoId: null, startSec: null },
+    );
+    expect(parseYoutubeUrl('https://www.youtube.com/?v=abc123')).toEqual({
+      videoId: null,
+      startSec: null,
+    });
+  });
+
+  it('youtu.be는 path segment가 하나가 아니면(추가 경로가 붙으면) videoId가 null이다', () => {
+    expect(parseYoutubeUrl('https://youtu.be/abc123/extra')).toEqual({
+      videoId: null,
+      startSec: null,
+    });
+    expect(parseYoutubeUrl('https://youtu.be/')).toEqual({
+      videoId: null,
+      startSec: null,
+    });
+  });
+});
+
+describe('buildYoutubeWatchUrl', () => {
+  it('videoId만으로 정규화된 watch URL을 만든다', () => {
+    expect(buildYoutubeWatchUrl('abc123')).toBe(
+      'https://www.youtube.com/watch?v=abc123',
+    );
+  });
+
+  it('startSec이 있으면 t 파라미터를 붙인다', () => {
+    expect(buildYoutubeWatchUrl('abc123', 45)).toBe(
+      'https://www.youtube.com/watch?v=abc123&t=45',
+    );
+  });
+
+  it('startSec이 null/undefined면 t 파라미터를 붙이지 않는다', () => {
+    expect(buildYoutubeWatchUrl('abc123', null)).toBe(
+      'https://www.youtube.com/watch?v=abc123',
+    );
+    expect(buildYoutubeWatchUrl('abc123')).toBe(
+      'https://www.youtube.com/watch?v=abc123',
+    );
   });
 });
