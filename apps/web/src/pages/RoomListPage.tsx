@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { AdBanner } from '../components/AdBanner';
 import { GameHelpModal } from '../components/GameHelpModal';
 import { Logo } from '../components/Logo';
+import { NotificationBell } from '../components/NotificationBell';
 import { RoomActionOverlay } from '../components/RoomActionOverlay';
 import { RoomCard } from '../components/RoomCard';
 import { useSession } from '../context/SessionContext';
@@ -198,94 +199,97 @@ export function RoomListPage() {
       <div className="mx-auto flex max-w-3xl flex-col gap-6">
         <header className="flex flex-wrap items-start justify-between gap-3">
           <Logo size="md" to="/rooms" />
-          <div className="flex flex-col items-end gap-1">
-            {editingNickname ? (
-              <form
-                onSubmit={handleNicknameSave}
-                className="flex items-center gap-1.5"
-              >
-                <input
-                  autoFocus
-                  value={nicknameDraft}
-                  onChange={(event) => setNicknameDraft(event.target.value)}
-                  maxLength={30}
-                  className="w-28 rounded-full border border-purple-200 bg-purple-50/60 px-3 py-1 text-xs text-slate-700 outline-none focus:border-purple-400"
-                />
-                <button
-                  type="submit"
-                  disabled={!nicknameDraft.trim()}
-                  className="rounded-full bg-purple-500 px-3 py-1 text-xs font-semibold text-white transition hover:bg-purple-600 disabled:bg-slate-200 disabled:text-slate-400"
+          <div className="flex items-start gap-2">
+            {isAuthenticated && <NotificationBell />}
+            <div className="flex flex-col items-end gap-1">
+              {editingNickname ? (
+                <form
+                  onSubmit={handleNicknameSave}
+                  className="flex items-center gap-1.5"
                 >
-                  저장
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEditingNickname(false)}
-                  className="text-xs text-slate-400 hover:text-slate-500"
-                >
-                  취소
-                </button>
-              </form>
-            ) : nickname && !isAuthenticated ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setNicknameDraft(nickname);
-                  setEditingNickname(true);
-                }}
-                title="클릭해서 닉네임 수정"
-                className="group flex items-center gap-1 text-sm font-medium text-slate-600 transition hover:text-purple-600"
-              >
-                <span className="underline decoration-dotted decoration-slate-300 underline-offset-2 group-hover:decoration-purple-400">
-                  {nickname}님 환영합니다
-                </span>
-                <span className="text-xs text-slate-300 transition group-hover:text-purple-400">
-                  ✏️
-                </span>
-              </button>
-            ) : nickname ? (
-              <span className="text-sm font-medium text-slate-600">
-                {nickname}님 환영합니다
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={() => navigate('/')}
-                className="text-sm text-slate-500 underline decoration-dotted underline-offset-2 hover:text-purple-500"
-              >
-                닉네임 등록하기
-              </button>
-            )}
-
-            <div className="flex items-center gap-2 text-xs text-slate-400">
-              <button
-                type="button"
-                onClick={() => setShowHelp(true)}
-                className="transition hover:text-purple-500"
-              >
-                게임 방법
-              </button>
-              {isAuthenticated && (
-                <>
-                  <span className="text-slate-200">·</span>
+                  <input
+                    autoFocus
+                    value={nicknameDraft}
+                    onChange={(event) => setNicknameDraft(event.target.value)}
+                    maxLength={30}
+                    className="w-28 rounded-full border border-purple-200 bg-purple-50/60 px-3 py-1 text-xs text-slate-700 outline-none focus:border-purple-400"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!nicknameDraft.trim()}
+                    className="rounded-full bg-purple-500 px-3 py-1 text-xs font-semibold text-white transition hover:bg-purple-600 disabled:bg-slate-200 disabled:text-slate-400"
+                  >
+                    저장
+                  </button>
                   <button
                     type="button"
-                    onClick={async () => {
-                      try {
-                        await logout();
-                        navigate('/');
-                      } catch {
-                        setListError(
-                          '로그아웃에 실패했습니다. 잠시 후 다시 시도해 주세요.',
-                        );
-                      }
-                    }}
-                    className="transition hover:text-purple-500"
+                    onClick={() => setEditingNickname(false)}
+                    className="text-xs text-slate-400 hover:text-slate-500"
                   >
-                    로그아웃
+                    취소
                   </button>
-                </>
+                </form>
+              ) : nickname && !isAuthenticated ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNicknameDraft(nickname);
+                    setEditingNickname(true);
+                  }}
+                  title="클릭해서 닉네임 수정"
+                  className="group flex items-center gap-1 text-sm font-medium text-slate-600 transition hover:text-purple-600"
+                >
+                  <span className="underline decoration-dotted decoration-slate-300 underline-offset-2 group-hover:decoration-purple-400">
+                    {nickname}님 환영합니다
+                  </span>
+                  <span className="text-xs text-slate-300 transition group-hover:text-purple-400">
+                    ✏️
+                  </span>
+                </button>
+              ) : nickname ? (
+                <span className="text-sm font-medium text-slate-600">
+                  {nickname}님 환영합니다
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => navigate('/')}
+                  className="text-sm text-slate-500 underline decoration-dotted underline-offset-2 hover:text-purple-500"
+                >
+                  닉네임 등록하기
+                </button>
               )}
+
+              <div className="flex items-center gap-2 text-xs text-slate-400">
+                <button
+                  type="button"
+                  onClick={() => setShowHelp(true)}
+                  className="transition hover:text-purple-500"
+                >
+                  게임 방법
+                </button>
+                {isAuthenticated && (
+                  <>
+                    <span className="text-slate-200">·</span>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await logout();
+                          navigate('/');
+                        } catch {
+                          setListError(
+                            '로그아웃에 실패했습니다. 잠시 후 다시 시도해 주세요.',
+                          );
+                        }
+                      }}
+                      className="transition hover:text-purple-500"
+                    >
+                      로그아웃
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         </header>
