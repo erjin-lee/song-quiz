@@ -84,6 +84,8 @@ yarn workspace api migration:generate src/migrations/<설명적인이름>
 yarn workspace api migration:run
 ```
 
+마이그레이션을 새로 추가하면 [`docs/db-changelog.md`](../../docs/db-changelog.md)에도 한 줄 추가한다(날짜/파일 링크/한 줄 설명/관련 기능 문서 링크).
+
 기타 명령:
 ```bash
 yarn workspace api migration:show      # 적용/미적용 마이그레이션 목록

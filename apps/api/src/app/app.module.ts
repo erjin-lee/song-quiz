@@ -15,6 +15,7 @@ import { ConfigModule } from '../config/config.module';
 import { InquiryModule } from '../inquiry/inquiry.module';
 import { AccessLogMiddleware } from '../logging/access-log.middleware';
 import { LoggingModule } from '../logging/logging.module';
+import { NotificationModule } from '../notification/notification.module';
 import { QuizModule } from '../quiz/quiz.module';
 import { ScraperModule } from '../scraper/scraper.module';
 import { SlackModule } from '../slack/slack.module';
@@ -37,6 +38,7 @@ import { UserModule } from '../user/user.module';
     ConfigModule,
     InquiryModule,
     LoggingModule,
+    NotificationModule,
     QuizModule,
     ScraperModule,
     SlackModule,
