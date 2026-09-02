@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { AlbumArtist } from '../quiz/entities/album-artist.entity';
 import { Artist } from '../quiz/entities/artist.entity';
 import { SongArtist } from '../quiz/entities/song-artist.entity';
@@ -26,16 +26,26 @@ export class ArtistLinkService {
     private readonly albumArtistRepository: Repository<AlbumArtist>,
   ) {}
 
-  async linkSongArtists(songId: string, artists: Artist[]): Promise<void> {
-    await this.songArtistRepository.manager.transaction(async (manager) => {
-      await manager.delete(SongArtist, { songId });
+  /**
+   * manager를 넘기면(이미 트랜잭션 안에서 호출하는 경우) 새 트랜잭션을 열지 않고
+   * 그 매니저를 그대로 써서, 호출자의 트랜잭션과 원자적으로 묶인다(예:
+   * melon-song-search.service.ts가 곡 저장 + 아티스트 연결을 한 트랜잭션으로
+   * 묶을 때). 안 넘기면 기존처럼 자체 트랜잭션을 연다.
+   */
+  async linkSongArtists(
+    songId: string,
+    artists: Artist[],
+    manager?: EntityManager,
+  ): Promise<void> {
+    const run = async (m: EntityManager) => {
+      await m.delete(SongArtist, { songId });
       if (artists.length === 0) {
         return;
       }
-      await manager.save(
+      await m.save(
         SongArtist,
         artists.map((artist, index) =>
-          manager.create(SongArtist, {
+          m.create(SongArtist, {
             songId,
             atstId: artist.atstId,
             atstSeq: index + 1,
@@ -43,19 +53,28 @@ export class ArtistLinkService {
           }),
         ),
       );
-    });
+    };
+    if (manager) {
+      await run(manager);
+    } else {
+      await this.songArtistRepository.manager.transaction(run);
+    }
   }
 
-  async linkAlbumArtists(albmId: string, artists: Artist[]): Promise<void> {
-    await this.albumArtistRepository.manager.transaction(async (manager) => {
-      await manager.delete(AlbumArtist, { albmId });
+  async linkAlbumArtists(
+    albmId: string,
+    artists: Artist[],
+    manager?: EntityManager,
+  ): Promise<void> {
+    const run = async (m: EntityManager) => {
+      await m.delete(AlbumArtist, { albmId });
       if (artists.length === 0) {
         return;
       }
-      await manager.save(
+      await m.save(
         AlbumArtist,
         artists.map((artist, index) =>
-          manager.create(AlbumArtist, {
+          m.create(AlbumArtist, {
             albmId,
             atstId: artist.atstId,
             atstSeq: index + 1,
@@ -63,6 +82,11 @@ export class ArtistLinkService {
           }),
         ),
       );
-    });
+    };
+    if (manager) {
+      await run(manager);
+    } else {
+      await this.albumArtistRepository.manager.transaction(run);
+    }
   }
 }

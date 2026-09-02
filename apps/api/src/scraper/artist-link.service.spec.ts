@@ -85,4 +85,23 @@ describe('ArtistLinkService', () => {
       { albmId: 'albm-1', atstId: 'atst-2', atstSeq: 2, mainYn: 'N' },
     ]);
   });
+
+  it('외부 manager를 넘기면 새 트랜잭션을 열지 않고 그 manager를 그대로 쓴다(호출자 트랜잭션과 원자적으로 묶기 위함)', async () => {
+    const externalManagerMock = {
+      delete: jest.fn(),
+      create: jest.fn((_entity, data) => data),
+      save: jest.fn(async (_entity, data) => data),
+    };
+
+    await service.linkSongArtists(
+      'song-1',
+      [artist1],
+      externalManagerMock as never,
+    );
+
+    expect(songArtistRepositoryMock.manager.transaction).not.toHaveBeenCalled();
+    expect(externalManagerMock.delete).toHaveBeenCalledWith(SongArtist, {
+      songId: 'song-1',
+    });
+  });
 });

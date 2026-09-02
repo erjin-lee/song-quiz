@@ -9,6 +9,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { NotificationService } from '../notification/notification.service';
 import { NotificationType } from '../notification/notification.constants';
+import { User } from '../user/entities/user.entity';
 import { UserService } from '../user/user.service';
 import { QuizAnswer } from './entities/quiz-answer.entity';
 import { QuizArtist } from './entities/quiz-artist.entity';
@@ -30,11 +31,6 @@ function makeSongInput(
   return {
     songId,
     youtubeUrl: `https://www.youtube.com/watch?v=v${songId}&t=10`,
-    youtubeVideoId: `v${songId}`,
-    linkSource: 'MANUAL' as const,
-    startSec: 10,
-    endSec: 40,
-    durationSec: 200,
     answers: [`정답${songId}`],
     ...overrides,
   };
@@ -43,30 +39,26 @@ function makeSongInput(
 describe('UserQuizRegistrationService', () => {
   let service: UserQuizRegistrationService;
 
+  // manager는 트랜잭션 콜백에 그대로 넘겨주는 값으로도, quizRepository.manager로
+  // 직접 쓰는 값(안전망 백그라운드 작업, getEligibility)으로도 재사용한다 -
+  // 실제 TypeORM에서도 트랜잭션 매니저는 같은 커넥션 위의 또 다른 EntityManager일 뿐이다.
+  const managerMock: Record<string, jest.Mock> = {
+    findOne: jest.fn(),
+    find: jest.fn(),
+    save: jest.fn(),
+    create: jest.fn((_entity, data) => data),
+    delete: jest.fn(),
+    update: jest.fn(),
+    createQueryBuilder: jest.fn(),
+  };
+  managerMock.transaction = jest.fn(async (cb: (m: unknown) => unknown) =>
+    cb(managerMock),
+  );
+
   const quizRepositoryMock = {
     findOne: jest.fn(),
-    create: jest.fn((d) => d),
     save: jest.fn(),
-  };
-  const quizSongRepositoryMock = {
-    create: jest.fn((d) => d),
-    save: jest.fn(),
-    delete: jest.fn(),
-    find: jest.fn(),
-  };
-  const quizAnswerRepositoryMock = {
-    create: jest.fn((d) => d),
-    save: jest.fn(),
-    delete: jest.fn(),
-  };
-  const quizArtistRepositoryMock = {
-    create: jest.fn((d) => d),
-    save: jest.fn(),
-    delete: jest.fn(),
-  };
-  const songRepositoryMock = {
-    findBy: jest.fn(),
-    createQueryBuilder: jest.fn(),
+    manager: managerMock,
   };
   const userServiceMock = { findUserKeyByUserId: jest.fn() };
   const youtubeLinkValidationServiceMock = { validate: jest.fn() };
@@ -80,38 +72,57 @@ describe('UserQuizRegistrationService', () => {
     return qb;
   }
 
+  let userLockResult: unknown = { userKey: 'user-key-1' };
+  let lastQuizResult: unknown = null;
+  let ownedQuizResult: unknown = null;
+  let songsFindResult: unknown[] = [];
+  let existingQuizSongIds: { quizSongId: string }[] = [];
+
   beforeEach(async () => {
     jest.clearAllMocks();
+
+    userLockResult = { userKey: 'user-key-1' };
+    lastQuizResult = null;
+    ownedQuizResult = null;
+    songsFindResult = [];
+    existingQuizSongIds = [];
+
     userServiceMock.findUserKeyByUserId.mockResolvedValue('user-key-1');
-    quizSongRepositoryMock.save.mockImplementation(async (data) => ({
-      quizSongId: `qs-${data.songId}`,
-      ...data,
-    }));
-    quizRepositoryMock.save.mockImplementation(async (data) => ({
-      quizId: 'quiz-1',
-      crtDt: new Date(),
-      ...data,
-    }));
-    songRepositoryMock.createQueryBuilder.mockReturnValue(makeQueryBuilder([]));
-    quizSongRepositoryMock.find.mockResolvedValue([]);
+
+    // findOne은 createQuiz(User 락 -> Quiz 최근 등록 조회)와 updateQuiz(Quiz
+    // 소유권 조회)에서 각각 다른 엔티티로 호출된다 - 첫 인자로 분기한다.
+    managerMock.findOne.mockImplementation((entity: unknown) => {
+      if (entity === User) return Promise.resolve(userLockResult);
+      if (entity === Quiz) {
+        return Promise.resolve(ownedQuizResult ?? lastQuizResult);
+      }
+      return Promise.resolve(null);
+    });
+    managerMock.find.mockImplementation((entity: unknown) => {
+      if (entity === Song) return Promise.resolve(songsFindResult);
+      if (entity === QuizSong) return Promise.resolve(existingQuizSongIds);
+      return Promise.resolve([]);
+    });
+    managerMock.save.mockImplementation((entity: unknown, data: unknown) => {
+      if (entity === Quiz) {
+        return Promise.resolve({
+          quizId: 'quiz-1',
+          crtDt: new Date(),
+          ...(data as object),
+        });
+      }
+      if (entity === QuizSong) {
+        const d = data as { songId: string };
+        return Promise.resolve({ quizSongId: `qs-${d.songId}`, ...d });
+      }
+      return Promise.resolve(data);
+    });
+    managerMock.createQueryBuilder.mockReturnValue(makeQueryBuilder([]));
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UserQuizRegistrationService,
         { provide: getRepositoryToken(Quiz), useValue: quizRepositoryMock },
-        {
-          provide: getRepositoryToken(QuizSong),
-          useValue: quizSongRepositoryMock,
-        },
-        {
-          provide: getRepositoryToken(QuizAnswer),
-          useValue: quizAnswerRepositoryMock,
-        },
-        {
-          provide: getRepositoryToken(QuizArtist),
-          useValue: quizArtistRepositoryMock,
-        },
-        { provide: getRepositoryToken(Song), useValue: songRepositoryMock },
         { provide: UserService, useValue: userServiceMock },
         {
           provide: YoutubeLinkValidationService,
@@ -128,7 +139,7 @@ describe('UserQuizRegistrationService', () => {
 
   describe('getEligibility', () => {
     it('이전에 등록한 퀴즈가 없으면 바로 등록 가능하다', async () => {
-      quizRepositoryMock.findOne.mockResolvedValue(null);
+      lastQuizResult = null;
 
       const result = await service.getEligibility('user-1');
 
@@ -136,9 +147,7 @@ describe('UserQuizRegistrationService', () => {
     });
 
     it('24시간이 지나지 않았으면 남은 시간을 반환한다', async () => {
-      quizRepositoryMock.findOne.mockResolvedValue({
-        crtDt: new Date(Date.now() - 60 * 60 * 1000), // 1시간 전
-      });
+      lastQuizResult = { crtDt: new Date(Date.now() - 60 * 60 * 1000) };
 
       const result = await service.getEligibility('user-1');
 
@@ -148,9 +157,7 @@ describe('UserQuizRegistrationService', () => {
     });
 
     it('24시간이 지났으면 다시 등록 가능하다', async () => {
-      quizRepositoryMock.findOne.mockResolvedValue({
-        crtDt: new Date(Date.now() - 25 * 60 * 60 * 1000),
-      });
+      lastQuizResult = { crtDt: new Date(Date.now() - 25 * 60 * 60 * 1000) };
 
       const result = await service.getEligibility('user-1');
 
@@ -175,15 +182,15 @@ describe('UserQuizRegistrationService', () => {
     };
 
     beforeEach(() => {
-      quizRepositoryMock.findOne.mockResolvedValue(null);
-      songRepositoryMock.findBy.mockResolvedValue(
-        baseDto.songs.map((s) => ({
-          songId: s.songId,
-          songNm: `곡${s.songId}`,
-        })),
-      );
+      songsFindResult = baseDto.songs.map((s) => ({
+        songId: s.songId,
+        songNm: `곡${s.songId}`,
+      }));
       youtubeLinkValidationServiceMock.validate.mockResolvedValue({
         valid: true,
+        durationSec: 200,
+        startSec: 10,
+        endSec: 40,
       });
     });
 
@@ -205,10 +212,16 @@ describe('UserQuizRegistrationService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('계정을 찾을 수 없으면 UnauthorizedException을 던진다', async () => {
+      userLockResult = null;
+
+      await expect(service.createQuiz('user-1', baseDto)).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
     it('24시간 제한에 걸리면 429를 던진다', async () => {
-      quizRepositoryMock.findOne.mockResolvedValue({
-        crtDt: new Date(Date.now() - 60 * 1000),
-      });
+      lastQuizResult = { crtDt: new Date(Date.now() - 60 * 1000) };
 
       await expect(service.createQuiz('user-1', baseDto)).rejects.toThrow(
         HttpException,
@@ -216,48 +229,64 @@ describe('UserQuizRegistrationService', () => {
     });
 
     it('존재하지 않는 곡이 포함되면 거부한다', async () => {
-      songRepositoryMock.findBy.mockResolvedValue(
-        baseDto.songs.slice(1).map((s) => ({ songId: s.songId, songNm: 'x' })),
-      );
+      songsFindResult = baseDto.songs
+        .slice(1)
+        .map((s) => ({ songId: s.songId, songNm: 'x' }));
 
       await expect(service.createQuiz('user-1', baseDto)).rejects.toThrow(
         NotFoundException,
       );
     });
 
+    it('유튜브 링크 형식이 올바르지 않은 곡이 있으면 거부한다', async () => {
+      await expect(
+        service.createQuiz('user-1', {
+          ...baseDto,
+          songs: [
+            makeSongInput('1', { youtubeUrl: 'not-a-youtube-url' }),
+            ...baseDto.songs.slice(1),
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('정상 요청이면 퀴즈/출제곡/정답을 저장하고 quizId를 반환한다', async () => {
       const result = await service.createQuiz('user-1', baseDto);
 
       expect(result).toEqual({ quizId: 'quiz-1' });
-      expect(quizRepositoryMock.save).toHaveBeenCalledWith(
+      expect(managerMock.save).toHaveBeenCalledWith(
+        Quiz,
         expect.objectContaining({
           quizTtl: '내 퀴즈',
           crtUserKey: 'user-key-1',
         }),
       );
-      expect(quizSongRepositoryMock.save).toHaveBeenCalledTimes(
-        MIN_USER_QUIZ_SONG_COUNT,
+      expect(managerMock.save).toHaveBeenCalledWith(
+        QuizSong,
+        expect.anything(),
       );
-      expect(quizAnswerRepositoryMock.save).toHaveBeenCalledTimes(
-        MIN_USER_QUIZ_SONG_COUNT,
-      );
+      expect(
+        managerMock.save.mock.calls.filter(([entity]) => entity === QuizSong)
+          .length,
+      ).toBe(MIN_USER_QUIZ_SONG_COUNT);
     });
 
-    it('저장 값은 클라이언트가 보낸 원본이 아니라 videoId로 재구성한 URL이다', async () => {
+    it('저장 값은 클라이언트가 보낸 원본이 아니라 videoId로 재구성한 URL/영상 ID를 쓴다', async () => {
       await service.createQuiz('user-1', {
         ...baseDto,
         songs: [
           makeSongInput('1', {
             youtubeUrl:
-              'https://www.youtube.com/watch?v=hacked&t=999&extra=evil',
-            youtubeVideoId: 'hacked',
+              'https://www.youtube.com/watch?v=realvid&t=5&extra=evil',
           }),
           ...baseDto.songs.slice(1),
         ],
       });
 
-      expect(quizSongRepositoryMock.save).toHaveBeenCalledWith(
+      expect(managerMock.save).toHaveBeenCalledWith(
+        QuizSong,
         expect.objectContaining({
+          youtubeVideoId: 'realvid',
           youtubeUrl: expect.not.stringContaining('extra=evil'),
         }),
       );
@@ -283,12 +312,20 @@ describe('UserQuizRegistrationService', () => {
           valid: false,
           reason: '영상을 찾을 수 없습니다.',
         })
-        .mockResolvedValue({ valid: true });
+        .mockResolvedValue({
+          valid: true,
+          durationSec: 200,
+          startSec: 10,
+          endSec: 40,
+        });
 
       await service.createQuiz('user-1', baseDto);
       await flushMicrotasks();
 
-      expect(quizSongRepositoryMock.delete).toHaveBeenCalledTimes(1);
+      expect(
+        managerMock.delete.mock.calls.filter(([entity]) => entity === QuizSong)
+          .length,
+      ).toBe(1);
       expect(notificationServiceMock.create).toHaveBeenCalledWith(
         expect.objectContaining({
           title: expect.stringContaining('1곡 제외'),
@@ -297,21 +334,19 @@ describe('UserQuizRegistrationService', () => {
       );
     });
 
-    it('자동 등록 링크는 안전망에서 제목 매칭을 건너뛴다', async () => {
-      await service.createQuiz('user-1', {
-        ...baseDto,
-        songs: [
-          makeSongInput('1', { linkSource: 'AUTO' }),
-          ...baseDto.songs.slice(1),
-        ],
-      });
+    it('안전망 재검증은 항상 콘텐츠(제목) 검증까지 수행한다(클라이언트가 우회할 수 없음)', async () => {
+      await service.createQuiz('user-1', baseDto);
       await flushMicrotasks();
 
       expect(youtubeLinkValidationServiceMock.validate).toHaveBeenCalledWith(
         expect.any(String),
         expect.any(String),
-        { skipContentCheck: true },
       );
+      // 두 번째 인자(옵션) 없이 항상 같은 시그니처로 호출되는지 확인 - 과거에는
+      // 세 번째 인자로 skipContentCheck를 넘겨 콘텐츠 검증을 건너뛸 수 있었다.
+      expect(
+        youtubeLinkValidationServiceMock.validate.mock.calls[0],
+      ).toHaveLength(2);
     });
   });
 
@@ -324,21 +359,21 @@ describe('UserQuizRegistrationService', () => {
     };
 
     beforeEach(() => {
-      songRepositoryMock.findBy.mockResolvedValue(
-        dto.songs.map((s) => ({ songId: s.songId, songNm: `곡${s.songId}` })),
-      );
-      quizRepositoryMock.findOne.mockResolvedValue({
-        quizId: 'quiz-1',
-        crtUserKey: 'user-key-1',
+      songsFindResult = dto.songs.map((s) => ({
+        songId: s.songId,
+        songNm: `곡${s.songId}`,
+      }));
+      ownedQuizResult = { quizId: 'quiz-1', crtUserKey: 'user-key-1' };
+      youtubeLinkValidationServiceMock.validate.mockResolvedValue({
+        valid: true,
+        durationSec: 200,
+        startSec: 10,
+        endSec: 40,
       });
-      quizRepositoryMock.save.mockImplementation(async (d) => d);
     });
 
     it('본인 소유 퀴즈가 아니면 ForbiddenException을 던진다', async () => {
-      quizRepositoryMock.findOne.mockResolvedValue({
-        quizId: 'quiz-1',
-        crtUserKey: 'other-user',
-      });
+      ownedQuizResult = { quizId: 'quiz-1', crtUserKey: 'other-user' };
 
       await expect(service.updateQuiz('user-1', 'quiz-1', dto)).rejects.toThrow(
         ForbiddenException,
@@ -346,7 +381,8 @@ describe('UserQuizRegistrationService', () => {
     });
 
     it('존재하지 않는 퀴즈면 NotFoundException을 던진다', async () => {
-      quizRepositoryMock.findOne.mockResolvedValue(null);
+      ownedQuizResult = undefined;
+      lastQuizResult = null;
 
       await expect(service.updateQuiz('user-1', 'quiz-1', dto)).rejects.toThrow(
         NotFoundException,
@@ -354,25 +390,24 @@ describe('UserQuizRegistrationService', () => {
     });
 
     it('기존 출제곡/정답/아티스트 연결을 지우고 새로 저장한다', async () => {
-      quizSongRepositoryMock.find.mockResolvedValue([
-        { quizSongId: 'old-1' },
-        { quizSongId: 'old-2' },
-      ]);
+      existingQuizSongIds = [{ quizSongId: 'old-1' }, { quizSongId: 'old-2' }];
 
       const result = await service.updateQuiz('user-1', 'quiz-1', dto);
 
-      expect(quizAnswerRepositoryMock.delete).toHaveBeenCalledWith({
-        quizSongId: expect.anything(),
-      });
-      expect(quizSongRepositoryMock.delete).toHaveBeenCalledWith({
-        quizId: 'quiz-1',
-      });
-      expect(quizArtistRepositoryMock.delete).toHaveBeenCalledWith({
-        quizId: 'quiz-1',
-      });
-      expect(quizSongRepositoryMock.save).toHaveBeenCalledTimes(
-        MIN_USER_QUIZ_SONG_COUNT,
+      expect(managerMock.delete).toHaveBeenCalledWith(
+        QuizAnswer,
+        expect.anything(),
       );
+      expect(managerMock.delete).toHaveBeenCalledWith(QuizSong, {
+        quizId: 'quiz-1',
+      });
+      expect(managerMock.delete).toHaveBeenCalledWith(QuizArtist, {
+        quizId: 'quiz-1',
+      });
+      expect(
+        managerMock.save.mock.calls.filter(([entity]) => entity === QuizSong)
+          .length,
+      ).toBe(MIN_USER_QUIZ_SONG_COUNT);
       expect(result).toEqual({ quizId: 'quiz-1' });
     });
 

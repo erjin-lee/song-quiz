@@ -9,17 +9,18 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
-import {
-  NotificationService,
-  CreateNotificationParams,
-} from '../notification/notification.service';
-import { NotificationType } from '../notification/notification.constants';
-import { UserService } from '../user/user.service';
+import { EntityManager, In, Repository } from 'typeorm';
 import {
   buildYoutubeWatchUrl,
   parseYoutubeUrl,
 } from '../common/youtube-url.util';
+import {
+  CreateNotificationParams,
+  NotificationService,
+} from '../notification/notification.service';
+import { NotificationType } from '../notification/notification.constants';
+import { User } from '../user/entities/user.entity';
+import { UserService } from '../user/user.service';
 import { CreateQuizRequestDto } from './dto/create-quiz-request.dto';
 import { CreateQuizResultDto } from './dto/create-quiz-result.dto';
 import { CreateQuizSongInputDto } from './dto/create-quiz-song-input.dto';
@@ -40,11 +41,19 @@ interface ExcludedSongInfo {
   reason: string;
 }
 
+/** 기존 자동 생성 플로우(quiz-generator.service.ts)와 동일한 클립 길이. */
+const QUIZ_SONG_CLIP_SEC = 30;
+
 /**
  * 로그인 유저의 퀴즈 등록(docs/features/user-quiz-registration/spec.md 3.3, 3.7,
  * 3.8). POST /quizzes는 이미 곡별 즉시 검증(youtube-link-validation.service.ts)을
  * 통과한 데이터로 곧바로 퀴즈를 만들고 응답한 뒤, 안전망 재검증은 응답 후
  * 백그라운드에서 진행한다.
+ *
+ * 생성/수정은 전부 트랜잭션 안에서 처리하고, 등록 유저(SQ_USER) 행에 비관적
+ * 락을 걸어 24시간 등록 제한 확인과 퀴즈 생성 사이에 동시 요청이 끼어들 수
+ * 없게 한다(코드 리뷰에서 지적된 두 문제 - 부분 실패 시 데이터 유실, 여러 탭
+ * 동시 등록으로 제한 우회 - 를 함께 해결한다).
  */
 @Injectable()
 export class UserQuizRegistrationService {
@@ -53,14 +62,6 @@ export class UserQuizRegistrationService {
   constructor(
     @InjectRepository(Quiz)
     private readonly quizRepository: Repository<Quiz>,
-    @InjectRepository(QuizSong)
-    private readonly quizSongRepository: Repository<QuizSong>,
-    @InjectRepository(QuizAnswer)
-    private readonly quizAnswerRepository: Repository<QuizAnswer>,
-    @InjectRepository(QuizArtist)
-    private readonly quizArtistRepository: Repository<QuizArtist>,
-    @InjectRepository(Song)
-    private readonly songRepository: Repository<Song>,
     private readonly userService: UserService,
     private readonly youtubeLinkValidationService: YoutubeLinkValidationService,
     private readonly notificationService: NotificationService,
@@ -68,7 +69,7 @@ export class UserQuizRegistrationService {
 
   async getEligibility(userId: string): Promise<RegistrationEligibilityDto> {
     const userKey = await this.resolveUserKey(userId);
-    return this.computeEligibility(userKey);
+    return this.computeEligibility(this.quizRepository.manager, userKey);
   }
 
   async createQuiz(
@@ -78,41 +79,62 @@ export class UserQuizRegistrationService {
     const userKey = await this.resolveUserKey(userId);
     this.validateSongsInput(dto.songs);
 
-    const eligibility = await this.computeEligibility(userKey);
-    if (!eligibility.eligible) {
-      throw new HttpException(
-        {
-          message: `아직 등록할 수 없습니다. ${Math.ceil(eligibility.remainingSeconds / 60)}분 후 다시 시도해주세요.`,
-          remainingSeconds: eligibility.remainingSeconds,
-        },
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
+    const { quiz, quizSongs, songById } =
+      await this.quizRepository.manager.transaction(async (manager) => {
+        // 이 유저 행을 잠가서, 같은 유저가 동시에 두 번 요청해도 뒤 트랜잭션은
+        // 앞 트랜잭션이 커밋될 때까지 기다린 뒤에야 아래 등록 가능 여부를 본다.
+        const lockedUser = await manager.findOne(User, {
+          where: { userKey },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!lockedUser) {
+          throw new UnauthorizedException('유효한 계정을 찾을 수 없습니다.');
+        }
 
-    const songById = await this.resolveSongsOrThrow(
-      dto.songs.map((song) => song.songId),
-    );
+        const eligibility = await this.computeEligibility(manager, userKey);
+        if (!eligibility.eligible) {
+          throw new HttpException(
+            {
+              message: `아직 등록할 수 없습니다. ${Math.ceil(eligibility.remainingSeconds / 60)}분 후 다시 시도해주세요.`,
+              remainingSeconds: eligibility.remainingSeconds,
+            },
+            HttpStatus.TOO_MANY_REQUESTS,
+          );
+        }
 
-    const quiz = await this.quizRepository.save(
-      this.quizRepository.create({
-        quizTtl: dto.quizTtl,
-        quizDesc: dto.quizDesc ?? null,
-        crtUserKey: userKey,
-      }),
-    );
+        const songById = await this.resolveSongsOrThrow(
+          manager,
+          dto.songs.map((song) => song.songId),
+        );
 
-    const quizSongs = await this.saveQuizSongsAndAnswers(
-      quiz.quizId,
-      dto.songs,
-    );
-    await this.populateQuizArtists(quiz.quizId, Array.from(songById.values()));
+        const quiz = await manager.save(
+          Quiz,
+          manager.create(Quiz, {
+            quizTtl: dto.quizTtl,
+            quizDesc: dto.quizDesc ?? null,
+            crtUserKey: userKey,
+          }),
+        );
 
-    // 응답을 기다리게 하지 않고 안전망 재검증은 백그라운드에서 진행한다.
+        const quizSongs = await this.saveQuizSongsAndAnswers(
+          manager,
+          quiz.quizId,
+          dto.songs,
+        );
+        await this.populateQuizArtists(
+          manager,
+          quiz.quizId,
+          Array.from(songById.values()),
+        );
+
+        return { quiz, quizSongs, songById };
+      });
+
+    // 응답을 기다리게 하지 않고 안전망 재검증은 커밋이 끝난 뒤 백그라운드에서 진행한다.
     void this.runBackgroundSafetyNet(
       quiz.quizId,
       userKey,
       dto.quizTtl,
-      dto.songs,
       quizSongs,
       songById,
     );
@@ -126,42 +148,70 @@ export class UserQuizRegistrationService {
     dto: CreateQuizRequestDto,
   ): Promise<CreateQuizResultDto> {
     const userKey = await this.resolveUserKey(userId);
-    const quiz = await this.getOwnedQuizOrThrow(quizId, userKey);
     this.validateSongsInput(dto.songs);
 
-    const songById = await this.resolveSongsOrThrow(
-      dto.songs.map((song) => song.songId),
-    );
+    const { quizSongs, songById } =
+      await this.quizRepository.manager.transaction(async (manager) => {
+        const quiz = await manager.findOne(Quiz, {
+          where: { quizId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!quiz) {
+          throw new NotFoundException(
+            `퀴즈를 찾을 수 없습니다. (quizId: ${quizId})`,
+          );
+        }
+        if (quiz.crtUserKey !== userKey) {
+          throw new ForbiddenException(
+            '본인이 등록한 퀴즈만 수정/삭제할 수 있습니다.',
+          );
+        }
 
-    quiz.quizTtl = dto.quizTtl;
-    quiz.quizDesc = dto.quizDesc ?? null;
-    await this.quizRepository.save(quiz);
+        const songById = await this.resolveSongsOrThrow(
+          manager,
+          dto.songs.map((song) => song.songId),
+        );
 
-    // 기존 출제곡/정답/아티스트 연결을 전부 지우고 새 목록으로 다시 만든다 -
-    // 클라이언트가 계산한 최종 리스트를 그대로 반영하는 게 스펙 의도라, 부분
-    // upsert로 곡 순서·추가/삭제를 각각 맞추는 것보다 이 편이 훨씬 단순하다.
-    const existingQuizSongIds = (
-      await this.quizSongRepository.find({
-        where: { quizId },
-        select: { quizSongId: true },
-      })
-    ).map((quizSong) => quizSong.quizSongId);
-    if (existingQuizSongIds.length > 0) {
-      await this.quizAnswerRepository.delete({
-        quizSongId: In(existingQuizSongIds),
+        quiz.quizTtl = dto.quizTtl;
+        quiz.quizDesc = dto.quizDesc ?? null;
+        await manager.save(Quiz, quiz);
+
+        // 기존 출제곡/정답/아티스트 연결을 전부 지우고 새 목록으로 다시 만든다 -
+        // 클라이언트가 계산한 최종 리스트를 그대로 반영하는 게 스펙 의도라, 부분
+        // upsert로 곡 순서·추가/삭제를 각각 맞추는 것보다 이 편이 훨씬 단순하다.
+        // 트랜잭션 하나로 묶여 있어 중간에 실패해도 기존 구성이 사라지지 않는다.
+        const existingQuizSongIds = (
+          await manager.find(QuizSong, {
+            where: { quizId },
+            select: { quizSongId: true },
+          })
+        ).map((quizSong) => quizSong.quizSongId);
+        if (existingQuizSongIds.length > 0) {
+          await manager.delete(QuizAnswer, {
+            quizSongId: In(existingQuizSongIds),
+          });
+        }
+        await manager.delete(QuizSong, { quizId });
+        await manager.delete(QuizArtist, { quizId });
+
+        const quizSongs = await this.saveQuizSongsAndAnswers(
+          manager,
+          quizId,
+          dto.songs,
+        );
+        await this.populateQuizArtists(
+          manager,
+          quizId,
+          Array.from(songById.values()),
+        );
+
+        return { quizSongs, songById };
       });
-    }
-    await this.quizSongRepository.delete({ quizId });
-    await this.quizArtistRepository.delete({ quizId });
-
-    const quizSongs = await this.saveQuizSongsAndAnswers(quizId, dto.songs);
-    await this.populateQuizArtists(quizId, Array.from(songById.values()));
 
     void this.runBackgroundSafetyNet(
       quizId,
       userKey,
       dto.quizTtl,
-      dto.songs,
       quizSongs,
       songById,
     );
@@ -171,15 +221,6 @@ export class UserQuizRegistrationService {
 
   async deleteQuiz(userId: string, quizId: string): Promise<void> {
     const userKey = await this.resolveUserKey(userId);
-    const quiz = await this.getOwnedQuizOrThrow(quizId, userKey);
-    quiz.useYn = 'N';
-    await this.quizRepository.save(quiz);
-  }
-
-  private async getOwnedQuizOrThrow(
-    quizId: string,
-    userKey: string,
-  ): Promise<Quiz> {
     const quiz = await this.quizRepository.findOne({ where: { quizId } });
     if (!quiz) {
       throw new NotFoundException(
@@ -191,7 +232,8 @@ export class UserQuizRegistrationService {
         '본인이 등록한 퀴즈만 수정/삭제할 수 있습니다.',
       );
     }
-    return quiz;
+    quiz.useYn = 'N';
+    await this.quizRepository.save(quiz);
   }
 
   private validateSongsInput(songs: CreateQuizSongInputDto[]): void {
@@ -207,46 +249,63 @@ export class UserQuizRegistrationService {
   }
 
   private async resolveSongsOrThrow(
+    manager: EntityManager,
     songIds: string[],
   ): Promise<Map<string, Song>> {
-    const songs = await this.songRepository.findBy({ songId: In(songIds) });
+    const songs = await manager.find(Song, { where: { songId: In(songIds) } });
     if (songs.length !== songIds.length) {
       throw new NotFoundException('존재하지 않는 곡이 포함되어 있습니다.');
     }
     return new Map(songs.map((song) => [song.songId, song]));
   }
 
+  /**
+   * videoId/재생 구간/영상 길이는 전부 서버가 youtubeUrl을 다시 파싱해서 계산한
+   * 값만 저장한다(ADR-0009) - 클라이언트가 URL과 별개로 videoId나 구간을 보낼
+   * 수 있게 하면, 곡 제목과 일치하는 URL로 즉시 검증은 통과시키고 실제로는
+   * 전혀 다른 영상 ID를 등록하는 우회가 가능해진다(퀴즈 재생 화면은 videoId를
+   * 그대로 쓴다 - quiz.service.ts getQuizSongs).
+   */
   private async saveQuizSongsAndAnswers(
+    manager: EntityManager,
     quizId: string,
     songs: CreateQuizSongInputDto[],
   ): Promise<QuizSong[]> {
     const quizSongs: QuizSong[] = [];
     let quizSeq = 1;
     for (const songInput of songs) {
-      // 저장 값은 항상 videoId에서 다시 만든 URL을 쓴다(ADR-0009) - 클라이언트가
-      // 보낸 문자열을 그대로 믿지 않는다.
-      const { videoId } = parseYoutubeUrl(songInput.youtubeUrl);
-      const normalizedUrl = videoId
-        ? buildYoutubeWatchUrl(videoId, songInput.startSec)
-        : songInput.youtubeUrl;
+      const { videoId, startSec: parsedStartSec } = parseYoutubeUrl(
+        songInput.youtubeUrl,
+      );
+      if (!videoId) {
+        throw new BadRequestException(
+          `유튜브 링크 형식이 올바르지 않은 곡이 있습니다. (songId: ${songInput.songId})`,
+        );
+      }
+      const startSec = parsedStartSec ?? 0;
+      const endSec = startSec + QUIZ_SONG_CLIP_SEC;
 
-      const quizSong = await this.quizSongRepository.save(
-        this.quizSongRepository.create({
+      const quizSong = await manager.save(
+        QuizSong,
+        manager.create(QuizSong, {
           quizId,
           songId: songInput.songId,
           quizSeq: quizSeq++,
-          youtubeUrl: normalizedUrl,
-          youtubeVideoId: songInput.youtubeVideoId,
-          durationSec: songInput.durationSec ?? null,
-          startSec: songInput.startSec,
-          endSec: songInput.endSec,
+          youtubeUrl: buildYoutubeWatchUrl(videoId, startSec),
+          youtubeVideoId: videoId,
+          durationSec: null,
+          startSec,
+          endSec,
         }),
       );
       quizSongs.push(quizSong);
 
-      await this.quizAnswerRepository.save(
-        songInput.answers.map((answerTxt) =>
-          this.quizAnswerRepository.create({
+      // 같은 곡에 중복 정답을 보내도 유니크 제약과 충돌하지 않도록 dedupe한다.
+      const uniqueAnswers = Array.from(new Set(songInput.answers));
+      await manager.save(
+        QuizAnswer,
+        uniqueAnswers.map((answerTxt) =>
+          manager.create(QuizAnswer, {
             quizSongId: quizSong.quizSongId,
             answerTxt,
           }),
@@ -257,11 +316,17 @@ export class UserQuizRegistrationService {
   }
 
   private async computeEligibility(
+    manager: EntityManager,
     userKey: string,
   ): Promise<RegistrationEligibilityDto> {
-    const lastQuiz = await this.quizRepository.findOne({
+    // pessimistic_read: 이 유저 행의 락(위 createQuiz)으로 동시 요청은 이미
+    // 직렬화됐지만, 일반 조회는 InnoDB REPEATABLE READ 스냅샷 때문에 방금
+    // 커밋된 다른 트랜잭션의 결과를 못 볼 수 있다 - 락 조회는 항상 최신
+    // 커밋본을 읽으므로 이 스냅샷 문제를 피한다.
+    const lastQuiz = await manager.findOne(Quiz, {
       where: { crtUserKey: userKey },
       order: { crtDt: 'DESC' },
+      lock: { mode: 'pessimistic_read' },
     });
     if (!lastQuiz) {
       return { eligible: true, remainingSeconds: 0 };
@@ -279,14 +344,15 @@ export class UserQuizRegistrationService {
   }
 
   private async populateQuizArtists(
+    manager: EntityManager,
     quizId: string,
     songs: Song[],
   ): Promise<void> {
     if (songs.length === 0) {
       return;
     }
-    const songsWithMainArtist = await this.songRepository
-      .createQueryBuilder('song')
+    const songsWithMainArtist = await manager
+      .createQueryBuilder(Song, 'song')
       .innerJoinAndSelect(
         'song.songArtists',
         'songArtist',
@@ -307,9 +373,10 @@ export class UserQuizRegistrationService {
       return;
     }
 
-    await this.quizArtistRepository.save(
+    await manager.save(
+      QuizArtist,
       Array.from(atstIds).map((atstId) =>
-        this.quizArtistRepository.create({ quizId, atstId }),
+        manager.create(QuizArtist, { quizId, atstId }),
       ),
     );
   }
@@ -318,25 +385,20 @@ export class UserQuizRegistrationService {
     quizId: string,
     userKey: string,
     quizTtl: string,
-    songInputs: CreateQuizRequestDto['songs'],
     quizSongs: QuizSong[],
     songById: Map<string, Song>,
   ): Promise<void> {
     try {
       const excluded: ExcludedSongInfo[] = [];
 
-      for (let i = 0; i < quizSongs.length; i++) {
-        const quizSong = quizSongs[i];
-        const songInput = songInputs[i];
+      for (const quizSong of quizSongs) {
         const song = songById.get(quizSong.songId);
         if (!song) {
           continue;
         }
 
         const result = await this.youtubeLinkValidationService
-          .validate(quizSong.youtubeUrl, song.songNm, {
-            skipContentCheck: songInput.linkSource === 'AUTO',
-          })
+          .validate(quizSong.youtubeUrl, song.songNm)
           .catch((error) => {
             this.logger.warn(
               `안전망 재검증 실패(quizSongId: ${quizSong.quizSongId})`,
@@ -350,12 +412,24 @@ export class UserQuizRegistrationService {
             songNm: song.songNm,
             reason: result?.reason ?? '링크를 확인할 수 없습니다.',
           });
-          await this.quizAnswerRepository.delete({
+          await this.quizRepository.manager.delete(QuizAnswer, {
             quizSongId: quizSong.quizSongId,
           });
-          await this.quizSongRepository.delete({
+          await this.quizRepository.manager.delete(QuizSong, {
             quizSongId: quizSong.quizSongId,
           });
+        } else {
+          // 검증 시점에 다시 계산한 재생 구간/길이로 갱신한다(제출 시점 값은
+          // 사용자가 URL의 t= 파라미터로 넣은 값이라 최적이 아닐 수 있다).
+          await this.quizRepository.manager.update(
+            QuizSong,
+            { quizSongId: quizSong.quizSongId },
+            {
+              durationSec: result.durationSec,
+              startSec: result.startSec ?? quizSong.startSec,
+              endSec: result.endSec ?? quizSong.endSec,
+            },
+          );
         }
       }
 

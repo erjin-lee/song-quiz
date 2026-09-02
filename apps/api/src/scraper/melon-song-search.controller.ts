@@ -32,14 +32,16 @@ export class MelonSongSearchController {
 
   @Post('songs/from-melon')
   @ApiOperation({
-    summary: '검색 결과 선택 시 곡/아티스트/앨범을 멱등하게 저장',
+    summary:
+      '검색 결과 선택 시 곡/아티스트/앨범을 멱등하게 저장(검색 시 캐시해둔 데이터만 신뢰)',
   })
   @ApiOkResponse({ type: RegisteredSongDto })
   async registerFromMelon(
     @Body() dto: RegisterSongFromMelonRequestDto,
   ): Promise<RegisteredSongDto> {
-    const song =
-      await this.melonSongSearchService.registerFromSearchResult(dto);
+    const song = await this.melonSongSearchService.registerFromMelonSongId(
+      dto.melonSongId,
+    );
     return { songId: song.songId, songNm: song.songNm, ytbLink: song.ytbLink };
   }
 }

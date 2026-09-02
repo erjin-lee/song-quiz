@@ -49,13 +49,16 @@ export class YoutubeLinkValidationService {
   constructor(private readonly youtubeScraperClient: YoutubeScraperClient) {}
 
   /**
-   * skipContentCheck: 자동 검색(아티스트+곡명 기준이라 신뢰도가 높음)으로 채운
-   * 링크는 제목 매칭을 건너뛰고 형식/가용성만 확인한다(스펙 3.3 자동 등록 버튼 항목).
+   * 항상 형식(ADR-0009)과 콘텐츠(영상 제목-곡 제목 대조)를 모두 검증한다.
+   * "자동 검색 결과라 신뢰도가 높으니 콘텐츠 검증을 건너뛴다"는 예외를 예전에
+   * 클라이언트가 보내는 플래그로 판단한 적이 있었는데, 그 플래그 자체가
+   * 클라이언트 입력이라 임의로 콘텐츠 검증을 우회하는 데 악용될 수 있었다
+   * (자동 검색 자체는 UserSongService.autoFillYoutubeLink가 서버에서 직접
+   * 수행하므로 이 서비스를 거치지 않는다 - 안전망은 항상 엄격하게 재검증한다).
    */
   async validate(
     rawUrl: string,
     songNm: string,
-    options?: { skipContentCheck?: boolean },
   ): Promise<YoutubeLinkValidationResult> {
     const { videoId, startSec: requestedStartSec } = parseYoutubeUrl(rawUrl);
     if (!videoId) {
@@ -78,20 +81,16 @@ export class YoutubeLinkValidationService {
       );
     }
 
-    if (!options?.skipContentCheck) {
-      const comparableSongTitle = toComparableText(
-        stripFeatAnnotations(songNm),
+    const comparableSongTitle = toComparableText(stripFeatAnnotations(songNm));
+    const comparableVideoTitle = toComparableText(videoInfo.title);
+    if (
+      !comparableSongTitle ||
+      !comparableVideoTitle.includes(comparableSongTitle)
+    ) {
+      return invalid(
+        '영상 제목에 곡 제목이 포함되어 있지 않습니다.',
+        videoInfo.durationSec,
       );
-      const comparableVideoTitle = toComparableText(videoInfo.title);
-      if (
-        !comparableSongTitle ||
-        !comparableVideoTitle.includes(comparableSongTitle)
-      ) {
-        return invalid(
-          '영상 제목에 곡 제목이 포함되어 있지 않습니다.',
-          videoInfo.durationSec,
-        );
-      }
     }
 
     const { startSec, endSec } = this.resolveClipRange(
