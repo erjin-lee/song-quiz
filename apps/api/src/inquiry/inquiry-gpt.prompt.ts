@@ -2,7 +2,7 @@ import type { InquiryFunctionName } from './inquiry.types';
 import type { InquirySongContext } from './inquiry-gpt.client';
 
 /** 프롬프트를 실질적으로 바꿀 때마다 사람이 수동으로 올린다(SQ_INQUIRY_ACTION.PROMPT_VERSION에 기록). */
-export const INQUIRY_PROMPT_VERSION = 'v1';
+export const INQUIRY_PROMPT_VERSION = 'v2';
 
 export const CLASSIFY_SYSTEM_RULES = `너는 음악 퀴즈 게임에서 유저가 남긴 곡 관련 문의를 보고, 사전에 정의된 조치 함수 중 어떤 것을 사용해야 할지 판별하는 역할이다.
 
@@ -72,7 +72,6 @@ LOW: 요청 취지가 불명확하거나, 값이 비합리적(음수, 영상 길
 다음 사항을 확인하라.
 - 영상이 현재 접근 가능한가
 - 영상 제목
-- 채널명
 - 해당 영상이 요청된 곡과 아티스트에 해당하는가
 - 기존 링크와 새 링크가 같은 곡을 가리키는가
 - 새 링크가 기존 링크보다 적절한가
@@ -94,8 +93,10 @@ LOW:
 ## 출력 형식
 
 설명 없이 반드시 아래 JSON 형식만 출력한다. reason에는 판단 근거를 한두 문장으로 요약한다.
+linkAccessible은 웹 검색으로 새 링크의 실제 페이지 내용(제목 등)을 확인할 수 있었으면 true,
+검색 결과가 없거나 접근할 수 없어 새 링크 자체를 확인하지 못했으면 false로 설정한다.
 
-{ "confidence": "HIGH", "reason": "판단 근거" }`,
+{ "confidence": "HIGH", "reason": "판단 근거", "linkAccessible": true }`,
 
   ADD_ANSWER: `너는 한국 음악 퀴즈의 정답 후보 데이터를 판별하는 역할이다.
 
@@ -133,6 +134,37 @@ LOW: 원곡 제목과 관계가 불명확하거나, 다른 곡과 혼동될 수 
 
 { "confidence": "HIGH", "type": "ORIGINAL", "reason": "판단 근거" }`,
 };
+
+/**
+ * CHANGE_LINK 1차 검증(웹 검색)에서 linkAccessible: false가 나왔을 때만 쓰는 2차 검증
+ * 규칙이다 - 웹 검색으로 새 링크에 접근하지 못했으니, 우리가 직접 스크래핑한 정보를
+ * 근거로 다시 판단한다. 웹 검색 도구 없이(강제 JSON 모드로) 호출한다.
+ */
+export const CHANGE_LINK_FALLBACK_SYSTEM_RULES = `너는 한국 음악 퀴즈 출제곡의 유튜브 링크 교체 요청이 타당한지 판별하는 역할이다.
+
+곡 정보(원래 제목, 아티스트, 기존 링크)와 유저 문의, 유저가 제시한 새 링크, 그리고 새 링크를
+직접 스크래핑해서 확인한 정보(제목/재생시간)가 주어진다. 웹 검색으로는 새 링크의 내용을 확인할
+수 없었기 때문에 대신 이 스크래핑 정보를 근거로 판단한다 - 별도로 웹 검색을 시도할 필요는 없다.
+
+다음 사항을 확인하라.
+- 스크래핑된 제목이 요청된 곡과 아티스트에 해당하는가
+- 기존 링크와 새 링크가 같은 곡을 가리키는가
+- 새 링크가 기존 링크보다 적절한가
+
+주의: 영상 제목은 업로더가 임의로 정할 수 있어 실제 영상 내용을 보장하지 않는다. 실제
+페이지에 접근해 확인한 게 아니라 제목/재생시간 텍스트만으로 판단하는 것이므로, confidence는
+MEDIUM 또는 LOW만 사용한다(HIGH는 절대 쓰지 않는다) - 사람 관리자의 최종 검토가 반드시
+필요하다.
+
+MEDIUM: 스크래핑된 제목/재생시간이 곡 정보와 일치해 새 링크가 맞는 곡으로 보이는 경우.
+LOW: 스크래핑된 정보가 곡/아티스트와 다르거나, 제목조차 확인하지 못했거나, 교체 요청이 명백히 부적절한 경우.
+
+## 출력 형식
+
+설명 없이 반드시 아래 JSON 형식만 출력한다. reason에는 판단 근거를 한두 문장으로 요약한다.
+confidence는 "MEDIUM" 또는 "LOW"만 가능하다.
+
+{ "confidence": "MEDIUM", "reason": "판단 근거" }`;
 
 export function buildClassifyUserMessage(
   song: InquirySongContext,
@@ -173,4 +205,30 @@ export function buildVerifyUserMessage(
         args.answerTxt,
       )}"은 적절할까? 원래 문의 내용: ${content}`;
   }
+}
+
+export interface ScrapedYoutubeInfo {
+  title: string | null;
+  durationSec: number | null;
+}
+
+export function buildChangeLinkFallbackUserMessage(
+  song: InquirySongContext,
+  content: string,
+  args: Record<string, unknown>,
+  scraped: ScrapedYoutubeInfo,
+): string {
+  const scrapedText = scraped.title
+    ? `제목: "${scraped.title}"${
+        scraped.durationSec !== null ? `, 길이: ${scraped.durationSec}초` : ''
+      }`
+    : '제목을 확인하지 못했다(재생시간만 확인됨)';
+
+  return `곡 "${song.songNm}"(아티스트: ${song.atstNm})의 유튜브 링크를 현재 "${song.youtubeUrl}"에서 "${String(
+    args.youtubeUrl,
+  )}"로 교체해달라는 요청이야. 원래 문의 내용: ${content}
+
+새 링크를 직접 스크래핑해서 확인한 정보: ${scrapedText}
+
+이 정보를 바탕으로 이 요청은 적절할까?`;
 }

@@ -121,6 +121,31 @@ describe('YoutubeScraperClient', () => {
     });
   });
 
+  describe('getVideoInfo', () => {
+    it('제목(og:title)과 재생 길이를 함께 파싱한다', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        fakeResponse(
+          '<meta property="og:title" content="아이유 - 좋은 날 &amp; 라이브">...le"lengthSeconds":"245"...',
+        ),
+      );
+
+      const result = await client.getVideoInfo('vid1');
+
+      expect(result).toEqual({
+        title: '아이유 - 좋은 날 & 라이브',
+        durationSec: 245,
+      });
+    });
+
+    it('제목/길이를 못 찾으면 각각 null을 반환한다', async () => {
+      fetchSpy.mockResolvedValueOnce(fakeResponse('<html>내용 없음</html>'));
+
+      const result = await client.getVideoInfo('vid1');
+
+      expect(result).toEqual({ title: null, durationSec: null });
+    });
+  });
+
   describe('getHtml 재시도/오류 처리', () => {
     it('첫 시도가 실패하면 재시도하여 성공한 결과를 반환한다', async () => {
       jest.useFakeTimers();

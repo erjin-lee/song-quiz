@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { withStartSecParam } from 'shared';
 import { Repository } from 'typeorm';
@@ -11,7 +15,7 @@ import {
   ChangeStartTimeArgs,
   InquiryConfidence,
 } from './inquiry.types';
-import { parseYoutubeUrl } from './youtube-url.util';
+import { buildYoutubeWatchUrl, parseYoutubeUrl } from './youtube-url.util';
 
 const MAX_ANSWER_TYPE_LENGTH = 12;
 /** 시작 시간 변경/링크 교체 시 종료 시간을 맞추는 클립 길이(초). quiz-generator.service.ts의 QUIZ_SONG_CLIP_SEC과 동일하게 맞춘다. */
@@ -58,7 +62,9 @@ export class InquiryActionService {
    * 새 링크의 영상 길이를 스크래핑해 DURATION을 갱신한다. 새 링크에 t 파라미터가
    * 있으면 그 값을 시작 시간으로, 없으면 스크래핑한 재생시간의 절반을 시작 시간으로
    * 쓴다. 종료 시간은 시작 시간 + QUIZ_SONG_CLIP_SEC으로 고정한다
-   * (quiz-generator.service.ts와 동일한 클립 길이).
+   * (quiz-generator.service.ts와 동일한 클립 길이). videoId를 파싱할 수 없는(유튜브
+   * 호스트가 아니거나 https가 아닌) 링크는 저장하지 않고 거부한다 - 그대로 저장하면
+   * youtubeVideoId가 없어 게임에서 플레이어가 아예 렌더링되지 않는 깨진 상태가 된다.
    */
   async changeLink(
     quizSongId: string,
@@ -73,20 +79,36 @@ export class InquiryActionService {
     const { videoId, startSec: startSecFromUrl } = parseYoutubeUrl(
       args.youtubeUrl,
     );
+    if (!videoId) {
+      throw new BadRequestException(
+        `유효한 유튜브 링크가 아닙니다. (quizSongId: ${quizSongId})`,
+      );
+    }
 
-    const durationSec = videoId
-      ? await this.youtubeScraperClient.getDurationSec(
-          videoId,
-          `quizSongId: ${quizSongId}`,
-        )
-      : null;
+    const durationSec = await this.youtubeScraperClient.getDurationSec(
+      videoId,
+      `quizSongId: ${quizSongId}`,
+    );
 
-    const startSec =
+    const rawStartSec =
       startSecFromUrl ??
       (durationSec !== null ? Math.round(durationSec / 2) : null) ??
       quizSong.startSec;
+    // t 파라미터는 이미 0 이상으로 보정돼 있지만(parseYoutubeUrl), 영상 길이를
+    // 알고 있으면 QUIZ_SONG_CLIP_SEC(30초) 클립이 전부 영상 안에 들어가도록 시작
+    // 시간의 상한도 durationSec - QUIZ_SONG_CLIP_SEC으로 제한한다(durationSec - 1만
+    // 보장하면 클립 대부분이 영상 길이를 넘어가는 1초짜리 재생 구간이 될 수 있다).
+    // 영상 자체가 30초보다 짧으면 0부터 시작해 있는 구간을 최대한 쓴다.
+    const startSec =
+      durationSec !== null
+        ? Math.min(rawStartSec, Math.max(durationSec - QUIZ_SONG_CLIP_SEC, 0))
+        : rawStartSec;
 
-    quizSong.youtubeUrl = args.youtubeUrl;
+    // 사용자가 제출한 원본 URL을 그대로 저장하지 않고, 검증된 videoId로 정규화한
+    // URL을 저장한다 - 그래야 실제로 스크래핑/재생에 쓰이는 videoId와 DB에 저장되는
+    // URL이 항상 일치한다(예: 같은 호스트라도 /results?v=x 같은 비영상 경로가 그대로
+    // 저장되는 것을 막는다).
+    quizSong.youtubeUrl = buildYoutubeWatchUrl(videoId, startSec);
     quizSong.youtubeVideoId = videoId;
     quizSong.durationSec = durationSec;
     quizSong.startSec = startSec;

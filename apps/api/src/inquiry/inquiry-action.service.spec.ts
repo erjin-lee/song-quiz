@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { QuizAnswer } from '../quiz/entities/quiz-answer.entity';
@@ -132,15 +132,94 @@ describe('InquiryActionService', () => {
       );
     });
 
-    it('videoId를 파싱할 수 없는 링크는 영상 길이를 스크래핑하지 않는다', async () => {
-      await service.changeLink('qs1', { youtubeUrl: '유효하지 않은 URL' });
+    it('videoId를 파싱할 수 없는 링크는 저장하지 않고 거부한다', async () => {
+      await expect(
+        service.changeLink('qs1', { youtubeUrl: '유효하지 않은 URL' }),
+      ).rejects.toThrow(BadRequestException);
 
       expect(youtubeScraperClientMock.getDurationSec).not.toHaveBeenCalled();
+      expect(quizSongRepositoryMock.save).not.toHaveBeenCalled();
+    });
+
+    it('유튜브가 아닌 호스트의 링크(v 파라미터가 있어도)는 저장하지 않고 거부한다', async () => {
+      await expect(
+        service.changeLink('qs1', {
+          youtubeUrl: 'https://example.com/?v=abc123',
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(quizSongRepositoryMock.save).not.toHaveBeenCalled();
+    });
+
+    it('유튜브 호스트라도 /watch 경로가 아닌 링크(예: 검색결과/홈)는 저장하지 않고 거부한다', async () => {
+      await expect(
+        service.changeLink('qs1', {
+          youtubeUrl: 'https://www.youtube.com/results?v=abc123',
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(quizSongRepositoryMock.save).not.toHaveBeenCalled();
+    });
+
+    it('저장되는 youtubeUrl은 검증된 videoId/startSec으로 정규화한 URL이다(제출한 URL에 불필요한 파라미터가 섞여 있어도)', async () => {
+      youtubeScraperClientMock.getDurationSec.mockResolvedValue(180);
+
+      await service.changeLink('qs1', {
+        youtubeUrl:
+          'https://www.youtube.com/watch?v=new&t=50&list=PLxxxx&index=3',
+      });
+
       expect(quizSongRepositoryMock.save).toHaveBeenCalledWith(
         expect.objectContaining({
-          youtubeVideoId: null,
-          durationSec: null,
-          startSec: baseQuizSong.startSec,
+          youtubeUrl: 'https://www.youtube.com/watch?v=new&t=50',
+        }),
+      );
+    });
+
+    it('새 링크의 t가 음수면 youtubeUrl/startSec/endSec 모두 0으로 일관되게 보정한다', async () => {
+      youtubeScraperClientMock.getDurationSec.mockResolvedValue(180);
+
+      await service.changeLink('qs1', {
+        youtubeUrl: 'https://www.youtube.com/watch?v=new&t=-60',
+      });
+
+      expect(quizSongRepositoryMock.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          youtubeUrl: 'https://www.youtube.com/watch?v=new&t=0',
+          startSec: 0,
+          endSec: 30,
+        }),
+      );
+    });
+
+    it('t가 스크래핑된 영상 길이를 넘으면 30초 클립이 전부 영상 안에 들어가도록 보정한다', async () => {
+      youtubeScraperClientMock.getDurationSec.mockResolvedValue(100);
+
+      await service.changeLink('qs1', {
+        youtubeUrl: 'https://www.youtube.com/watch?v=new&t=99999',
+      });
+
+      expect(quizSongRepositoryMock.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          youtubeUrl: 'https://www.youtube.com/watch?v=new&t=70',
+          startSec: 70,
+          endSec: 100,
+        }),
+      );
+    });
+
+    it('영상이 30초보다 짧으면 0부터 시작한다', async () => {
+      youtubeScraperClientMock.getDurationSec.mockResolvedValue(20);
+
+      await service.changeLink('qs1', {
+        youtubeUrl: 'https://www.youtube.com/watch?v=new&t=15',
+      });
+
+      expect(quizSongRepositoryMock.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          youtubeUrl: 'https://www.youtube.com/watch?v=new&t=0',
+          startSec: 0,
+          endSec: 30,
         }),
       );
     });
