@@ -124,6 +124,25 @@ describe('YoutubeLinkValidationService', () => {
     expect(result.endSec).toBe(150);
   });
 
+  it('skipContentCheck가 true면 제목이 안 겹쳐도 통과시키되 영상 정보는 그대로 조회한다', async () => {
+    youtubeScraperClientMock.getVideoInfo.mockResolvedValue({
+      title: '전혀 다른 영상 제목(영문 표기 등)',
+      durationSec: 240,
+    });
+
+    const result = await service.validate(
+      'https://www.youtube.com/watch?v=abc123',
+      '봄날',
+      { skipContentCheck: true },
+    );
+
+    expect(result.valid).toBe(true);
+    expect(result.durationSec).toBe(240);
+    expect(youtubeScraperClientMock.getVideoInfo).toHaveBeenCalledWith(
+      'abc123',
+    );
+  });
+
   it('영상 길이를 못 구했으면 시작 지점을 0으로 둔다', async () => {
     youtubeScraperClientMock.getVideoInfo.mockResolvedValue({
       title: '봄날 MV',

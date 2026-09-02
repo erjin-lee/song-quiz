@@ -17,6 +17,10 @@ function searchResultCacheKey(melonSongId: string): string {
   return `melon-song-search-result:${melonSongId}`;
 }
 
+function isDuplicateKeyError(error: unknown): boolean {
+  return (error as { code?: string })?.code === 'ER_DUP_ENTRY';
+}
+
 /**
  * 유저가 퀴즈에 담을 곡을 멜론에서 검색하고, 고른 곡을 DB에 멱등하게
  * 등록한다(docs/features/user-quiz-registration/spec.md 3.1, 3.2).
@@ -57,9 +61,14 @@ export class MelonSongSearchService {
         .join(', ')}`,
     }));
 
+    // setStrict: 이 캐시는 등록을 허용하는 유일한 증빙이라, 여러 ECS 태스크가
+    // 떠 있는 운영 환경에서 Redis 오류를 프로세스 로컬 캐시로 조용히 폴백하면
+    // (일반 set()의 동작) 이 요청을 처리한 태스크에만 결과가 남고 다른
+    // 태스크로 간 등록 요청은 "검색 결과가 만료됐습니다"로 실패한다 - 그런
+    // 조용한 실패보다는 캐시 저장 실패를 그대로 던져 500으로 드러내는 편이 낫다.
     await Promise.all(
       items.map((item) =>
-        this.cacheService.set(
+        this.cacheService.setStrict(
           searchResultCacheKey(item.melonSongId),
           item,
           SEARCH_RESULT_CACHE_TTL_SECONDS,
@@ -78,7 +87,7 @@ export class MelonSongSearchService {
       return existingSong;
     }
 
-    const cached = await this.cacheService.get<MelonSongSearchResultDto>(
+    const cached = await this.cacheService.getStrict<MelonSongSearchResultDto>(
       searchResultCacheKey(melonSongId),
     );
     if (!cached) {
@@ -108,9 +117,16 @@ export class MelonSongSearchService {
           }),
         );
       } catch (error) {
+        if (!isDuplicateKeyError(error)) {
+          throw error;
+        }
         // 동시에 같은 신규 곡을 등록한 경우 unique(melonSongId) 충돌 - 재조회한다.
+        // 이 트랜잭션은 위 getOrCreateArtists/getOrCreateAlbum 조회 시점에
+        // REPEATABLE READ 스냅샷이 이미 떠서, 일반 조회로는 방금 다른
+        // 트랜잭션이 커밋한 행이 안 보일 수 있다 - 락 조회로 최신 커밋본을 읽는다.
         const retried = await manager.findOne(Song, {
           where: { melonSongId: cached.melonSongId },
+          lock: { mode: 'pessimistic_read' },
         });
         if (retried) {
           return retried;
@@ -166,8 +182,12 @@ export class MelonSongSearchService {
         }),
       );
     } catch (error) {
+      if (!isDuplicateKeyError(error)) {
+        throw error;
+      }
       const retried = await manager.findOne(Artist, {
         where: { melonAtstId: melonArtistId },
+        lock: { mode: 'pessimistic_read' },
       });
       if (retried) {
         return retried;
@@ -200,7 +220,13 @@ export class MelonSongSearchService {
         }),
       );
     } catch (error) {
-      const retried = await manager.findOne(Album, { where: { melonAlbmId } });
+      if (!isDuplicateKeyError(error)) {
+        throw error;
+      }
+      const retried = await manager.findOne(Album, {
+        where: { melonAlbmId },
+        lock: { mode: 'pessimistic_read' },
+      });
       if (retried) {
         return retried;
       }

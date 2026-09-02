@@ -16,6 +16,7 @@ import { QuizArtist } from './entities/quiz-artist.entity';
 import { QuizSong } from './entities/quiz-song.entity';
 import { Quiz } from './entities/quiz.entity';
 import { Song } from './entities/song.entity';
+import { issueLinkVerificationToken } from './link-verification-token.util';
 import { MIN_USER_QUIZ_SONG_COUNT } from './quiz.constants';
 import { UserQuizRegistrationService } from './user-quiz-registration.service';
 import { YoutubeLinkValidationService } from './youtube-link-validation.service';
@@ -38,6 +39,7 @@ function makeSongInput(
 
 describe('UserQuizRegistrationService', () => {
   let service: UserQuizRegistrationService;
+  const originalSecret = process.env.USER_JWT_SECRET;
 
   // manager는 트랜잭션 콜백에 그대로 넘겨주는 값으로도, quizRepository.manager로
   // 직접 쓰는 값(안전망 백그라운드 작업, getEligibility)으로도 재사용한다 -
@@ -80,6 +82,7 @@ describe('UserQuizRegistrationService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    process.env.USER_JWT_SECRET = 'test-secret';
 
     userLockResult = { userKey: 'user-key-1' };
     lastQuizResult = null;
@@ -137,6 +140,10 @@ describe('UserQuizRegistrationService', () => {
     );
   });
 
+  afterAll(() => {
+    process.env.USER_JWT_SECRET = originalSecret;
+  });
+
   describe('getEligibility', () => {
     it('이전에 등록한 퀴즈가 없으면 바로 등록 가능하다', async () => {
       lastQuizResult = null;
@@ -170,6 +177,15 @@ describe('UserQuizRegistrationService', () => {
       await expect(service.getEligibility('unknown')).rejects.toThrow(
         UnauthorizedException,
       );
+    });
+
+    it('트랜잭션 밖에서 호출되므로 비관적 락 없이 조회한다(락은 활성 트랜잭션이 필요해 여기서 걸면 TypeORM이 예외를 던진다)', async () => {
+      await service.getEligibility('user-1');
+
+      const quizFindOneCall = managerMock.findOne.mock.calls.find(
+        ([entity]) => entity === Quiz,
+      );
+      expect(quizFindOneCall?.[1]).not.toHaveProperty('lock');
     });
   });
 
@@ -225,6 +241,17 @@ describe('UserQuizRegistrationService', () => {
 
       await expect(service.createQuiz('user-1', baseDto)).rejects.toThrow(
         HttpException,
+      );
+    });
+
+    it('트랜잭션 안에서는 비관적 락으로 최근 등록 여부를 조회한다', async () => {
+      await service.createQuiz('user-1', baseDto);
+
+      const quizFindOneCall = managerMock.findOne.mock.calls.find(
+        ([entity]) => entity === Quiz,
+      );
+      expect(quizFindOneCall?.[1]).toEqual(
+        expect.objectContaining({ lock: { mode: 'pessimistic_read' } }),
       );
     });
 
@@ -334,19 +361,50 @@ describe('UserQuizRegistrationService', () => {
       );
     });
 
-    it('안전망 재검증은 항상 콘텐츠(제목) 검증까지 수행한다(클라이언트가 우회할 수 없음)', async () => {
+    it('검증 토큰이 없으면 안전망이 항상 콘텐츠(제목) 검증까지 수행한다(클라이언트가 임의로 우회할 수 없음)', async () => {
       await service.createQuiz('user-1', baseDto);
       await flushMicrotasks();
 
       expect(youtubeLinkValidationServiceMock.validate).toHaveBeenCalledWith(
         expect.any(String),
         expect.any(String),
+        { skipContentCheck: false },
       );
-      // 두 번째 인자(옵션) 없이 항상 같은 시그니처로 호출되는지 확인 - 과거에는
-      // 세 번째 인자로 skipContentCheck를 넘겨 콘텐츠 검증을 건너뛸 수 있었다.
-      expect(
-        youtubeLinkValidationServiceMock.validate.mock.calls[0],
-      ).toHaveLength(2);
+    });
+
+    it('AUTO 검증 토큰이 이 songId+videoId에 대해 유효하면 안전망이 제목 매칭을 생략한다(spec.md 3.3-③)', async () => {
+      const token = issueLinkVerificationToken('1', 'v1', 'AUTO');
+      await service.createQuiz('user-1', {
+        ...baseDto,
+        songs: [
+          makeSongInput('1', { verificationToken: token }),
+          ...baseDto.songs.slice(1),
+        ],
+      });
+      await flushMicrotasks();
+
+      const call = youtubeLinkValidationServiceMock.validate.mock.calls.find(
+        ([url]: [string]) => url.includes('v1'),
+      );
+      expect(call[2]).toEqual({ skipContentCheck: true });
+    });
+
+    it('토큰의 videoId가 실제 제출한 링크와 다르면(URL을 바꿔치기) 제목 매칭을 생략하지 않는다', async () => {
+      // 토큰은 v-other용으로 발급됐는데 실제로는 v1을 등록하려는 상황.
+      const token = issueLinkVerificationToken('1', 'v-other', 'AUTO');
+      await service.createQuiz('user-1', {
+        ...baseDto,
+        songs: [
+          makeSongInput('1', { verificationToken: token }),
+          ...baseDto.songs.slice(1),
+        ],
+      });
+      await flushMicrotasks();
+
+      const call = youtubeLinkValidationServiceMock.validate.mock.calls.find(
+        ([url]: [string]) => url.includes('v1'),
+      );
+      expect(call[2]).toEqual({ skipContentCheck: false });
     });
   });
 

@@ -30,6 +30,7 @@ import { QuizArtist } from './entities/quiz-artist.entity';
 import { QuizSong } from './entities/quiz-song.entity';
 import { Quiz } from './entities/quiz.entity';
 import { Song } from './entities/song.entity';
+import { verifyLinkVerificationToken } from './link-verification-token.util';
 import {
   MIN_USER_QUIZ_SONG_COUNT,
   QUIZ_REGISTRATION_INTERVAL_MS,
@@ -69,7 +70,11 @@ export class UserQuizRegistrationService {
 
   async getEligibility(userId: string): Promise<RegistrationEligibilityDto> {
     const userKey = await this.resolveUserKey(userId);
-    return this.computeEligibility(this.quizRepository.manager, userKey);
+    // 안내용 단순 조회라 락이 필요 없다(트랜잭션 밖에서 호출되는데, 비관적
+    // 락은 활성 트랜잭션이 없으면 TypeORM이 예외를 던진다).
+    return this.computeEligibility(this.quizRepository.manager, userKey, {
+      lock: false,
+    });
   }
 
   async createQuiz(
@@ -79,7 +84,7 @@ export class UserQuizRegistrationService {
     const userKey = await this.resolveUserKey(userId);
     this.validateSongsInput(dto.songs);
 
-    const { quiz, quizSongs, songById } =
+    const { quiz, quizSongs, songById, skipContentCheckByQuizSongId } =
       await this.quizRepository.manager.transaction(async (manager) => {
         // 이 유저 행을 잠가서, 같은 유저가 동시에 두 번 요청해도 뒤 트랜잭션은
         // 앞 트랜잭션이 커밋될 때까지 기다린 뒤에야 아래 등록 가능 여부를 본다.
@@ -91,7 +96,9 @@ export class UserQuizRegistrationService {
           throw new UnauthorizedException('유효한 계정을 찾을 수 없습니다.');
         }
 
-        const eligibility = await this.computeEligibility(manager, userKey);
+        const eligibility = await this.computeEligibility(manager, userKey, {
+          lock: true,
+        });
         if (!eligibility.eligible) {
           throw new HttpException(
             {
@@ -116,18 +123,15 @@ export class UserQuizRegistrationService {
           }),
         );
 
-        const quizSongs = await this.saveQuizSongsAndAnswers(
-          manager,
-          quiz.quizId,
-          dto.songs,
-        );
+        const { quizSongs, skipContentCheckByQuizSongId } =
+          await this.saveQuizSongsAndAnswers(manager, quiz.quizId, dto.songs);
         await this.populateQuizArtists(
           manager,
           quiz.quizId,
           Array.from(songById.values()),
         );
 
-        return { quiz, quizSongs, songById };
+        return { quiz, quizSongs, songById, skipContentCheckByQuizSongId };
       });
 
     // 응답을 기다리게 하지 않고 안전망 재검증은 커밋이 끝난 뒤 백그라운드에서 진행한다.
@@ -137,6 +141,7 @@ export class UserQuizRegistrationService {
       dto.quizTtl,
       quizSongs,
       songById,
+      skipContentCheckByQuizSongId,
     );
 
     return { quizId: quiz.quizId };
@@ -150,7 +155,7 @@ export class UserQuizRegistrationService {
     const userKey = await this.resolveUserKey(userId);
     this.validateSongsInput(dto.songs);
 
-    const { quizSongs, songById } =
+    const { quizSongs, songById, skipContentCheckByQuizSongId } =
       await this.quizRepository.manager.transaction(async (manager) => {
         const quiz = await manager.findOne(Quiz, {
           where: { quizId },
@@ -194,18 +199,15 @@ export class UserQuizRegistrationService {
         await manager.delete(QuizSong, { quizId });
         await manager.delete(QuizArtist, { quizId });
 
-        const quizSongs = await this.saveQuizSongsAndAnswers(
-          manager,
-          quizId,
-          dto.songs,
-        );
+        const { quizSongs, skipContentCheckByQuizSongId } =
+          await this.saveQuizSongsAndAnswers(manager, quizId, dto.songs);
         await this.populateQuizArtists(
           manager,
           quizId,
           Array.from(songById.values()),
         );
 
-        return { quizSongs, songById };
+        return { quizSongs, songById, skipContentCheckByQuizSongId };
       });
 
     void this.runBackgroundSafetyNet(
@@ -214,6 +216,7 @@ export class UserQuizRegistrationService {
       dto.quizTtl,
       quizSongs,
       songById,
+      skipContentCheckByQuizSongId,
     );
 
     return { quizId };
@@ -270,8 +273,12 @@ export class UserQuizRegistrationService {
     manager: EntityManager,
     quizId: string,
     songs: CreateQuizSongInputDto[],
-  ): Promise<QuizSong[]> {
+  ): Promise<{
+    quizSongs: QuizSong[];
+    skipContentCheckByQuizSongId: Map<string, boolean>;
+  }> {
     const quizSongs: QuizSong[] = [];
+    const skipContentCheckByQuizSongId = new Map<string, boolean>();
     let quizSeq = 1;
     for (const songInput of songs) {
       const { videoId, startSec: parsedStartSec } = parseYoutubeUrl(
@@ -300,6 +307,19 @@ export class UserQuizRegistrationService {
       );
       quizSongs.push(quizSong);
 
+      // 토큰이 이 songId+videoId 조합에 대해 서버가 발급한 AUTO 검증인지
+      // 확인한다(link-verification-token.util.ts) - 토큰이 없거나 위조/만료됐거나
+      // 다른 곡·다른 영상용이면 항상 콘텐츠 검증까지 하는 쪽(false)으로 fallback한다.
+      const verifiedSource = verifyLinkVerificationToken(
+        songInput.verificationToken,
+        songInput.songId,
+        videoId,
+      );
+      skipContentCheckByQuizSongId.set(
+        quizSong.quizSongId,
+        verifiedSource === 'AUTO',
+      );
+
       // 같은 곡에 중복 정답을 보내도 유니크 제약과 충돌하지 않도록 dedupe한다.
       const uniqueAnswers = Array.from(new Set(songInput.answers));
       await manager.save(
@@ -312,21 +332,25 @@ export class UserQuizRegistrationService {
         ),
       );
     }
-    return quizSongs;
+    return { quizSongs, skipContentCheckByQuizSongId };
   }
 
   private async computeEligibility(
     manager: EntityManager,
     userKey: string,
+    options: { lock: boolean },
   ): Promise<RegistrationEligibilityDto> {
     // pessimistic_read: 이 유저 행의 락(위 createQuiz)으로 동시 요청은 이미
     // 직렬화됐지만, 일반 조회는 InnoDB REPEATABLE READ 스냅샷 때문에 방금
     // 커밋된 다른 트랜잭션의 결과를 못 볼 수 있다 - 락 조회는 항상 최신
-    // 커밋본을 읽으므로 이 스냅샷 문제를 피한다.
+    // 커밋본을 읽으므로 이 스냅샷 문제를 피한다. 단, 비관적 락은 활성
+    // 트랜잭션 안에서만 걸 수 있어 createQuiz의 트랜잭션 안에서만 켠다 -
+    // 단순 조회용 getEligibility()는 트랜잭션 밖에서 호출되므로 락을 걸면
+    // TypeORM이 PessimisticLockTransactionRequiredError를 던진다.
     const lastQuiz = await manager.findOne(Quiz, {
       where: { crtUserKey: userKey },
       order: { crtDt: 'DESC' },
-      lock: { mode: 'pessimistic_read' },
+      ...(options.lock ? { lock: { mode: 'pessimistic_read' as const } } : {}),
     });
     if (!lastQuiz) {
       return { eligible: true, remainingSeconds: 0 };
@@ -387,6 +411,7 @@ export class UserQuizRegistrationService {
     quizTtl: string,
     quizSongs: QuizSong[],
     songById: Map<string, Song>,
+    skipContentCheckByQuizSongId: Map<string, boolean>,
   ): Promise<void> {
     try {
       const excluded: ExcludedSongInfo[] = [];
@@ -398,7 +423,10 @@ export class UserQuizRegistrationService {
         }
 
         const result = await this.youtubeLinkValidationService
-          .validate(quizSong.youtubeUrl, song.songNm)
+          .validate(quizSong.youtubeUrl, song.songNm, {
+            skipContentCheck:
+              skipContentCheckByQuizSongId.get(quizSong.quizSongId) ?? false,
+          })
           .catch((error) => {
             this.logger.warn(
               `안전망 재검증 실패(quizSongId: ${quizSong.quizSongId})`,
