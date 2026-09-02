@@ -79,8 +79,11 @@ TypeORM 공식 마이그레이션(`src/data-source.ts`, `src/migrations/`)을 �
 infra/terraform/environments/prod/scripts/tunnel-db.sh
 # 3) .env.local의 DB_HOST_NAME/DB_PORT가 터널 쪽(127.0.0.1:<로컬 포트>)을 가리키는 상태에서
 yarn workspace api migration:generate src/migrations/<설명적인이름>
-# 4) 생성된 파일의 up()/down() SQL을 리뷰(코드 리뷰와 동일한 감각) 후 커밋 + PR
-# 5) merge 후 실제 DB에 반영할 시점에 사람이 직접
+# 4) migration:generate 결과물은 TypeORM 기본 포맷(큰따옴표, 4칸 들여쓰기)이라
+#    프로젝트 lint 규칙과 어긋난다 - 커밋 전에 반드시 실행해 포맷을 맞춘다
+yarn workspace api lint
+# 5) 생성된 파일의 up()/down() SQL을 리뷰(코드 리뷰와 동일한 감각) 후 커밋 + PR
+# 6) merge 후 실제 DB에 반영할 시점에 사람이 직접
 yarn workspace api migration:run
 ```
 
