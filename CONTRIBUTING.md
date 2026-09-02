@@ -61,3 +61,7 @@ git push -u origin HEAD
 ```
 
 force push는 하지 않는다.
+
+## Pull Request
+
+PR을 생성할 때는 [`.github/pull_request_template.md`](.github/pull_request_template.md)의 셀프 리뷰 체크리스트 항목을 실제로 확인한 뒤, 그 내용을 PR 본문에 포함한다 - PR 생성 명령에 본문을 직접 지정하더라도 이 체크리스트를 생략하지 않는다.
