@@ -30,3 +30,4 @@
 | [0006](0006-game-multi-instance-no-sticky-session.md) | Game multi-instance 환경에서 ALB sticky session을 쓰지 않는다 | Accepted |
 | [0007](0007-shared-package-for-cross-app-code.md) | apps/api ↔ 프런트엔드 공유 코드를 packages/shared로 이관 | Accepted (DTO 이관은 진행 중) |
 | [0008](0008-inquiry-action-reapproval-and-atomic-guard.md) | 문의 조치 재승인 시 중복 실행 허용(ADD_ANSWER만 예외) + 원자적 상태 검증 | Accepted |
+| [0009](0009-change-link-verification-trust-boundary.md) | 문의 CHANGE_LINK 검증의 AI 신뢰 경계 + URL 정규화 저장 | Accepted |
