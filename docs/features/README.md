@@ -15,5 +15,5 @@
 
 | 기능 | 상태 | 문서 |
 |---|---|---|
-| 로그인 유저 퀴즈 등록 | Draft (구현 대기) | [spec](user-quiz-registration/spec.md) · [tasks](user-quiz-registration/tasks.md) |
+| 로그인 유저 퀴즈 등록 | 백엔드 완료, 프런트엔드 대기 | [spec](user-quiz-registration/spec.md) · [tasks](user-quiz-registration/tasks.md) |
 | 범용 알림 시스템 | 구현 완료(마이그레이션 실행은 사람이 해야 함) | [spec](notification-system/spec.md) · [tasks](notification-system/tasks.md) |

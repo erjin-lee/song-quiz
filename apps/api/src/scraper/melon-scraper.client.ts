@@ -13,6 +13,7 @@ const SONG_PAGE_SIZE = 50;
 const PAGE_FETCH_DELAY_MS = 200;
 const MAX_PAGE_ITERATIONS = 500;
 const FETCH_TIMEOUT_MS = 10_000;
+const SONG_SEARCH_RESULT_LIMIT = 10;
 
 export enum ChartType {
   AG = 'AG',
@@ -51,6 +52,14 @@ export interface ScrapedChartSong {
   melonAlbmId: string;
   albmNm: string;
   albumThumbImgUrl: string | null;
+  artists: ScrapedChartArtist[];
+}
+
+export interface ScrapedSearchSong {
+  melonSongId: string;
+  songNm: string;
+  melonAlbmId: string;
+  albmNm: string;
   artists: ScrapedChartArtist[];
 }
 
@@ -208,6 +217,25 @@ export class MelonScraperClient {
     return songs;
   }
 
+  /** 멜론 통합검색(곡)에서 키워드로 곡을 찾는다. 상위 SONG_SEARCH_RESULT_LIMIT건만 반환한다. */
+  async searchSongs(keyword: string): Promise<ScrapedSearchSong[]> {
+    const url = `${MELON_BASE_URL}/search/song/index.htm?q=${encodeURIComponent(keyword)}&section=song`;
+    const html = await this.getHtml(url);
+    const $ = cheerio.load(html);
+
+    const songs: ScrapedSearchSong[] = [];
+    $('div.d_song_list tbody tr').each((_, el) => {
+      const song = this.parseSearchSongRow($, $(el));
+      if (song) {
+        songs.push(song);
+      }
+    });
+
+    await delay(PAGE_FETCH_DELAY_MS);
+
+    return songs.slice(0, SONG_SEARCH_RESULT_LIMIT);
+  }
+
   private parseAlbumItem<T extends AnyNode>(
     $: cheerio.CheerioAPI,
     $li: cheerio.Cheerio<T>,
@@ -339,6 +367,69 @@ export class MelonScraperClient {
       albumThumbImgUrl,
       artists,
     };
+  }
+
+  private parseSearchSongRow<T extends AnyNode>(
+    $: cheerio.CheerioAPI,
+    $tr: cheerio.Cheerio<T>,
+  ): ScrapedSearchSong | null {
+    const melonSongId = $tr
+      .find('input.input_check[name="input_check"]')
+      .attr('value');
+    if (!melonSongId) {
+      return null;
+    }
+
+    const songNm = normalizeText(
+      $tr.find('a.fc_gray').first().attr('title') ||
+        $tr.find('a.fc_gray').first().text(),
+    );
+    if (!songNm) {
+      this.logger.warn(
+        `검색 곡 파싱 실패: 곡명을 찾을 수 없습니다. (melonSongId: ${melonSongId})`,
+      );
+      return null;
+    }
+
+    // #artistName 안에는 화면에 보이는 아티스트 링크 외에, 말줄임 툴팁용으로
+    // 같은 링크를 다시 감싼 숨김 <span>이 하나 더 있다(멜론 마크업 특성) -
+    // .find('a')로 전부 잡으면 아티스트가 중복된다. 직계 자식만 취해서 피한다.
+    const artists = $tr
+      .find('#artistName')
+      .children('a')
+      .map((_, a): ScrapedChartArtist | null => {
+        const $a = $(a);
+        const melonArtistId = extractId($a.attr('href'));
+        const atstNm = normalizeText(
+          ($a.attr('title') || $a.text()).replace(/\s*-\s*페이지\s*이동$/, ''),
+        );
+        return melonArtistId && atstNm ? { melonArtistId, atstNm } : null;
+      })
+      .get()
+      .filter((artist): artist is ScrapedChartArtist => artist !== null);
+    if (artists.length === 0) {
+      this.logger.warn(
+        `검색 곡 파싱 실패: 아티스트 정보를 찾을 수 없습니다. (melonSongId: ${melonSongId})`,
+      );
+      return null;
+    }
+
+    const $albumAnchor = $tr.find('a[href*="goAlbumDetail"]').first();
+    const melonAlbmId = extractId($albumAnchor.attr('href'));
+    const albmNm = normalizeText(
+      ($albumAnchor.attr('title') || $albumAnchor.text()).replace(
+        /\s*-\s*페이지\s*이동$/,
+        '',
+      ),
+    );
+    if (!melonAlbmId || !albmNm) {
+      this.logger.warn(
+        `검색 곡 파싱 실패: 앨범 정보를 찾을 수 없습니다. (melonSongId: ${melonSongId})`,
+      );
+      return null;
+    }
+
+    return { melonSongId, songNm, melonAlbmId, albmNm, artists };
   }
 
   private async getHtml(url: string, referer?: string): Promise<string> {

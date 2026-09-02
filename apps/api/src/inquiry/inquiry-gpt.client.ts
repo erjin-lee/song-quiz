@@ -23,7 +23,7 @@ import {
   InquiryConfidence,
   InquiryFunctionName,
 } from './inquiry.types';
-import { parseYoutubeUrl } from './youtube-url.util';
+import { parseYoutubeUrl } from '../common/youtube-url.util';
 
 const CONFIDENCE_VALUES: InquiryConfidence[] = ['LOW', 'MEDIUM', 'HIGH'];
 
