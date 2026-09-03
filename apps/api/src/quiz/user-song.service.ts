@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { DbSongSearchResultDto } from './dto/db-song-search-result.dto';
 import { QuizAnswer } from './entities/quiz-answer.entity';
 import { Song } from './entities/song.entity';
 import { issueLinkVerificationToken } from './link-verification-token.util';
@@ -12,6 +13,8 @@ import {
 import { YoutubeScraperClient } from './youtube-scraper.client';
 
 const QUIZ_SONG_CLIP_SEC = 30;
+/** 곡 검색 자동완성 수준으로만 쓰므로 멜론 검색(상위 10건)과 동일하게 맞춘다. */
+const DB_SONG_SEARCH_RESULT_LIMIT = 10;
 
 type YoutubeLinkValidationResponse = YoutubeLinkValidationResult & {
   verificationToken: string | null;
@@ -34,6 +37,44 @@ export class UserSongService {
     private readonly youtubeLinkValidationService: YoutubeLinkValidationService,
     private readonly youtubeScraperClient: YoutubeScraperClient,
   ) {}
+
+  /**
+   * 곡 검색 1차 경로(DB) - spec.md 3.1. 이미 등록된 곡을 재사용하도록, 곡명/
+   * 대표 아티스트명으로 러프하게 찾는다. 결과가 없으면 프론트가 멜론 검색(2차)로
+   * 넘어간다.
+   */
+  async searchSongs(keyword: string): Promise<DbSongSearchResultDto[]> {
+    const trimmed = keyword.trim();
+    if (!trimmed) {
+      return [];
+    }
+
+    const likeKeyword = `%${trimmed}%`;
+    const songs = await this.songRepository
+      .createQueryBuilder('song')
+      .innerJoinAndSelect(
+        'song.songArtists',
+        'songArtist',
+        'songArtist.mainYn = :mainYn',
+        { mainYn: 'Y' },
+      )
+      .innerJoinAndSelect('songArtist.artist', 'artist')
+      .where('song.songNm LIKE :likeKeyword', { likeKeyword })
+      .orWhere('artist.atstNm LIKE :likeKeyword', { likeKeyword })
+      .orderBy('song.crtDt', 'DESC')
+      .take(DB_SONG_SEARCH_RESULT_LIMIT)
+      .getMany();
+
+    return songs
+      .filter((song) => song.songArtists?.[0]?.artist)
+      .map((song) => ({
+        songId: song.songId,
+        songNm: song.songNm,
+        atstNm: song.songArtists[0].artist.atstNm,
+        displayLabel: `${song.songNm} - ${song.songArtists[0].artist.atstNm}`,
+        ytbLink: song.ytbLink,
+      }));
+  }
 
   async validateYoutubeLink(
     songId: string,

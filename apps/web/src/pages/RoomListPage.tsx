@@ -11,9 +11,19 @@ import { useDocumentMeta } from '../hooks/useDocumentMeta';
 import { useGuestNicknameFallback } from '../hooks/useGuestNicknameFallback';
 import { ApiError } from '../api/client';
 import { getAdConfig } from '../api/config';
+import { getRegistrationEligibility } from '../api/quiz-registration';
 import { getRooms, joinRoom } from '../api/room';
 import { saveRoomSession } from '../utils/roomSession';
 import type { RoomItemDto } from '../types/room';
+
+function formatRemainingTime(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.ceil((seconds % 3600) / 60);
+  if (hours > 0) {
+    return `${hours}시간 ${minutes}분`;
+  }
+  return `${minutes}분`;
+}
 
 const ADSENSE_SLOT_ROOM_LIST = import.meta.env.VITE_ADSENSE_SLOT_ROOM_LIST;
 
@@ -40,6 +50,12 @@ export function RoomListPage() {
   const [passwordInput, setPasswordInput] = useState('');
   const [passwordSubmitting, setPasswordSubmitting] = useState(false);
   const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [showQuizLoginRequired, setShowQuizLoginRequired] = useState(false);
+  const [quizBlockedMessage, setQuizBlockedMessage] = useState<string | null>(
+    null,
+  );
+  const [checkingQuizEligibility, setCheckingQuizEligibility] =
+    useState(false);
 
   useDocumentMeta({
     title: '방 목록 | 노래맞히기',
@@ -112,6 +128,34 @@ export function RoomListPage() {
       return;
     }
     navigate('/rooms/new');
+  };
+
+  const handleCreateQuizClick = async () => {
+    if (!isInitialized || checkingQuizEligibility) {
+      return;
+    }
+    if (!isAuthenticated) {
+      setShowQuizLoginRequired(true);
+      return;
+    }
+
+    setCheckingQuizEligibility(true);
+    try {
+      const eligibility = await getRegistrationEligibility();
+      if (eligibility.eligible) {
+        navigate('/quizzes/new');
+      } else {
+        setQuizBlockedMessage(
+          `${formatRemainingTime(eligibility.remainingSeconds)} 후 다시 등록할 수 있어요.`,
+        );
+      }
+    } catch {
+      // 안내용 조회가 실패해도 빌더 페이지 진입 자체는 막지 않는다(진입 후
+      // 최종 등록 시 서버가 다시 검사한다).
+      navigate('/quizzes/new');
+    } finally {
+      setCheckingQuizEligibility(false);
+    }
   };
 
   const runJoin = async (
@@ -296,14 +340,24 @@ export function RoomListPage() {
 
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-bold text-slate-700">방 목록</h1>
-          <button
-            type="button"
-            onClick={handleCreateClick}
-            disabled={!isInitialized}
-            className="rounded-full bg-purple-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-purple-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
-          >
-            + 새 방 만들기
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleCreateQuizClick}
+              disabled={!isInitialized || checkingQuizEligibility}
+              className="rounded-full bg-white px-5 py-2 text-sm font-semibold text-purple-600 shadow-sm transition hover:bg-purple-50 disabled:cursor-not-allowed disabled:text-slate-300"
+            >
+              + 퀴즈 만들기
+            </button>
+            <button
+              type="button"
+              onClick={handleCreateClick}
+              disabled={!isInitialized}
+              className="rounded-full bg-purple-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-purple-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+            >
+              + 새 방 만들기
+            </button>
+          </div>
         </div>
 
         {listError && <p className="text-sm text-rose-500">{listError}</p>}
@@ -359,6 +413,55 @@ export function RoomListPage() {
 
       {isJoinPreparingAd && (
         <RoomActionOverlay message="방에 입장하는 중입니다..." />
+      )}
+
+      {showQuizLoginRequired && (
+        <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40 px-4">
+          <div className="w-full max-w-xs rounded-2xl bg-white p-6 shadow-xl">
+            <h2 className="mb-1 text-base font-bold text-slate-800">
+              🔒 로그인이 필요해요
+            </h2>
+            <p className="mb-4 text-sm text-slate-500">
+              퀴즈 등록은 로그인 후 이용할 수 있어요.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowQuizLoginRequired(false)}
+                className="rounded-full px-5 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/')}
+                className="rounded-full bg-purple-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-purple-600"
+              >
+                로그인하러 가기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {quizBlockedMessage && (
+        <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40 px-4">
+          <div className="w-full max-w-xs rounded-2xl bg-white p-6 shadow-xl">
+            <h2 className="mb-1 text-base font-bold text-slate-800">
+              ⏳ 아직 등록할 수 없어요
+            </h2>
+            <p className="mb-4 text-sm text-slate-500">{quizBlockedMessage}</p>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setQuizBlockedMessage(null)}
+                className="rounded-full bg-purple-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-purple-600"
+              >
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {passwordPromptRoom && (

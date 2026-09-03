@@ -16,8 +16,12 @@ import { QuizArtist } from './entities/quiz-artist.entity';
 import { QuizSong } from './entities/quiz-song.entity';
 import { Quiz } from './entities/quiz.entity';
 import { Song } from './entities/song.entity';
-import { issueLinkVerificationToken } from './link-verification-token.util';
+import {
+  issueLinkVerificationToken,
+  verifyLinkVerificationToken,
+} from './link-verification-token.util';
 import { MIN_USER_QUIZ_SONG_COUNT } from './quiz.constants';
+import { QuizService } from './quiz.service';
 import { UserQuizRegistrationService } from './user-quiz-registration.service';
 import { YoutubeLinkValidationService } from './youtube-link-validation.service';
 
@@ -72,12 +76,14 @@ describe('UserQuizRegistrationService', () => {
 
   const quizRepositoryMock = {
     findOne: jest.fn(),
+    find: jest.fn(),
     save: jest.fn(),
     manager: managerMock,
   };
   const userServiceMock = { findUserKeyByUserId: jest.fn() };
   const youtubeLinkValidationServiceMock = { validate: jest.fn() };
   const notificationServiceMock = { create: jest.fn() };
+  const quizServiceMock = { getQuizSongs: jest.fn() };
 
   function makeQueryBuilder(songsWithArtists: unknown[]) {
     const qb: Record<string, jest.Mock> = {};
@@ -145,6 +151,7 @@ describe('UserQuizRegistrationService', () => {
           useValue: youtubeLinkValidationServiceMock,
         },
         { provide: NotificationService, useValue: notificationServiceMock },
+        { provide: QuizService, useValue: quizServiceMock },
       ],
     }).compile();
 
@@ -503,6 +510,161 @@ describe('UserQuizRegistrationService', () => {
           songs: dto.songs.slice(0, MIN_USER_QUIZ_SONG_COUNT - 1),
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('getMyQuizzes', () => {
+    it('내가 등록한 퀴즈를 최신순으로, 곡 수와 함께 반환한다', async () => {
+      quizRepositoryMock.find.mockResolvedValue([
+        {
+          quizId: 'quiz-2',
+          quizTtl: '두번째',
+          quizDesc: null,
+          playCnt: 3,
+          crtDt: new Date('2026-01-02'),
+        },
+        {
+          quizId: 'quiz-1',
+          quizTtl: '첫번째',
+          quizDesc: '설명',
+          playCnt: 0,
+          crtDt: new Date('2026-01-01'),
+        },
+      ]);
+      managerMock.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest
+          .fn()
+          .mockResolvedValue([{ quizId: 'quiz-2', count: '7' }]),
+      });
+
+      const result = await service.getMyQuizzes('user-1');
+
+      expect(result).toEqual([
+        expect.objectContaining({ quizId: 'quiz-2', songCount: 7 }),
+        expect.objectContaining({ quizId: 'quiz-1', songCount: 0 }),
+      ]);
+      expect(quizRepositoryMock.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { crtUserKey: 'user-key-1', useYn: 'Y' },
+        }),
+      );
+    });
+
+    it('등록한 퀴즈가 없으면 빈 배열을 반환하고 곡 수 조회를 하지 않는다', async () => {
+      quizRepositoryMock.find.mockResolvedValue([]);
+
+      const result = await service.getMyQuizzes('user-1');
+
+      expect(result).toEqual([]);
+      expect(managerMock.createQueryBuilder).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getQuizForEdit', () => {
+    it('본인 소유 퀴즈면 제목/설명/곡/정답과 함께, 재검증에 통과한 곡은 검증 토큰도 반환한다', async () => {
+      quizRepositoryMock.findOne.mockResolvedValue({
+        quizId: 'quiz-1',
+        quizTtl: '내 퀴즈',
+        quizDesc: '설명',
+        crtUserKey: 'user-key-1',
+      });
+      quizServiceMock.getQuizSongs.mockResolvedValue([
+        {
+          songId: 's1',
+          songNm: '봄날',
+          atstNm: '방탄소년단',
+          youtubeUrl: 'https://www.youtube.com/watch?v=v1',
+          answers: [{ answerTxt: '봄날' }, { answerTxt: 'Spring Day' }],
+        },
+      ]);
+      youtubeLinkValidationServiceMock.validate.mockResolvedValue({
+        valid: true,
+        youtubeVideoId: 'v1',
+        reason: null,
+      });
+
+      const result = await service.getQuizForEdit('user-1', 'quiz-1');
+
+      expect(youtubeLinkValidationServiceMock.validate).toHaveBeenCalledWith(
+        'https://www.youtube.com/watch?v=v1',
+        '봄날',
+      );
+      expect(result).toEqual({
+        quizId: 'quiz-1',
+        quizTtl: '내 퀴즈',
+        quizDesc: '설명',
+        songs: [
+          {
+            songId: 's1',
+            songNm: '봄날',
+            atstNm: '방탄소년단',
+            youtubeUrl: 'https://www.youtube.com/watch?v=v1',
+            answers: ['봄날', 'Spring Day'],
+            verificationToken: expect.any(String),
+            failReason: null,
+          },
+        ],
+      });
+      expect(
+        verifyLinkVerificationToken(
+          result.songs[0].verificationToken,
+          's1',
+          'v1',
+        ),
+      ).toBe('MANUAL');
+    });
+
+    it('재검증에 실패한 곡은 토큰 없이 실패 사유만 반환한다(등록을 막지 않고 빌더에서 다시 확인하게 함)', async () => {
+      quizRepositoryMock.findOne.mockResolvedValue({
+        quizId: 'quiz-1',
+        quizTtl: '내 퀴즈',
+        quizDesc: null,
+        crtUserKey: 'user-key-1',
+      });
+      quizServiceMock.getQuizSongs.mockResolvedValue([
+        {
+          songId: 's1',
+          songNm: '봄날',
+          atstNm: '방탄소년단',
+          youtubeUrl: 'https://www.youtube.com/watch?v=v1',
+          answers: [{ answerTxt: '봄날' }],
+        },
+      ]);
+      youtubeLinkValidationServiceMock.validate.mockResolvedValue({
+        valid: false,
+        youtubeVideoId: null,
+        reason: '영상 제목에 곡 제목이 포함되어 있지 않습니다.',
+      });
+
+      const result = await service.getQuizForEdit('user-1', 'quiz-1');
+
+      expect(result.songs[0].verificationToken).toBeNull();
+      expect(result.songs[0].failReason).toBe(
+        '영상 제목에 곡 제목이 포함되어 있지 않습니다.',
+      );
+    });
+
+    it('본인 소유가 아니면 ForbiddenException을 던진다', async () => {
+      quizRepositoryMock.findOne.mockResolvedValue({
+        quizId: 'quiz-1',
+        crtUserKey: 'other-user',
+      });
+
+      await expect(service.getQuizForEdit('user-1', 'quiz-1')).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('존재하지 않으면 NotFoundException을 던진다', async () => {
+      quizRepositoryMock.findOne.mockResolvedValue(null);
+
+      await expect(service.getQuizForEdit('user-1', 'quiz-1')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 

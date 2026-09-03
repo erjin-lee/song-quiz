@@ -25,16 +25,16 @@
 
 | # | 단계 | 이슈 | 상태 | 비고 |
 |---|---|---|---|---|
-| 8 | 진입점 + 로그인 모달 + 등록 가능 여부 사전 확인 | [FE1 #155](https://github.com/erjin-lee/song-quiz/issues/155) | 미착수 | #145 선행 필요(eligibility API) |
-| 9 | 퀴즈 만들기/수정 빌더 페이지 골격 | [FE2 #156](https://github.com/erjin-lee/song-quiz/issues/156) | 미착수 | |
-| 10 | 곡 검색 UI(DB → 멜론 폴백) + 중복 방지 | [FE3 #157](https://github.com/erjin-lee/song-quiz/issues/157) | 미착수 | #142 선행 필요 |
-| 11 | 곡별 링크·정답 편집 모달 + 비동기 검증 | [FE4 #158](https://github.com/erjin-lee/song-quiz/issues/158) | 미착수 | #143 #144 선행 필요 |
-| 12 | 빌더 진행 상태 로컬스토리지 임시 저장 | [FE5 #159](https://github.com/erjin-lee/song-quiz/issues/159) | 미착수 | |
-| 13 | 마이페이지 - 내 퀴즈 목록(수정/삭제) | [FE6 #160](https://github.com/erjin-lee/song-quiz/issues/160) | 미착수 | #148 선행 필요. "알림" 탭은 [알림 시스템 #154](https://github.com/erjin-lee/song-quiz/issues/154)에서 만든 컴포넌트를 배치만 함 |
+| 8 | 진입점 + 로그인 모달 + 등록 가능 여부 사전 확인 | [FE1 #155](https://github.com/erjin-lee/song-quiz/issues/155) | 완료 | #145 선행 필요(eligibility API) |
+| 9 | 퀴즈 만들기/수정 빌더 페이지 골격 | [FE2 #156](https://github.com/erjin-lee/song-quiz/issues/156) | 완료 | |
+| 10 | 곡 검색 UI(DB → 멜론 폴백) + 중복 방지 | [FE3 #157](https://github.com/erjin-lee/song-quiz/issues/157) | 완료 | #142 선행 필요. DB 검색 API(`GET /songs/search`)가 없어서 백엔드에 함께 추가했다 |
+| 11 | 곡별 링크·정답 편집 모달 + 비동기 검증 | [FE4 #158](https://github.com/erjin-lee/song-quiz/issues/158) | 완료 | #143 #144 선행 필요 |
+| 12 | 빌더 진행 상태 로컬스토리지 임시 저장 | [FE5 #159](https://github.com/erjin-lee/song-quiz/issues/159) | 완료 | |
+| 13 | 마이페이지 - 내 퀴즈 목록(수정/삭제) | [FE6 #160](https://github.com/erjin-lee/song-quiz/issues/160) | 완료 | #148 선행 필요. "알림" 탭은 [알림 시스템 #154](https://github.com/erjin-lee/song-quiz/issues/154)에서 만든 `NotificationBell`과 같은 API(`GET /notifications`)를 리스트 형태로 재사용 |
 
 ## 구현 메모(백엔드)
 
-- **마이그레이션**: [`1788400000000-AddQuizCrtUserKey.ts`](../../../apps/api/src/migrations/1788400000000-AddQuizCrtUserKey.ts)도 이 작업 환경에서 bastion 터널 접근이 안 돼 손으로 작성했다(`DB_INFO.txt` DDL 참고). **실제 반영 전 `migration:generate`로 diff 확인 + 사람이 `migration:run` 실행 필요**(알림 시스템 때와 동일한 사유). [`docs/db-changelog.md`](../../db-changelog.md)에 등록해뒀다.
+- **마이그레이션**: [`1788437170629-AddQuizCrtUserKey.ts`](../../../apps/api/src/migrations/1788437170629-AddQuizCrtUserKey.ts)도 이 작업 환경에서 bastion 터널 접근이 안 돼 손으로 작성했다(`DB_INFO.txt` DDL 참고). **실제 반영 전 `migration:generate`로 diff 확인 + 사람이 `migration:run` 실행 필요**(알림 시스템 때와 동일한 사유). [`docs/db-changelog.md`](../../db-changelog.md)에 등록해뒀다.
 - **멜론 곡 검색**(#142): 실제 `melon.com/search/song/index.htm` 페이지를 직접 호출해 HTML 구조를 확인한 뒤 셀렉터를 작성했다(`#artistName`에 화면용 링크 + 툴팁용 숨김 `<span>` 중복이 있어 `.children('a')`로 직계만 취함 — 앨범 파서의 기존 패턴과 동일). 새 엔드포인트는 순환 의존을 피하기 위해 `quiz` 모듈이 아니라 기존처럼 `scraper` 모듈에 추가했다(`scraper → quiz` 방향 유지).
 - **유튜브 링크 검증**(#143): 기존 `inquiry/youtube-url.util.ts`(ADR-0009 URL 검증 로직)를 `common/`으로 옮겨 `quiz` 모듈과 공유하도록 정리했다. `YoutubeScraperClient.getVideoInfo`가 이미 있어 재사용했고, `stripFeatAnnotations`/`toComparableText`(신규, `song-title-normalizer.ts`)로 곡 제목-영상 제목 대조와 정답 정규화를 같은 유틸로 처리한다.
 - **안전망 재검증**(#145): 저장되는 videoId/재생 구간은 클라이언트가 보낸 값이 아니라 서버가 `youtubeUrl`을 다시 파싱해서 계산한 값만 쓴다(ADR-0009, 테스트로 확인) — 처음엔 `youtubeVideoId`를 별도 필드로 클라이언트에게 받아 저장했는데, 코드 리뷰에서 "URL과 다른 videoId를 보내 검증은 통과시키고 실제로는 다른 영상을 등록할 수 있다"는 지적을 받고 그 필드 자체를 없앴다.
@@ -46,13 +46,27 @@
 - **QuizArtist 채우기**: 조사 중 `QuizArtist`(SQ_QUIZ_ATST, "퀴즈 대상 아티스트")가 이미 존재하고 `QuizService.getQuizzes`의 아티스트 검색이 이 테이블을 참조한다는 걸 확인했다 — 스펙에 명시돼 있지 않았지만, 유저 등록 퀴즈도 아티스트로 검색되게 하려면 필요해서 등록/수정 시 함께 채우도록 추가했다.
 - 코드 리뷰 세 라운드를 거치며 유닛 테스트를 계속 보강했다(신규 파일: `link-verification-token.util.spec.ts`, `user-song.service.spec.ts` 포함). `yarn workspace api test`(36 suites, 331건) / `build` / `lint` 전체 통과 확인.
 
+## 구현 메모(프런트엔드)
+
+- **작업 중 발견한 백엔드 공백 3건**: 프런트를 실제로 붙여보기 전까지는 몰랐던 빈 곳들이라 백엔드 쪽에 최소한만 추가했다(전부 읽기 전용 조회, 새 쓰기 로직 없음).
+  - `GET /songs/search?keyword=`(`UserSongService.searchSongs`): spec.md 3.1의 "1차: 기존 DB에서 제목/아티스트명으로 검색"이 실제로는 구현돼 있지 않았다 — 멜론 검색(2차)만 있었다.
+  - `GET /quizzes/mine`(`UserQuizRegistrationService.getMyQuizzes`): 로그인 유저 본인 퀴즈만 골라서 곡 수와 함께 보여주는 마이페이지 전용 목록. 기존 `GET /quizzes`(전체 공개 목록)로는 만들 수 없었다.
+  - `GET /quizzes/:quizId`(`UserQuizRegistrationService.getQuizForEdit`): 수정 화면 진입 시 기존 제목/설명/곡/링크/정답을 불러와 프리필하는 용도. 소유권 확인(본인 퀴즈 아니면 403)을 포함하며, 곡 목록 조회는 기존 `QuizService.getQuizSongs`를 재사용했다. 이 라우트는 `UserQuizRegistrationController`의 `GET mine`보다 반드시 뒤에 선언해야 한다 - `:quizId` 파라미터 라우트가 먼저면 `/quizzes/mine` 요청도 `quizId='mine'`으로 잘못 매칭된다(Express는 라우트를 선언 순서대로 매칭).
+- **검증 토큰이 진짜로 필요해진 이유(빌더 UX에 직결)**: 백엔드가 이미 "모든 곡은 최근에 검증받은 토큰이 있어야 등록/수정 가능"으로 강제하기 때문에, 프런트도 곡을 담을 때마다 링크 편집 모달 → "확인" → 서버 검증 → ✅ 상태가 되는 흐름을 반드시 거치게 만들었다. **수정 화면에서 기존 곡을 불러올 때도 토큰이 없으므로(발급 즉시 소모되는 값이라 저장 자체가 안 됨) 모든 곡이 "❔(미확인)" 상태로 시작하고, 수정 저장 전에 각 곡을 다시 확인해야 한다** — 처음엔 이게 나쁜 UX처럼 보였지만, 백엔드 쪽 코드 리뷰에서 이미 "토큰을 매번 새로 요구하면 오래된 상태를 추측할 필요가 없다"는 의도로 설계된 것이라 그대로 따랐다(백엔드 구현 메모의 "즉시 검증을 우회한 등록 차단 + 토큰 필수화" 참고).
+- **곡 카드 상태 머신**: `unverified`(❔, 아직 확인 안 함) → `checking`(⏳, 서버 검증 중) → `valid`(✅) | `invalid`(⚠️, 카드에 마우스 올리면 사유 툴팁). 링크를 다시 입력하거나 자동 검색을 다시 트리거하면 다시 `checking`으로 돌아간다. 등록/수정 버튼은 `songs.length >= 5 && songs.every(valid)`일 때만 활성화된다(spec.md 3.3 최종 등록 조건을 클라이언트에서도 미리 막음 - 실제 강제는 서버가 한다).
+- **로컬스토리지 임시 저장**(4.5, `utils/quizDraft.ts`, 기존 `roomSession.ts`와 동일 패턴): 새 퀴즈(`song-quiz:quiz-draft:new`)와 퀴즈별 수정(`song-quiz:quiz-draft:edit:{quizId}`)의 키를 분리해서, 새 퀴즈를 작성하다가 다른 탭에서 기존 퀴즈를 수정해도 서로 덮어쓰지 않는다. 초안이 있으면 항상 서버 재조회보다 초안을 우선한다(진행 중이던 미확인 링크/정답까지 그대로 복구하기 위함) - 검증 토큰도 초안에 그대로 저장되지만, 토큰 자체가 짧은 TTL(1시간)로 서명되어 있어 오래된 초안을 불러와도 만료된 토큰은 서버가 알아서 거부한다(별도 만료 처리 로직 불필요).
+- **멜론 검색으로 담은 곡의 아티스트 표시명**: `POST /songs/from-melon`의 응답(`RegisteredSongDto`)에는 아티스트명이 없어서(트러스트 경계상 서버가 캐시한 값만 신뢰 - 코드 리뷰 참고), 검색 결과 자체(`MelonSongSearchResultDto.artists`)에서 화면 표시용 아티스트명만 따로 꺼내 썼다(등록 자체는 melonSongId만으로 이뤄지므로 이 표시명이 실제 저장에 영향을 주지 않는다).
+- **마이페이지 알림 탭**: 새 UI를 만들지 않고 `NotificationBell`이 쓰는 것과 같은 `GET /notifications` 응답을 그대로 리스트로 펼쳐서 보여준다(spec.md 4.6 의도 그대로).
+- **미검증 항목**: 이 환경에서는 bastion 터널로 실 DB에 붙을 수 없고 로컬 Redis도 띄워져 있지 않아(`REDIS_HOST` 미설정 시 로컬 메모리 폴백은 되지만, 이번엔 그 폴백 단계 이전에 API 서버 자체가 Socket.IO Redis 어댑터 연결 실패로 부팅을 못 했다), 브라우저로 실제 클릭해가며 검증하지는 못했다. 타입 체크(`tsc -b`)와 `vite build`, 신규 컴포넌트 테스트(React Testing Library, 32건 추가)로만 검증했다 - 실제 배포 환경에서 한 번은 꼭 수동으로 전체 플로우를 훑어봐야 한다.
+- 신규 프런트 테스트 파일: `QuizBuilderPage.test.tsx`(7), `MyPage.test.tsx`(8), `quizDraft.test.ts`(7), `RoomListPage.test.tsx`에 3건 추가, `client.test.ts`에 `apiDelete` 1건 추가. `yarn workspace web test`(20 files, 118건) / `yarn web:build` / `yarn workspace web lint` 전체 통과 확인.
+
 ## 아직 안 고친 것(별도 결정 필요)
 
 코드 리뷰에서 나왔지만 아키텍처 결정이 필요하거나 우선순위상 미루기로 한 항목들. 고칠 때는 이 목록에서 지운다.
 
 - **안전망 재검증 유실 위험**: `void this.runBackgroundSafetyNet(...)`이 여전히 프로세스 메모리의 fire-and-forget 작업이라, 배포/재시작 중에는 유실될 수 있다. SQS/BullMQ 같은 큐 인프라를 새로 들이는 건 이 코드베이스에 없는 아키텍처 결정이라 임의로 진행하지 않고 별도로 확인 후 진행하기로 함(A안: 지금은 보류하기로 결정).
 - **검증 토큰이 재생 시작 시점(startSec)을 보증하지 않음**: [`link-verification-token.util.ts`](../../../apps/api/src/quiz/link-verification-token.util.ts)의 토큰은 songId+videoId만 서명하고 startSec은 서명 대상이 아니다. [`saveQuizSongsAndAnswers`](../../../apps/api/src/quiz/user-quiz-registration.service.ts)는 최종 요청의 `youtubeUrl`에서 startSec을 매번 새로 파싱해서 쓰므로, `t=10`으로 검증받은 뒤 같은 토큰과 `t=999999`가 붙은 URL을 제출하면 토큰 검증은 그대로 통과하고 `startSec=999999`(영상 길이를 벗어나 재생 불가한 구간)로 퀴즈가 즉시 공개된다. 안전망이 나중에 보정하지만, 그 사이엔 재생할 수 없는 퀴즈가 노출된다. 권장 수정 방향: 토큰에 정규화된 startSec(또는 전체 정규화 URL)도 서명해 최종 요청과 대조하거나, 제출 URL의 시작 시점은 무시하고 토큰에 서명된 값만 저장하도록 바꾸기 — 시작 시점 변조 테스트도 함께 추가해야 한다.
-- **기존 AUTO 링크를 그대로 둔 채 다른 필드만 수정하는 경로가 막혀 있음**: 수정(PATCH)이 모든 곡에 새 토큰을 요구하도록 바꾸면서 "다음날 퀴즈 수정 시 AUTO 출처를 알 수 없다"는 문제는 해결했지만, 그 대신 기존 AUTO 링크와 **동일한 URL**에 대해 AUTO 토큰을 다시 받을 방법이 없다는 새 문제가 생겼다 — `.../youtube-link/validate`는 항상 제목 매칭까지 하므로 애초에 AUTO 예외가 필요했던 영상(제목 표기가 다른 경우)은 여기서도 실패하고, `.../youtube-link/auto`는 같은 URL을 재검증하는 게 아니라 매번 새로 검색하므로 다른 영상이 나오거나 검색에 실패할 수 있다. 결과적으로 "설명만 수정" 같은 단순 수정이 거부되거나, 의도치 않게 링크가 바뀔 수 있다. 권장 수정 방향: `QuizSong`에 서버가 판단한 출처(MANUAL/AUTO)를 영속화해서 동일 songId+videoId면 재사용하거나, 소유자에게 "저장된 AUTO 출처 그대로 토큰만 재발급"하는 전용 엔드포인트를 추가하기 — 둘 다 스키마/API 설계 결정이 필요해 별도 확인 후 진행.
+- **기존 AUTO 링크를 그대로 둔 채 다른 필드만 수정하는 경로가 막혀 있음** — **대부분 완화됨(2026-09-03)**: 원래는 수정 화면에 들어가면 모든 곡이 토큰 없이(미확인 상태로) 시작해서, 단순히 설명만 고쳐도 곡마다 일일이 다시 확인해야 했다. 지금은 [`GET /quizzes/:quizId`](../../../apps/api/src/quiz/user-quiz-registration.service.ts)가 응답 시점에 각 곡을 서버가 직접 재검증해서(콘텐츠 매칭 포함) 통과한 곡은 토큰까지 함께 내려주므로, 빌더가 열리자마자 대부분의 곡이 바로 "확인 완료(✅)"로 채워진다. 다만 이건 어디까지나 "지금 다시 검증해서 통과하는가"를 매번 새로 판단하는 것이라, 원래 AUTO로 등록됐고 영상 제목이 곡명과 표기가 크게 다른 소수의 곡은 여전히 이 재검증에서 실패(⚠️)로 뜰 수 있다 — 이 경우엔 유저가 "자동으로 찾기"를 다시 누르거나 링크를 직접 확인해야 한다. `QuizSong`에 출처(MANUAL/AUTO)를 영속화하는 근본 해결책은 여전히 하지 않았다(스키마 변경 필요, 별도 결정 사항으로 남겨둠) — 실제로 이 정도의 잔여 불편이 문제가 되는지 지켜보고 필요하면 진행.
 
 ## 폐기된 이슈
 
@@ -71,3 +85,5 @@
 - 2026-09-02: `POST /quizzes`의 안전망 재검증을 동기 → 비동기(백그라운드)로 변경(직접 입력 링크가 많으면 응답이 느려지는 문제). 등록 버튼 클릭 직후 문구를 "등록 완료"가 아니라 "등록 신청" 뉘앙스로 변경. 알림 타입을 실패 전용(`QUIZ_REG_FAILED`)에서 완료 시 항상 발송(`QUIZ_REG_COMPLETED`, 제외 곡 있으면 제목/내용에 반영)으로 통합.
 - 2026-09-02: 백엔드 1~7단계(#150, #142~#145, #148, #147) 구현 완료. 알림 시스템 완료 후 착수 순서대로 진행. 프런트엔드(FE1~FE6)는 별도 착수.
 - 2026-09-03: 코드 리뷰 4차 - 검증 토큰의 startSec 미보증, 기존 AUTO 링크 재검증 경로 부재 2건을 "아직 안 고친 것"에 문서화만 하고 이번 라운드에서는 수정하지 않기로 함(별도 확인 후 진행).
+- 2026-09-03: 프런트엔드 8~13단계(FE1~FE6, #155~#160) 구현 완료. 진행 중 발견한 백엔드 공백 3건(DB 곡 검색, 마이페이지 내 퀴즈 목록, 수정 화면 프리필용 상세 조회 API)을 함께 추가. 브라우저로 직접 클릭해보는 수동 검증은 로컬 DB/Redis 접근 제약으로 못 했고, 타입 체크·빌드·유닛 테스트로만 확인함 - 배포 후 수동 확인 필요.
+- 2026-09-03: 수정 화면 진입 시 기존 곡이 전부 "미확인" 상태로 뜨던 걸 개선 — `GET /quizzes/:quizId`가 조회 시점에 각 곡을 서버에서 다시 검증해서 통과한 곡은 토큰까지 함께 내려주도록 변경. "아직 안 고친 것"의 AUTO 링크 재검증 항목이 대부분 완화됨(완전히 해결된 건 아님, 해당 항목 참고).

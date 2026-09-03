@@ -28,6 +28,17 @@ describe('UserSongService', () => {
     return qb;
   }
 
+  function makeSearchQueryBuilder(songs: unknown[]) {
+    const qb: Record<string, jest.Mock> = {};
+    qb.innerJoinAndSelect = jest.fn().mockReturnValue(qb);
+    qb.where = jest.fn().mockReturnValue(qb);
+    qb.orWhere = jest.fn().mockReturnValue(qb);
+    qb.orderBy = jest.fn().mockReturnValue(qb);
+    qb.take = jest.fn().mockReturnValue(qb);
+    qb.getMany = jest.fn().mockResolvedValue(songs);
+    return qb;
+  }
+
   beforeEach(async () => {
     jest.clearAllMocks();
     process.env.USER_JWT_SECRET = 'test-secret';
@@ -53,6 +64,40 @@ describe('UserSongService', () => {
 
   afterAll(() => {
     process.env.USER_JWT_SECRET = originalSecret;
+  });
+
+  describe('searchSongs', () => {
+    it('곡명 또는 대표 아티스트명으로 검색해 "곡명 - 가수명" 라벨을 붙여 반환한다', async () => {
+      songRepositoryMock.createQueryBuilder.mockReturnValue(
+        makeSearchQueryBuilder([
+          {
+            songId: 's1',
+            songNm: '봄날',
+            songArtists: [{ artist: { atstNm: '방탄소년단' } }],
+            ytbLink: 'https://www.youtube.com/watch?v=v1',
+          },
+        ]),
+      );
+
+      const result = await service.searchSongs('봄날');
+
+      expect(result).toEqual([
+        {
+          songId: 's1',
+          songNm: '봄날',
+          atstNm: '방탄소년단',
+          displayLabel: '봄날 - 방탄소년단',
+          ytbLink: 'https://www.youtube.com/watch?v=v1',
+        },
+      ]);
+    });
+
+    it('빈 키워드는 검색하지 않고 빈 배열을 반환한다', async () => {
+      const result = await service.searchSongs('   ');
+
+      expect(result).toEqual([]);
+      expect(songRepositoryMock.createQueryBuilder).not.toHaveBeenCalled();
+    });
   });
 
   describe('validateYoutubeLink', () => {

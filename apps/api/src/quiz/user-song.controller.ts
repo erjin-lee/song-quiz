@@ -5,6 +5,7 @@ import {
   Param,
   ParseIntPipe,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -16,6 +17,8 @@ import {
 } from '@nestjs/swagger';
 import { UserAuthGuard } from '../user/guards/user-auth.guard';
 import { AnswerCandidatesDto } from './dto/answer-candidates.dto';
+import { DbSongSearchResultDto } from './dto/db-song-search-result.dto';
+import { SearchSongsQueryDto } from './dto/search-songs-query.dto';
 import { ValidateYoutubeLinkRequestDto } from './dto/validate-youtube-link-request.dto';
 import { YoutubeLinkValidationResultDto } from './dto/youtube-link-validation-result.dto';
 import { UserSongService } from './user-song.service';
@@ -26,6 +29,15 @@ import { UserSongService } from './user-song.service';
 @ApiUnauthorizedResponse({ description: '인증 토큰이 없거나 유효하지 않음' })
 export class UserSongController {
   constructor(private readonly userSongService: UserSongService) {}
+
+  @Get('search')
+  @ApiOperation({ summary: 'DB에 이미 등록된 곡 검색(곡명/아티스트명, 1차)' })
+  @ApiOkResponse({ type: DbSongSearchResultDto, isArray: true })
+  searchSongs(
+    @Query() query: SearchSongsQueryDto,
+  ): Promise<DbSongSearchResultDto[]> {
+    return this.userSongService.searchSongs(query.keyword);
+  }
 
   @Post(':songId/youtube-link/validate')
   @ApiOperation({ summary: '유저가 입력한 유튜브 링크 즉시 검증' })

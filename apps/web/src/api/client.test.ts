@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { apiGet, apiPatch, apiPost, ApiError } from './client';
+import { apiDelete, apiGet, apiPatch, apiPost, ApiError } from './client';
 
 function mockFetchOnce(response: Partial<Response> & { json?: () => Promise<unknown> }) {
   const fetchMock = vi.fn().mockResolvedValue({
@@ -59,6 +59,17 @@ describe('api client', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       'http://localhost:8001/quiz/1',
       expect.objectContaining({ method: 'PATCH', body: undefined }),
+    );
+  });
+
+  it('apiDelete는 body 없이 DELETE 요청을 보낸다', async () => {
+    const fetchMock = mockFetchOnce({ status: 204, json: async () => undefined });
+
+    await apiDelete('/quizzes/1');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8001/quizzes/1',
+      expect.objectContaining({ method: 'DELETE' }),
     );
   });
 

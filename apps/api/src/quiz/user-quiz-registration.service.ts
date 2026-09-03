@@ -24,17 +24,23 @@ import { UserService } from '../user/user.service';
 import { CreateQuizRequestDto } from './dto/create-quiz-request.dto';
 import { CreateQuizResultDto } from './dto/create-quiz-result.dto';
 import { CreateQuizSongInputDto } from './dto/create-quiz-song-input.dto';
+import { MyQuizListItemDto } from './dto/my-quiz-list-item.dto';
+import { QuizEditDetailDto } from './dto/quiz-edit-detail.dto';
 import { RegistrationEligibilityDto } from './dto/registration-eligibility.dto';
 import { QuizAnswer } from './entities/quiz-answer.entity';
 import { QuizArtist } from './entities/quiz-artist.entity';
 import { QuizSong } from './entities/quiz-song.entity';
 import { Quiz } from './entities/quiz.entity';
 import { Song } from './entities/song.entity';
-import { verifyLinkVerificationToken } from './link-verification-token.util';
+import {
+  issueLinkVerificationToken,
+  verifyLinkVerificationToken,
+} from './link-verification-token.util';
 import {
   MIN_USER_QUIZ_SONG_COUNT,
   QUIZ_REGISTRATION_INTERVAL_MS,
 } from './quiz.constants';
+import { QuizService } from './quiz.service';
 import { YoutubeLinkValidationService } from './youtube-link-validation.service';
 
 interface ExcludedSongInfo {
@@ -66,6 +72,7 @@ export class UserQuizRegistrationService {
     private readonly userService: UserService,
     private readonly youtubeLinkValidationService: YoutubeLinkValidationService,
     private readonly notificationService: NotificationService,
+    private readonly quizService: QuizService,
   ) {}
 
   async getEligibility(userId: string): Promise<RegistrationEligibilityDto> {
@@ -75,6 +82,104 @@ export class UserQuizRegistrationService {
     return this.computeEligibility(this.quizRepository.manager, userKey, {
       lock: false,
     });
+  }
+
+  /** 마이페이지 "내가 등록한 퀴즈" 목록(4.6) - 최신 등록순. */
+  async getMyQuizzes(userId: string): Promise<MyQuizListItemDto[]> {
+    const userKey = await this.resolveUserKey(userId);
+    const quizzes = await this.quizRepository.find({
+      where: { crtUserKey: userKey, useYn: 'Y' },
+      order: { crtDt: 'DESC' },
+    });
+    if (quizzes.length === 0) {
+      return [];
+    }
+
+    const songCountRows = await this.quizRepository.manager
+      .createQueryBuilder(QuizSong, 'quizSong')
+      .select('quizSong.quizId', 'quizId')
+      .addSelect('COUNT(*)', 'count')
+      .where('quizSong.quizId IN (:...quizIds)', {
+        quizIds: quizzes.map((quiz) => quiz.quizId),
+      })
+      .groupBy('quizSong.quizId')
+      .getRawMany<{ quizId: string; count: string }>();
+    const songCountByQuizId = new Map(
+      songCountRows.map((row) => [row.quizId, Number(row.count)]),
+    );
+
+    return quizzes.map((quiz) => ({
+      quizId: quiz.quizId,
+      quizTtl: quiz.quizTtl,
+      quizDesc: quiz.quizDesc,
+      songCount: songCountByQuizId.get(quiz.quizId) ?? 0,
+      playCnt: quiz.playCnt,
+      crtDt: quiz.crtDt.toISOString(),
+    }));
+  }
+
+  /**
+   * 수정 화면(/quizzes/:quizId/edit) 프리필용 - 본인 소유 퀴즈만 조회 가능.
+   * 각 곡을 조회 시점에 다시 검증해서, 여전히 유효하면 토큰을 함께 내려준다 -
+   * 그래야 빌더가 기존 곡을 전부 "미확인"으로 띄우고 유저가 일일이 다시
+   * 확인해야 하는 상황을 피할 수 있다(토큰은 발급 즉시 소모되는 값이라 DB에
+   * 저장해둘 수 없으므로, 조회 때마다 새로 만든다). 저장된 링크가 원래
+   * AUTO(자동 검색)로 채워졌던 경우에도 여기서는 항상 제목 매칭까지 포함한
+   * 전체 재검증을 한다 - "아직 안 고친 것" 문서 참고, 제목 표기가 크게
+   * 다른 극소수 AUTO 링크는 여기서 실패로 뜰 수 있고 그럴 때만 유저가
+   * 다시 확인하면 된다.
+   */
+  async getQuizForEdit(
+    userId: string,
+    quizId: string,
+  ): Promise<QuizEditDetailDto> {
+    const userKey = await this.resolveUserKey(userId);
+    const quiz = await this.quizRepository.findOne({ where: { quizId } });
+    if (!quiz) {
+      throw new NotFoundException(
+        `퀴즈를 찾을 수 없습니다. (quizId: ${quizId})`,
+      );
+    }
+    if (quiz.crtUserKey !== userKey) {
+      throw new ForbiddenException('본인이 등록한 퀴즈만 수정할 수 있습니다.');
+    }
+
+    const songs = await this.quizService.getQuizSongs(quizId);
+    const songsWithVerification = await Promise.all(
+      songs.map(async (song) => {
+        const result = await this.youtubeLinkValidationService.validate(
+          song.youtubeUrl,
+          song.songNm,
+        );
+        const verificationToken =
+          result.valid && result.youtubeVideoId
+            ? issueLinkVerificationToken(
+                song.songId,
+                result.youtubeVideoId,
+                'MANUAL',
+              )
+            : null;
+
+        return {
+          songId: song.songId,
+          songNm: song.songNm,
+          atstNm: song.atstNm,
+          youtubeUrl: song.youtubeUrl,
+          answers: song.answers.map((answer) => answer.answerTxt),
+          verificationToken,
+          failReason: result.valid
+            ? null
+            : (result.reason ?? '링크를 확인할 수 없습니다.'),
+        };
+      }),
+    );
+
+    return {
+      quizId: quiz.quizId,
+      quizTtl: quiz.quizTtl,
+      quizDesc: quiz.quizDesc,
+      songs: songsWithVerification,
+    };
   }
 
   async createQuiz(
