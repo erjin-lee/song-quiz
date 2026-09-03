@@ -120,14 +120,17 @@ export class UserQuizRegistrationService {
 
   /**
    * 수정 화면(/quizzes/:quizId/edit) 프리필용 - 본인 소유 퀴즈만 조회 가능.
-   * 각 곡을 조회 시점에 다시 검증해서, 여전히 유효하면 토큰을 함께 내려준다 -
-   * 그래야 빌더가 기존 곡을 전부 "미확인"으로 띄우고 유저가 일일이 다시
-   * 확인해야 하는 상황을 피할 수 있다(토큰은 발급 즉시 소모되는 값이라 DB에
-   * 저장해둘 수 없으므로, 조회 때마다 새로 만든다). 저장된 링크가 원래
-   * AUTO(자동 검색)로 채워졌던 경우에도 여기서는 항상 제목 매칭까지 포함한
-   * 전체 재검증을 한다 - "아직 안 고친 것" 문서 참고, 제목 표기가 크게
-   * 다른 극소수 AUTO 링크는 여기서 실패로 뜰 수 있고 그럴 때만 유저가
-   * 다시 확인하면 된다.
+   * 조회 시점에 유튜브를 다시 스크래핑해서 재검증하지 않는다 - 이 QuizSong
+   * 행이 지금 존재한다는 사실 자체가 "이미 검증을 통과했다"는 뜻이기
+   * 때문이다: 생성/수정 시점에 이미 서명된 토큰(즉시 검증 통과 증명)이
+   * 없으면 애초에 저장되지 않고, 그 이후 백그라운드 안전망이 재검증해서
+   * 실패하면 QuizSong/QuizAnswer 행 자체를 삭제한다(runBackgroundSafetyNet
+   * 참고) - 그래서 살아남은 행은 항상 "검증을 통과한 상태"만 나타낸다.
+   * 곡 수만큼 유튜브에 매번 실시간으로 재검증 요청을 보내면(이전 구현)
+   * 곡이 많은 퀴즈를 열 때마다 외부 요청이 무제한으로 몰리는 문제도 있었다
+   * (코드 리뷰 지적) - 저장된 상태를 그대로 신뢰하는 쪽으로 바꿔 이 문제도
+   * 함께 해소된다. 대신 이 사이 영상이 비공개/삭제된 것 같은 드문 TOCTOU는
+   * 여기서 잡지 못하고, 다음 등록/수정 시점의 안전망이 마지막 방어선이 된다.
    */
   async getQuizForEdit(
     userId: string,
@@ -145,8 +148,11 @@ export class UserQuizRegistrationService {
     }
 
     const songs = await this.quizService.getQuizSongs(quizId);
-    const songsWithVerification = await Promise.all(
-      songs.map(async (song) => {
+    return {
+      quizId: quiz.quizId,
+      quizTtl: quiz.quizTtl,
+      quizDesc: quiz.quizDesc,
+      songs: songs.map((song) => {
         // QuizService.getQuizSongs()의 youtubeUrl은 재생용으로 t=를 1초
         // 앞당겨 보정한 값이다(플레이어 로딩 버퍼 대응) - 그 값을 그대로
         // 수정 화면에 돌려주면, 건드리지 않은 곡도 저장할 때마다 시작
@@ -155,19 +161,13 @@ export class UserQuizRegistrationService {
         const editYoutubeUrl = song.youtubeVideoId
           ? buildYoutubeWatchUrl(song.youtubeVideoId, song.startSec)
           : song.youtubeUrl;
-
-        const result = await this.youtubeLinkValidationService.validate(
-          editYoutubeUrl,
-          song.songNm,
-        );
-        const verificationToken =
-          result.valid && result.youtubeVideoId
-            ? issueLinkVerificationToken(
-                song.songId,
-                result.youtubeVideoId,
-                'MANUAL',
-              )
-            : null;
+        const verificationToken = song.youtubeVideoId
+          ? issueLinkVerificationToken(
+              song.songId,
+              song.youtubeVideoId,
+              'MANUAL',
+            )
+          : null;
 
         return {
           songId: song.songId,
@@ -176,18 +176,11 @@ export class UserQuizRegistrationService {
           youtubeUrl: editYoutubeUrl,
           answers: song.answers.map((answer) => answer.answerTxt),
           verificationToken,
-          failReason: result.valid
+          failReason: verificationToken
             ? null
-            : (result.reason ?? '링크를 확인할 수 없습니다.'),
+            : '유튜브 영상 정보를 확인할 수 없습니다. 링크를 다시 확인해주세요.',
         };
       }),
-    );
-
-    return {
-      quizId: quiz.quizId,
-      quizTtl: quiz.quizTtl,
-      quizDesc: quiz.quizDesc,
-      songs: songsWithVerification,
     };
   }
 

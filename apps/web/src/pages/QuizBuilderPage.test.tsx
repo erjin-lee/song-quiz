@@ -505,7 +505,7 @@ describe('QuizBuilderPage', () => {
     expect(screen.getByRole('button', { name: '수정하기' })).toBeDisabled();
   });
 
-  it('수정 화면 진입 시 서버 재검증에 실패한 곡은 실패 상태로 표시한다', async () => {
+  it('수정 화면 진입 시 토큰이 없는 곡(이상 상태)은 실패 상태로 표시한다', async () => {
     mockedUseSession.mockReturnValue(makeSessionValue({}));
     mockedGetQuizForEdit.mockResolvedValue({
       quizId: 'quiz-1',
@@ -519,7 +519,8 @@ describe('QuizBuilderPage', () => {
           youtubeUrl: 'https://www.youtube.com/watch?v=v1',
           answers: ['봄날'],
           verificationToken: null,
-          failReason: '영상 제목에 곡 제목이 포함되어 있지 않습니다.',
+          failReason:
+            '유튜브 영상 정보를 확인할 수 없습니다. 링크를 다시 확인해주세요.',
         },
       ],
     });

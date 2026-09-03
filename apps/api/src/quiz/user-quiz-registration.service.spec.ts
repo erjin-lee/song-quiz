@@ -565,7 +565,7 @@ describe('UserQuizRegistrationService', () => {
   });
 
   describe('getQuizForEdit', () => {
-    it('본인 소유 퀴즈면 제목/설명/곡/정답과 함께, 재검증에 통과한 곡은 검증 토큰도 반환한다', async () => {
+    it('본인 소유 퀴즈면 제목/설명/곡/정답과 함께, 저장된 링크를 그대로 신뢰해 검증 토큰을 반환한다(다시 스크래핑하지 않음)', async () => {
       quizRepositoryMock.findOne.mockResolvedValue({
         quizId: 'quiz-1',
         quizTtl: '내 퀴즈',
@@ -585,20 +585,12 @@ describe('UserQuizRegistrationService', () => {
           answers: [{ answerTxt: '봄날' }, { answerTxt: 'Spring Day' }],
         },
       ]);
-      youtubeLinkValidationServiceMock.validate.mockResolvedValue({
-        valid: true,
-        youtubeVideoId: 'v1',
-        reason: null,
-      });
 
       const result = await service.getQuizForEdit('user-1', 'quiz-1');
 
-      // 검증도, 응답도 재생용으로 보정된 URL(t=99)이 아니라 원본 startSec(100)으로
-      // 재조합한 URL을 써야 한다 - 그래야 수정할 때마다 시작 지점이 계속 줄어들지 않는다.
-      expect(youtubeLinkValidationServiceMock.validate).toHaveBeenCalledWith(
-        'https://www.youtube.com/watch?v=v1&t=100',
-        '봄날',
-      );
+      // 이미 저장된 QuizSong 행이라는 사실 자체를 신뢰 증거로 쓴다 - 안전망을
+      // 통과 못 한 곡은 애초에 삭제되므로 다시 스크래핑해서 검증할 필요가 없다.
+      expect(youtubeLinkValidationServiceMock.validate).not.toHaveBeenCalled();
       expect(result).toEqual({
         quizId: 'quiz-1',
         quizTtl: '내 퀴즈',
@@ -608,6 +600,9 @@ describe('UserQuizRegistrationService', () => {
             songId: 's1',
             songNm: '봄날',
             atstNm: '방탄소년단',
+            // 재생용으로 보정된 URL(t=99)이 아니라 원본 startSec(100)으로
+            // 재조합한 URL이어야 한다 - 그래야 수정할 때마다 시작 지점이
+            // 계속 줄어들지 않는다.
             youtubeUrl: 'https://www.youtube.com/watch?v=v1&t=100',
             answers: ['봄날', 'Spring Day'],
             verificationToken: expect.any(String),
@@ -624,7 +619,7 @@ describe('UserQuizRegistrationService', () => {
       ).toBe('MANUAL');
     });
 
-    it('재검증에 실패한 곡은 토큰 없이 실패 사유만 반환한다(등록을 막지 않고 빌더에서 다시 확인하게 함)', async () => {
+    it('videoId가 없는 이상 상태의 곡은 토큰 없이 실패 사유를 반환한다', async () => {
       quizRepositoryMock.findOne.mockResolvedValue({
         quizId: 'quiz-1',
         quizTtl: '내 퀴즈',
@@ -637,20 +632,17 @@ describe('UserQuizRegistrationService', () => {
           songNm: '봄날',
           atstNm: '방탄소년단',
           youtubeUrl: 'https://www.youtube.com/watch?v=v1',
+          youtubeVideoId: null,
+          startSec: 0,
           answers: [{ answerTxt: '봄날' }],
         },
       ]);
-      youtubeLinkValidationServiceMock.validate.mockResolvedValue({
-        valid: false,
-        youtubeVideoId: null,
-        reason: '영상 제목에 곡 제목이 포함되어 있지 않습니다.',
-      });
 
       const result = await service.getQuizForEdit('user-1', 'quiz-1');
 
       expect(result.songs[0].verificationToken).toBeNull();
       expect(result.songs[0].failReason).toBe(
-        '영상 제목에 곡 제목이 포함되어 있지 않습니다.',
+        '유튜브 영상 정보를 확인할 수 없습니다. 링크를 다시 확인해주세요.',
       );
     });
 
