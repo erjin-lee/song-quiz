@@ -97,7 +97,11 @@ describe('UserQuizRegistrationService', () => {
   let lastQuizResult: unknown = null;
   let ownedQuizResult: unknown = null;
   let songsFindResult: unknown[] = [];
-  let existingQuizSongIds: { quizSongId: string }[] = [];
+  let existingQuizSongIds: {
+    quizSongId: string;
+    songId?: string;
+    youtubeVideoId?: string | null;
+  }[] = [];
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -510,6 +514,39 @@ describe('UserQuizRegistrationService', () => {
           songs: dto.songs.slice(0, MIN_USER_QUIZ_SONG_COUNT - 1),
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('링크를 안 건드린 기존 곡은 토큰 출처와 무관하게 안전망 제목 매칭을 생략한다(설명만 고쳐도 삭제되지 않도록)', async () => {
+      // 곡 '1'은 수정 전에도 이미 이 퀴즈에 videoId 'v1'로 들어있었고, 이번
+      // 제출도 같은 videoId다 - 수정 화면 프리필은 항상 MANUAL 토큰을
+      // 발급하지만(getQuizForEdit), 링크 자체가 안 바뀌었으니 원래 AUTO로
+      // 등록됐을 수도 있는 이 곡의 제목 매칭 예외를 그대로 유지해야 한다.
+      existingQuizSongIds = [
+        { quizSongId: 'old-1', songId: '1', youtubeVideoId: 'v1' },
+      ];
+
+      await service.updateQuiz('user-1', 'quiz-1', dto);
+      await flushMicrotasks();
+
+      const call = youtubeLinkValidationServiceMock.validate.mock.calls.find(
+        ([url]: [string]) => url.includes('v1'),
+      );
+      expect(call[2]).toEqual({ skipContentCheck: true });
+    });
+
+    it('링크가 바뀐 기존 곡은 MANUAL 토큰이면 안전망 제목 매칭을 그대로 수행한다', async () => {
+      // 곡 '1'은 수정 전엔 videoId 'v-old'였는데 이번엔 다른 링크(v1)로 바뀌었다.
+      existingQuizSongIds = [
+        { quizSongId: 'old-1', songId: '1', youtubeVideoId: 'v-old' },
+      ];
+
+      await service.updateQuiz('user-1', 'quiz-1', dto);
+      await flushMicrotasks();
+
+      const call = youtubeLinkValidationServiceMock.validate.mock.calls.find(
+        ([url]: [string]) => url.includes('v1'),
+      );
+      expect(call[2]).toEqual({ skipContentCheck: false });
     });
   });
 

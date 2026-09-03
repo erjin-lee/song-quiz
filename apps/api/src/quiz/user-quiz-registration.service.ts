@@ -292,12 +292,22 @@ export class UserQuizRegistrationService {
         // 클라이언트가 계산한 최종 리스트를 그대로 반영하는 게 스펙 의도라, 부분
         // upsert로 곡 순서·추가/삭제를 각각 맞추는 것보다 이 편이 훨씬 단순하다.
         // 트랜잭션 하나로 묶여 있어 중간에 실패해도 기존 구성이 사라지지 않는다.
-        const existingQuizSongIds = (
-          await manager.find(QuizSong, {
-            where: { quizId },
-            select: { quizSongId: true },
-          })
-        ).map((quizSong) => quizSong.quizSongId);
+        const existingQuizSongs = await manager.find(QuizSong, {
+          where: { quizId },
+          select: { quizSongId: true, songId: true, youtubeVideoId: true },
+        });
+        // 삭제 전에 songId별 기존 videoId를 기억해둔다 - saveQuizSongsAndAnswers가
+        // 이걸로 "링크를 안 건드린 곡"을 가려내 안전망 제목 매칭을 생략해야
+        // 한다(위 saveQuizSongsAndAnswers 주석 참고).
+        const previousVideoIdBySongId = new Map(
+          existingQuizSongs.map((quizSong) => [
+            quizSong.songId,
+            quizSong.youtubeVideoId,
+          ]),
+        );
+        const existingQuizSongIds = existingQuizSongs.map(
+          (quizSong) => quizSong.quizSongId,
+        );
         if (existingQuizSongIds.length > 0) {
           await manager.delete(QuizAnswer, {
             quizSongId: In(existingQuizSongIds),
@@ -307,7 +317,12 @@ export class UserQuizRegistrationService {
         await manager.delete(QuizArtist, { quizId });
 
         const { quizSongs, skipContentCheckByQuizSongId } =
-          await this.saveQuizSongsAndAnswers(manager, quizId, dto.songs);
+          await this.saveQuizSongsAndAnswers(
+            manager,
+            quizId,
+            dto.songs,
+            previousVideoIdBySongId,
+          );
         await this.populateQuizArtists(
           manager,
           quizId,
@@ -380,6 +395,14 @@ export class UserQuizRegistrationService {
     manager: EntityManager,
     quizId: string,
     songs: CreateQuizSongInputDto[],
+    // 수정(updateQuiz)에서만 넘어온다 - 이 songId+videoId 조합이 수정 전에도
+    // 이미 이 퀴즈에 들어있던 조합이면(링크를 안 건드린 곡), 토큰 출처와
+    // 무관하게 안전망 제목 매칭을 생략한다. "예전에 통과했음을 그대로
+    // 신뢰한다"는 원칙(getQuizForEdit과 동일)을 안전망에도 적용하지 않으면,
+    // 원래 AUTO로 등록돼 표기 차이가 있던 곡이 설명만 고쳐도 수정 화면이
+    // 항상 MANUAL 토큰을 발급한다는 이유만으로 안전망에서 삭제돼버린다
+    // (코드 리뷰 지적).
+    previousVideoIdBySongId?: Map<string, string | null>,
   ): Promise<{
     quizSongs: QuizSong[];
     skipContentCheckByQuizSongId: Map<string, boolean>;
@@ -415,6 +438,8 @@ export class UserQuizRegistrationService {
           `링크 검증이 확인되지 않았거나 만료됐습니다. 다시 검증해주세요. (songId: ${songInput.songId})`,
         );
       }
+      const isUnchangedLink =
+        previousVideoIdBySongId?.get(songInput.songId) === videoId;
 
       const quizSong = await manager.save(
         QuizSong,
@@ -432,7 +457,7 @@ export class UserQuizRegistrationService {
       quizSongs.push(quizSong);
       skipContentCheckByQuizSongId.set(
         quizSong.quizSongId,
-        verifiedSource === 'AUTO',
+        isUnchangedLink || verifiedSource === 'AUTO',
       );
 
       // 같은 곡에 중복 정답을 보내도 유니크 제약과 충돌하지 않도록 dedupe한다.
