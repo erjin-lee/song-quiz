@@ -2,6 +2,7 @@ import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 
 @Entity('SQ_QUIZ', { comment: '노래 맞추기 퀴즈' })
 @Index('IDX_SQ_QUIZ_01', ['useYn'])
+@Index('IDX_SQ_QUIZ_02', ['crtUserKey'])
 export class Quiz {
   @PrimaryGeneratedColumn({
     name: 'QUIZ_ID',
@@ -45,6 +46,15 @@ export class Quiz {
     comment: '플레이 횟수',
   })
   playCnt: number;
+
+  @Column({
+    name: 'CRT_USER_KEY',
+    type: 'bigint',
+    unsigned: true,
+    nullable: true,
+    comment: '등록한 유저 고유 ID(운영진이 생성한 기존 퀴즈는 NULL)',
+  })
+  crtUserKey: string | null;
 
   @Column({
     name: 'USE_YN',

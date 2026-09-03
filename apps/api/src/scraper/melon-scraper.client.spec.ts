@@ -266,4 +266,127 @@ describe('MelonScraperClient', () => {
       );
     });
   });
+
+  describe('searchSongs', () => {
+    function songRow(options: {
+      songId: string;
+      songNm: string;
+      artists: Array<{ id: string; nm: string }>;
+      albmId: string;
+      albmNm: string;
+    }): string {
+      const artistLinks = options.artists
+        .map(
+          (a) =>
+            `<a href="javascript:melon.link.goArtistDetail('${a.id}');" title="${a.nm} - 페이지 이동" class="fc_mgray">${a.nm}</a>`,
+        )
+        .join(', ');
+      return `
+        <tr>
+          <td><input type="checkbox" class="input_check" name="input_check" value="${options.songId}" /></td>
+          <td class="t_left"><div class="ellipsis">
+            <a href="javascript:;" class="btn btn_icon_detail"><span>상세정보</span></a>
+            <a href="javascript:;" class="fc_gray" title="${options.songNm}"><b>${options.songNm}</b></a>
+          </div></td>
+          <td class="t_left"><div id="artistName" class="ellipsis">
+            ${artistLinks}
+            <span class="checkEllipsisSongdefaultList" style="display:none">${artistLinks}</span>
+          </div></td>
+          <td class="t_left"><div class="ellipsis">
+            <a href="javascript:melon.link.goAlbumDetail('${options.albmId}');" title="${options.albmNm} - 페이지 이동" class="fc_mgray">${options.albmNm}</a>
+          </div></td>
+        </tr>
+      `;
+    }
+
+    it('곡 검색 결과를 파싱한다(다중 아티스트 숨김 중복 제거 포함)', async () => {
+      const html = `
+        <div class="d_song_list">
+          <table><tbody>
+            ${songRow({
+              songId: '111',
+              songNm: '봄날',
+              artists: [{ id: '672375', nm: '방탄소년단' }],
+              albmId: '10037969',
+              albmNm: 'YOU NEVER WALK ALONE',
+            })}
+            ${songRow({
+              songId: '222',
+              songNm: '봄날 (Duet)',
+              artists: [
+                { id: '714975', nm: '스무살' },
+                { id: '2398314', nm: '보라미유' },
+              ],
+              albmId: '10854549',
+              albmNm: '연필선',
+            })}
+          </tbody></table>
+        </div>
+      `;
+      fetchSpy.mockResolvedValueOnce(fakeResponse(html));
+
+      const result = await client.searchSongs('봄날');
+
+      expect(result).toEqual([
+        {
+          melonSongId: '111',
+          songNm: '봄날',
+          melonAlbmId: '10037969',
+          albmNm: 'YOU NEVER WALK ALONE',
+          artists: [{ melonArtistId: '672375', atstNm: '방탄소년단' }],
+        },
+        {
+          melonSongId: '222',
+          songNm: '봄날 (Duet)',
+          melonAlbmId: '10854549',
+          albmNm: '연필선',
+          artists: [
+            { melonArtistId: '714975', atstNm: '스무살' },
+            { melonArtistId: '2398314', atstNm: '보라미유' },
+          ],
+        },
+      ]);
+    });
+
+    it('상위 10건까지만 반환한다', async () => {
+      const rows = Array.from({ length: 15 }, (_, i) =>
+        songRow({
+          songId: String(i + 1),
+          songNm: `곡 ${i + 1}`,
+          artists: [{ id: '1', nm: '아티스트' }],
+          albmId: '1',
+          albmNm: '앨범',
+        }),
+      ).join('');
+      fetchSpy.mockResolvedValueOnce(
+        fakeResponse(
+          `<div class="d_song_list"><table><tbody>${rows}</tbody></table></div>`,
+        ),
+      );
+
+      const result = await client.searchSongs('곡');
+
+      expect(result).toHaveLength(10);
+    });
+
+    it('아티스트나 앨범 정보가 없는 행은 건너뛴다', async () => {
+      const html = `
+        <div class="d_song_list"><table><tbody>
+          <tr>
+            <td><input type="checkbox" class="input_check" name="input_check" value="999" /></td>
+            <td class="t_left"><div class="ellipsis">
+              <a href="javascript:;" class="fc_gray" title="아티스트 없는 곡"><b>아티스트 없는 곡</b></a>
+            </div></td>
+            <td class="t_left"><div id="artistName" class="ellipsis"></div></td>
+            <td class="t_left"><div class="ellipsis"></div></td>
+          </tr>
+        </tbody></table></div>
+      `;
+      fetchSpy.mockResolvedValueOnce(fakeResponse(html));
+
+      const result = await client.searchSongs('아무거나');
+
+      expect(result).toEqual([]);
+    });
+  });
 });
