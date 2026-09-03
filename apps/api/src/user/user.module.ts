@@ -34,6 +34,11 @@ import { UserService } from './user.service';
   ],
   controllers: [UserAuthController, UserInternalController],
   providers: [UserService, UserAuthGuard, EmailAuthService],
-  exports: [UserService, UserAuthGuard],
+  // JwtModule도 함께 export한다 - UserAuthGuard를 @UseGuards(UserAuthGuard)로
+  // 쓰는 다른 모듈(quiz/scraper/notification 등)에서는 NestJS가 그 가드를
+  // 해당 모듈 컨텍스트에서 별도 인스턴스로 다시 생성하는데, 이때 생성자 의존성인
+  // JwtService가 그 모듈 안에서 보여야 한다. UserAuthGuard만 export하면
+  // 가드 클래스 자체는 보여도 그 생성자 의존성까지 따라오지 않는다.
+  exports: [UserService, UserAuthGuard, JwtModule],
 })
 export class UserModule {}
