@@ -292,6 +292,23 @@ export class UserQuizRegistrationService {
       const startSec = parsedStartSec ?? 0;
       const endSec = startSec + QUIZ_SONG_CLIP_SEC;
 
+      // 이 songId+videoId 조합이 즉시 검증(.../validate 또는 .../auto)을
+      // 통과했다는 사실 자체를 토큰으로 증명해야 등록을 받는다
+      // (link-verification-token.util.ts) - 이 게이트가 없으면 즉시 검증
+      // API를 아예 안 거치고 형식만 맞는 URL을 바로 제출해 콘텐츠 검증 없이
+      // 퀴즈를 공개할 수 있다(spec.md 4.1 "최종 등록 조건", 코드 리뷰 지적).
+      // 토큰 출처가 AUTO일 때만 안전망이 제목 매칭을 생략한다.
+      const verifiedSource = verifyLinkVerificationToken(
+        songInput.verificationToken,
+        songInput.songId,
+        videoId,
+      );
+      if (!verifiedSource) {
+        throw new BadRequestException(
+          `링크 검증이 확인되지 않았거나 만료됐습니다. 다시 검증해주세요. (songId: ${songInput.songId})`,
+        );
+      }
+
       const quizSong = await manager.save(
         QuizSong,
         manager.create(QuizSong, {
@@ -306,15 +323,6 @@ export class UserQuizRegistrationService {
         }),
       );
       quizSongs.push(quizSong);
-
-      // 토큰이 이 songId+videoId 조합에 대해 서버가 발급한 AUTO 검증인지
-      // 확인한다(link-verification-token.util.ts) - 토큰이 없거나 위조/만료됐거나
-      // 다른 곡·다른 영상용이면 항상 콘텐츠 검증까지 하는 쪽(false)으로 fallback한다.
-      const verifiedSource = verifyLinkVerificationToken(
-        songInput.verificationToken,
-        songInput.songId,
-        videoId,
-      );
       skipContentCheckByQuizSongId.set(
         quizSong.quizSongId,
         verifiedSource === 'AUTO',

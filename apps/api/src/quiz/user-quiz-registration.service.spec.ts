@@ -21,6 +21,10 @@ import { MIN_USER_QUIZ_SONG_COUNT } from './quiz.constants';
 import { UserQuizRegistrationService } from './user-quiz-registration.service';
 import { YoutubeLinkValidationService } from './youtube-link-validation.service';
 
+// baseDto/dto가 describe 콜백 실행 시점(파일 로드 중, beforeEach보다 먼저)에
+// makeSongInput으로 기본 토큰을 만들어야 해서 시크릿을 모듈 최상단에서 설정한다.
+process.env.USER_JWT_SECRET = 'test-secret';
+
 function flushMicrotasks(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
@@ -29,10 +33,19 @@ function makeSongInput(
   songId: string,
   overrides: Partial<Record<string, unknown>> = {},
 ) {
+  const youtubeUrl = `https://www.youtube.com/watch?v=v${songId}&t=10`;
   return {
     songId,
-    youtubeUrl: `https://www.youtube.com/watch?v=v${songId}&t=10`,
+    youtubeUrl,
     answers: [`정답${songId}`],
+    // 기본값은 직접 입력(MANUAL) 검증을 통과한 것으로 가정한다 - 최종 등록은
+    // 이제 모든 곡에 유효한 토큰을 요구하므로, 토큰 자체를 테스트하는 곳이
+    // 아니면 매번 명시할 필요 없게 기본으로 채워둔다.
+    verificationToken: issueLinkVerificationToken(
+      songId,
+      `v${songId}`,
+      'MANUAL',
+    ),
     ...overrides,
   };
 }
@@ -305,6 +318,11 @@ describe('UserQuizRegistrationService', () => {
           makeSongInput('1', {
             youtubeUrl:
               'https://www.youtube.com/watch?v=realvid&t=5&extra=evil',
+            verificationToken: issueLinkVerificationToken(
+              '1',
+              'realvid',
+              'MANUAL',
+            ),
           }),
           ...baseDto.songs.slice(1),
         ],
@@ -361,7 +379,7 @@ describe('UserQuizRegistrationService', () => {
       );
     });
 
-    it('검증 토큰이 없으면 안전망이 항상 콘텐츠(제목) 검증까지 수행한다(클라이언트가 임의로 우회할 수 없음)', async () => {
+    it('MANUAL 토큰(직접 입력)이 있어도 안전망이 항상 콘텐츠(제목) 검증까지 수행한다(AUTO만 예외)', async () => {
       await service.createQuiz('user-1', baseDto);
       await flushMicrotasks();
 
@@ -370,6 +388,18 @@ describe('UserQuizRegistrationService', () => {
         expect.any(String),
         { skipContentCheck: false },
       );
+    });
+
+    it('검증 토큰이 없는 곡이 있으면 즉시 검증을 안 거친 것으로 보고 등록 자체를 거부한다(즉시 검증 API 우회 방지)', async () => {
+      await expect(
+        service.createQuiz('user-1', {
+          ...baseDto,
+          songs: [
+            makeSongInput('1', { verificationToken: undefined }),
+            ...baseDto.songs.slice(1),
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('AUTO 검증 토큰이 이 songId+videoId에 대해 유효하면 안전망이 제목 매칭을 생략한다(spec.md 3.3-③)', async () => {
@@ -389,22 +419,19 @@ describe('UserQuizRegistrationService', () => {
       expect(call[2]).toEqual({ skipContentCheck: true });
     });
 
-    it('토큰의 videoId가 실제 제출한 링크와 다르면(URL을 바꿔치기) 제목 매칭을 생략하지 않는다', async () => {
+    it('토큰의 videoId가 실제 제출한 링크와 다르면(URL을 바꿔치기) 등록 자체를 거부한다', async () => {
       // 토큰은 v-other용으로 발급됐는데 실제로는 v1을 등록하려는 상황.
       const token = issueLinkVerificationToken('1', 'v-other', 'AUTO');
-      await service.createQuiz('user-1', {
-        ...baseDto,
-        songs: [
-          makeSongInput('1', { verificationToken: token }),
-          ...baseDto.songs.slice(1),
-        ],
-      });
-      await flushMicrotasks();
 
-      const call = youtubeLinkValidationServiceMock.validate.mock.calls.find(
-        ([url]: [string]) => url.includes('v1'),
-      );
-      expect(call[2]).toEqual({ skipContentCheck: false });
+      await expect(
+        service.createQuiz('user-1', {
+          ...baseDto,
+          songs: [
+            makeSongInput('1', { verificationToken: token }),
+            ...baseDto.songs.slice(1),
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 

@@ -44,9 +44,22 @@ export class UserSongService {
       youtubeUrl,
       song.songNm,
     );
-    // 직접 입력한 링크는 최종 등록 시에도 항상 콘텐츠 검증을 다시 하므로
-    // 예외를 증명할 토큰이 필요 없다(autoFillYoutubeLink만 발급한다).
-    return { ...result, verificationToken: null };
+    if (!result.valid || !result.youtubeVideoId) {
+      return { ...result, verificationToken: null };
+    }
+    // 즉시 검증 통과 사실 자체도 토큰으로 증명해야 한다 - 최종 등록(POST/PATCH
+    // /quizzes)이 이 토큰 없이도 곡을 받아주면, 이 API를 아예 안 거치고 형식만
+    // 맞는 URL을 바로 제출해 콘텐츠 검증 없이 퀴즈를 만들 수 있다(코드 리뷰
+    // 지적). MANUAL 출처는 skipContentCheck 예외를 받지 못한다 - 안전망은
+    // 항상 다시 전체 검증한다(즉시 검증 이후 영상이 바뀌었을 TOCTOU 대비).
+    return {
+      ...result,
+      verificationToken: issueLinkVerificationToken(
+        songId,
+        result.youtubeVideoId,
+        'MANUAL',
+      ),
+    };
   }
 
   /** 링크가 공란인 곡을 "{아티스트} - {곡명}"으로 검색해 자동으로 채운다. */

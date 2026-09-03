@@ -56,7 +56,7 @@ describe('UserSongService', () => {
   });
 
   describe('validateYoutubeLink', () => {
-    it('직접 입력 링크는 검증 결과에 verificationToken을 싣지 않는다(최종 등록 시에도 항상 콘텐츠 검증)', async () => {
+    it('검증에 통과하면 이 songId+videoId에 대한 MANUAL 검증 토큰을 발급한다(최종 등록이 즉시 검증 통과 여부를 확인할 수 있도록)', async () => {
       songRepositoryMock.findOne.mockResolvedValue({
         songId: 's1',
         songNm: '봄날',
@@ -69,6 +69,29 @@ describe('UserSongService', () => {
         startSec: 0,
         endSec: 30,
         reason: null,
+      });
+
+      const result = await service.validateYoutubeLink('s1', 'raw-url');
+
+      expect(result.verificationToken).not.toBeNull();
+      expect(
+        verifyLinkVerificationToken(result.verificationToken, 's1', 'v1'),
+      ).toBe('MANUAL');
+    });
+
+    it('검증에 실패하면 토큰을 발급하지 않는다', async () => {
+      songRepositoryMock.findOne.mockResolvedValue({
+        songId: 's1',
+        songNm: '봄날',
+      });
+      youtubeLinkValidationServiceMock.validate.mockResolvedValue({
+        valid: false,
+        youtubeUrl: null,
+        youtubeVideoId: null,
+        durationSec: null,
+        startSec: null,
+        endSec: null,
+        reason: '영상 제목에 곡 제목이 포함되어 있지 않습니다.',
       });
 
       const result = await service.validateYoutubeLink('s1', 'raw-url');

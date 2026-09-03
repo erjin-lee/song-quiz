@@ -1,10 +1,9 @@
-import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsNotEmpty,
-  IsOptional,
   IsString,
   MaxLength,
 } from 'class-validator';
@@ -42,13 +41,15 @@ export class CreateQuizSongInputDto {
   @MaxLength(300, { each: true })
   answers: string[];
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     description:
-      '.../youtube-link/auto 응답의 verificationToken을 그대로 실어 보내면 ' +
-      '안전망 재검증에서 제목 매칭을 생략할 수 있다(spec.md 3.3-③). ' +
-      '토큰이 없거나 이 songId/youtubeUrl 조합과 서명이 맞지 않으면 항상 콘텐츠 검증까지 수행한다(secure by default).',
+      '.../youtube-link/validate 또는 .../auto 응답의 verificationToken을 그대로 실어 보내야 한다. ' +
+      '이 songId/videoId 조합에 대해 서버가 즉시 검증을 통과시켰다는 증명이며, 없거나 서명·songId/videoId가 ' +
+      '안 맞거나 만료됐으면 등록 자체가 거부된다(즉시 검증 API를 거치지 않고 형식만 맞는 URL을 바로 제출하는 ' +
+      '우회를 막기 위함). 토큰 출처가 AUTO(자동 검색)일 때만 안전망 재검증에서 제목 매칭을 생략한다(spec.md 3.3-③) - ' +
+      'MANUAL(직접 입력) 출처는 안전망이 항상 콘텐츠 검증까지 다시 수행한다.',
   })
-  @IsOptional()
   @IsString()
-  verificationToken?: string;
+  @IsNotEmpty()
+  verificationToken: string;
 }
