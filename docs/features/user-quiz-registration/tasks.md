@@ -34,7 +34,7 @@
 
 ## 구현 메모(백엔드)
 
-- **마이그레이션**: [`1788437170629-AddQuizCrtUserKey.ts`](../../../apps/api/src/migrations/1788437170629-AddQuizCrtUserKey.ts)도 이 작업 환경에서 bastion 터널 접근이 안 돼 손으로 작성했다(`DB_INFO.txt` DDL 참고). **실제 반영 전 `migration:generate`로 diff 확인 + 사람이 `migration:run` 실행 필요**(알림 시스템 때와 동일한 사유). [`docs/db-changelog.md`](../../db-changelog.md)에 등록해뒀다.
+- **마이그레이션**: 처음엔 이 작업 환경에서 bastion 터널 접근이 안 돼 `1788400000000-AddQuizCrtUserKey.ts`를 손으로 작성했다(`DB_INFO.txt` DDL 참고). 이후 실제로 bastion 터널을 거쳐 `migration:generate`로 재생성한 [`1788437170629-AddQuizCrtUserKey.ts`](../../../apps/api/src/migrations/1788437170629-AddQuizCrtUserKey.ts)로 교체하고 `migration:run`까지 완료했다(사람이 직접 실행) — 손으로 쓴 파일은 한 번도 실행된 적이 없어서 안전하게 교체할 수 있었다. **앞으로는 이미 머지·실행된 마이그레이션 파일의 타임스탬프/내용을 바꾸지 않는다** — 이미 실행한 환경이 있으면 TypeORM이 새 파일명을 미실행으로 인식해 중복 컬럼 에러로 실패한다(코드 리뷰 지적). 보정이 필요하면 항상 새 파일을 추가한다. [`docs/db-changelog.md`](../../db-changelog.md)에 등록해뒀다.
 - **멜론 곡 검색**(#142): 실제 `melon.com/search/song/index.htm` 페이지를 직접 호출해 HTML 구조를 확인한 뒤 셀렉터를 작성했다(`#artistName`에 화면용 링크 + 툴팁용 숨김 `<span>` 중복이 있어 `.children('a')`로 직계만 취함 — 앨범 파서의 기존 패턴과 동일). 새 엔드포인트는 순환 의존을 피하기 위해 `quiz` 모듈이 아니라 기존처럼 `scraper` 모듈에 추가했다(`scraper → quiz` 방향 유지).
 - **유튜브 링크 검증**(#143): 기존 `inquiry/youtube-url.util.ts`(ADR-0009 URL 검증 로직)를 `common/`으로 옮겨 `quiz` 모듈과 공유하도록 정리했다. `YoutubeScraperClient.getVideoInfo`가 이미 있어 재사용했고, `stripFeatAnnotations`/`toComparableText`(신규, `song-title-normalizer.ts`)로 곡 제목-영상 제목 대조와 정답 정규화를 같은 유틸로 처리한다.
 - **안전망 재검증**(#145): 저장되는 videoId/재생 구간은 클라이언트가 보낸 값이 아니라 서버가 `youtubeUrl`을 다시 파싱해서 계산한 값만 쓴다(ADR-0009, 테스트로 확인) — 처음엔 `youtubeVideoId`를 별도 필드로 클라이언트에게 받아 저장했는데, 코드 리뷰에서 "URL과 다른 videoId를 보내 검증은 통과시키고 실제로는 다른 영상을 등록할 수 있다"는 지적을 받고 그 필드 자체를 없앴다.
@@ -52,13 +52,20 @@
   - `GET /songs/search?keyword=`(`UserSongService.searchSongs`): spec.md 3.1의 "1차: 기존 DB에서 제목/아티스트명으로 검색"이 실제로는 구현돼 있지 않았다 — 멜론 검색(2차)만 있었다.
   - `GET /quizzes/mine`(`UserQuizRegistrationService.getMyQuizzes`): 로그인 유저 본인 퀴즈만 골라서 곡 수와 함께 보여주는 마이페이지 전용 목록. 기존 `GET /quizzes`(전체 공개 목록)로는 만들 수 없었다.
   - `GET /quizzes/:quizId`(`UserQuizRegistrationService.getQuizForEdit`): 수정 화면 진입 시 기존 제목/설명/곡/링크/정답을 불러와 프리필하는 용도. 소유권 확인(본인 퀴즈 아니면 403)을 포함하며, 곡 목록 조회는 기존 `QuizService.getQuizSongs`를 재사용했다. 이 라우트는 `UserQuizRegistrationController`의 `GET mine`보다 반드시 뒤에 선언해야 한다 - `:quizId` 파라미터 라우트가 먼저면 `/quizzes/mine` 요청도 `quizId='mine'`으로 잘못 매칭된다(Express는 라우트를 선언 순서대로 매칭).
-- **검증 토큰이 진짜로 필요해진 이유(빌더 UX에 직결)**: 백엔드가 이미 "모든 곡은 최근에 검증받은 토큰이 있어야 등록/수정 가능"으로 강제하기 때문에, 프런트도 곡을 담을 때마다 링크 편집 모달 → "확인" → 서버 검증 → ✅ 상태가 되는 흐름을 반드시 거치게 만들었다. **수정 화면에서 기존 곡을 불러올 때도 토큰이 없으므로(발급 즉시 소모되는 값이라 저장 자체가 안 됨) 모든 곡이 "❔(미확인)" 상태로 시작하고, 수정 저장 전에 각 곡을 다시 확인해야 한다** — 처음엔 이게 나쁜 UX처럼 보였지만, 백엔드 쪽 코드 리뷰에서 이미 "토큰을 매번 새로 요구하면 오래된 상태를 추측할 필요가 없다"는 의도로 설계된 것이라 그대로 따랐다(백엔드 구현 메모의 "즉시 검증을 우회한 등록 차단 + 토큰 필수화" 참고).
-- **곡 카드 상태 머신**: `unverified`(❔, 아직 확인 안 함) → `checking`(⏳, 서버 검증 중) → `valid`(✅) | `invalid`(⚠️, 카드에 마우스 올리면 사유 툴팁). 링크를 다시 입력하거나 자동 검색을 다시 트리거하면 다시 `checking`으로 돌아간다. 등록/수정 버튼은 `songs.length >= 5 && songs.every(valid)`일 때만 활성화된다(spec.md 3.3 최종 등록 조건을 클라이언트에서도 미리 막음 - 실제 강제는 서버가 한다).
+- **검증 토큰이 진짜로 필요해진 이유(빌더 UX에 직결)**: 백엔드가 이미 "모든 곡은 최근에 검증받은 토큰이 있어야 등록/수정 가능"으로 강제하기 때문에, 프런트도 곡을 담을 때마다 링크 편집 모달 → "확인" → 서버 검증 → ✅ 상태가 되는 흐름을 반드시 거치게 만들었다. 수정 화면은 `GET /quizzes/:quizId`가 조회 시점에 재검증+토큰 발급까지 해주므로(2026-09-03 개선, 아래 코드 리뷰 5차 참고) 대부분의 곡이 바로 확인 완료 상태로 시작하고, 재검증에 실패한 소수만 다시 확인하면 된다.
+- **곡 카드 상태 머신**: `unverified`(❔, 아직 확인 안 함) → `checking`(⏳, 서버 검증 중) → `valid`(✅) | `invalid`(⚠️, 카드에 마우스 올리면 사유 툴팁). 링크를 다시 입력하거나 자동 검색을 다시 트리거하면 다시 `checking`으로 돌아간다. 등록/수정 버튼은 `songs.length >= 5 && songs.every(valid && 정답 1~10개)`일 때만 활성화된다(spec.md 3.3 최종 등록 조건 + 서버 DTO의 `ArrayMinSize(1)`/`ArrayMaxSize(10)`을 클라이언트에서도 미리 막음 - 실제 강제는 서버가 한다). 곡별 검증 요청에는 순번을 매겨서, 링크를 빠르게 두 번 바꿔 저장했을 때 먼저 보낸 요청의 응답이 나중에 도착해도 최신 상태를 덮어쓰지 않게 했다.
 - **로컬스토리지 임시 저장**(4.5, `utils/quizDraft.ts`, 기존 `roomSession.ts`와 동일 패턴): 새 퀴즈(`song-quiz:quiz-draft:new`)와 퀴즈별 수정(`song-quiz:quiz-draft:edit:{quizId}`)의 키를 분리해서, 새 퀴즈를 작성하다가 다른 탭에서 기존 퀴즈를 수정해도 서로 덮어쓰지 않는다. 초안이 있으면 항상 서버 재조회보다 초안을 우선한다(진행 중이던 미확인 링크/정답까지 그대로 복구하기 위함) - 검증 토큰도 초안에 그대로 저장되지만, 토큰 자체가 짧은 TTL(1시간)로 서명되어 있어 오래된 초안을 불러와도 만료된 토큰은 서버가 알아서 거부한다(별도 만료 처리 로직 불필요).
 - **멜론 검색으로 담은 곡의 아티스트 표시명**: `POST /songs/from-melon`의 응답(`RegisteredSongDto`)에는 아티스트명이 없어서(트러스트 경계상 서버가 캐시한 값만 신뢰 - 코드 리뷰 참고), 검색 결과 자체(`MelonSongSearchResultDto.artists`)에서 화면 표시용 아티스트명만 따로 꺼내 썼다(등록 자체는 melonSongId만으로 이뤄지므로 이 표시명이 실제 저장에 영향을 주지 않는다).
 - **마이페이지 알림 탭**: 새 UI를 만들지 않고 `NotificationBell`이 쓰는 것과 같은 `GET /notifications` 응답을 그대로 리스트로 펼쳐서 보여준다(spec.md 4.6 의도 그대로).
-- **미검증 항목**: 이 환경에서는 bastion 터널로 실 DB에 붙을 수 없고 로컬 Redis도 띄워져 있지 않아(`REDIS_HOST` 미설정 시 로컬 메모리 폴백은 되지만, 이번엔 그 폴백 단계 이전에 API 서버 자체가 Socket.IO Redis 어댑터 연결 실패로 부팅을 못 했다), 브라우저로 실제 클릭해가며 검증하지는 못했다. 타입 체크(`tsc -b`)와 `vite build`, 신규 컴포넌트 테스트(React Testing Library, 32건 추가)로만 검증했다 - 실제 배포 환경에서 한 번은 꼭 수동으로 전체 플로우를 훑어봐야 한다.
-- 신규 프런트 테스트 파일: `QuizBuilderPage.test.tsx`(7), `MyPage.test.tsx`(8), `quizDraft.test.ts`(7), `RoomListPage.test.tsx`에 3건 추가, `client.test.ts`에 `apiDelete` 1건 추가. `yarn workspace web test`(20 files, 118건) / `yarn web:build` / `yarn workspace web lint` 전체 통과 확인.
+- **마이페이지 진입점**: 방 목록 화면의 로그인 유저 메뉴(닉네임 옆, "게임 방법"·"로그아웃"과 같은 줄)에 "마이페이지" 버튼을 추가했다 — 처음엔 등록 직후 자동 이동 경로만 있고 되돌아갈 진입점이 없었다(코드 리뷰 지적).
+- **미검증 항목**: 이 환경에서는 bastion 터널로 실 DB에 붙을 수 없고 로컬 Redis도 띄워져 있지 않아(`REDIS_HOST` 미설정 시 로컬 메모리 폴백은 되지만, 이번엔 그 폴백 단계 이전에 API 서버 자체가 Socket.IO Redis 어댑터 연결 실패로 부팅을 못 했다), 브라우저로 실제 클릭해가며 검증하지는 못했다. 타입 체크(`tsc -b`)와 `vite build`, 신규 컴포넌트 테스트(React Testing Library)로만 검증했다 - 실제 배포 환경에서 한 번은 꼭 수동으로 전체 플로우를 훑어봐야 한다.
+- 신규 프런트 테스트: `QuizBuilderPage.test.tsx`(11), `MyPage.test.tsx`(8), `quizDraft.test.ts`(7), `RoomListPage.test.tsx`에 4건 추가, `client.test.ts`에 `apiDelete` 1건 추가. `yarn workspace web test`(20 files, 123건) / `yarn web:build` / `yarn workspace web lint` 전체 통과 확인.
+- **코드 리뷰 5차(2026-09-03)에서 고친 것**:
+  1. 마이그레이션 파일 타임스탬프 문제 — 아래 "마이그레이션" 항목 참고(사용자가 직접 교체+실행함, 문서만 정정).
+  2. `GET /quizzes/:quizId`가 재생용으로 1초 앞당긴 URL(`QuizService.getQuizSongs`의 `shiftYoutubeUrlStartSecEarlier`)을 그대로 편집용으로 돌려줘서, 링크를 안 건드리고 수정만 해도 저장할 때마다 시작 지점이 1초씩 계속 줄어드는 버그 — `youtubeVideoId`+원본 `startSec`으로 URL을 다시 조합하도록 수정.
+  3. `canSubmit`이 정답 개수(서버 DTO 기준 1~10개)를 확인하지 않아서, 링크가 없는 곡을 "자동으로 찾기"만으로 채우면(정답은 그대로 `[]`) 카드는 ✅인데 서버가 `ArrayMinSize(1)`에서 거부하는 상황이 가능했음 — `canSubmit`에 정답 개수 검사 추가, 자동 채우기 성공 시 정답 후보를 함께 채워주기, 모달/후보 API 양쪽에 10개 상한 반영.
+  4. 곡별 링크 검증 요청에 순번이 없어서, 응답 순서가 뒤바뀌면(느린 이전 요청이 나중에 도착) 오래된 링크가 최신 상태를 덮어쓸 수 있었음 — 곡별 요청 순번을 추적해 최신 요청의 응답만 반영하도록 수정.
+  5. 마이페이지로 돌아갈 진입점 부재 — 위 "마이페이지 진입점" 항목 참고.
 
 ## 아직 안 고친 것(별도 결정 필요)
 
@@ -87,3 +94,4 @@
 - 2026-09-03: 코드 리뷰 4차 - 검증 토큰의 startSec 미보증, 기존 AUTO 링크 재검증 경로 부재 2건을 "아직 안 고친 것"에 문서화만 하고 이번 라운드에서는 수정하지 않기로 함(별도 확인 후 진행).
 - 2026-09-03: 프런트엔드 8~13단계(FE1~FE6, #155~#160) 구현 완료. 진행 중 발견한 백엔드 공백 3건(DB 곡 검색, 마이페이지 내 퀴즈 목록, 수정 화면 프리필용 상세 조회 API)을 함께 추가. 브라우저로 직접 클릭해보는 수동 검증은 로컬 DB/Redis 접근 제약으로 못 했고, 타입 체크·빌드·유닛 테스트로만 확인함 - 배포 후 수동 확인 필요.
 - 2026-09-03: 수정 화면 진입 시 기존 곡이 전부 "미확인" 상태로 뜨던 걸 개선 — `GET /quizzes/:quizId`가 조회 시점에 각 곡을 서버에서 다시 검증해서 통과한 곡은 토큰까지 함께 내려주도록 변경. "아직 안 고친 것"의 AUTO 링크 재검증 항목이 대부분 완화됨(완전히 해결된 건 아님, 해당 항목 참고).
+- 2026-09-03: 코드 리뷰 5차 - 마이그레이션 파일 교체 관련 문서 정정(사용자가 직접 bastion 터널로 재생성+실행 완료), 수정 화면 URL이 편집할 때마다 재생 시작 지점을 1초씩 깎아먹던 버그 수정, 프런트 `canSubmit`에 정답 개수(1~10) 검사 추가 및 자동 채우기 시 정답 후보 자동 채움, 곡별 검증 요청 응답 순서 뒤바뀜 방지(요청 순번 추적), 마이페이지 진입 버튼 추가.

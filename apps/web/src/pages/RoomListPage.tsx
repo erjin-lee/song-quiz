@@ -317,6 +317,14 @@ export function RoomListPage() {
                     <span className="text-slate-200">·</span>
                     <button
                       type="button"
+                      onClick={() => navigate('/mypage')}
+                      className="transition hover:text-purple-500"
+                    >
+                      마이페이지
+                    </button>
+                    <span className="text-slate-200">·</span>
+                    <button
+                      type="button"
                       onClick={async () => {
                         try {
                           await logout();

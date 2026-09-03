@@ -577,7 +577,11 @@ describe('UserQuizRegistrationService', () => {
           songId: 's1',
           songNm: '봄날',
           atstNm: '방탄소년단',
-          youtubeUrl: 'https://www.youtube.com/watch?v=v1',
+          // getQuizSongs()가 재생용으로 1초 앞당긴 값(t=99) - 편집 화면은
+          // 이걸 그대로 쓰면 안 되고 videoId+startSec(100)으로 재조합해야 한다.
+          youtubeUrl: 'https://www.youtube.com/watch?v=v1&t=99',
+          youtubeVideoId: 'v1',
+          startSec: 100,
           answers: [{ answerTxt: '봄날' }, { answerTxt: 'Spring Day' }],
         },
       ]);
@@ -589,8 +593,10 @@ describe('UserQuizRegistrationService', () => {
 
       const result = await service.getQuizForEdit('user-1', 'quiz-1');
 
+      // 검증도, 응답도 재생용으로 보정된 URL(t=99)이 아니라 원본 startSec(100)으로
+      // 재조합한 URL을 써야 한다 - 그래야 수정할 때마다 시작 지점이 계속 줄어들지 않는다.
       expect(youtubeLinkValidationServiceMock.validate).toHaveBeenCalledWith(
-        'https://www.youtube.com/watch?v=v1',
+        'https://www.youtube.com/watch?v=v1&t=100',
         '봄날',
       );
       expect(result).toEqual({
@@ -602,7 +608,7 @@ describe('UserQuizRegistrationService', () => {
             songId: 's1',
             songNm: '봄날',
             atstNm: '방탄소년단',
-            youtubeUrl: 'https://www.youtube.com/watch?v=v1',
+            youtubeUrl: 'https://www.youtube.com/watch?v=v1&t=100',
             answers: ['봄날', 'Spring Day'],
             verificationToken: expect.any(String),
             failReason: null,

@@ -147,8 +147,17 @@ export class UserQuizRegistrationService {
     const songs = await this.quizService.getQuizSongs(quizId);
     const songsWithVerification = await Promise.all(
       songs.map(async (song) => {
+        // QuizService.getQuizSongs()의 youtubeUrl은 재생용으로 t=를 1초
+        // 앞당겨 보정한 값이다(플레이어 로딩 버퍼 대응) - 그 값을 그대로
+        // 수정 화면에 돌려주면, 건드리지 않은 곡도 저장할 때마다 시작
+        // 지점이 계속 1초씩 줄어든다. 원본 videoId+startSec으로 다시
+        // 조합한 URL을 써야 한다.
+        const editYoutubeUrl = song.youtubeVideoId
+          ? buildYoutubeWatchUrl(song.youtubeVideoId, song.startSec)
+          : song.youtubeUrl;
+
         const result = await this.youtubeLinkValidationService.validate(
-          song.youtubeUrl,
+          editYoutubeUrl,
           song.songNm,
         );
         const verificationToken =
@@ -164,7 +173,7 @@ export class UserQuizRegistrationService {
           songId: song.songId,
           songNm: song.songNm,
           atstNm: song.atstNm,
-          youtubeUrl: song.youtubeUrl,
+          youtubeUrl: editYoutubeUrl,
           answers: song.answers.map((answer) => answer.answerTxt),
           verificationToken,
           failReason: result.valid

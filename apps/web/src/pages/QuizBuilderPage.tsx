@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Logo } from '../components/Logo';
 import { SongLinkAnswerModal } from '../components/SongLinkAnswerModal';
@@ -8,6 +8,7 @@ import { ApiError } from '../api/client';
 import {
   autoFillYoutubeLink,
   createQuiz,
+  getAnswerCandidates,
   getQuizForEdit,
   getRegistrationEligibility,
   registerSongFromMelon,
@@ -30,6 +31,8 @@ import type {
 
 /** apps/api MIN_USER_QUIZ_SONG_COUNT과 동일(quiz.constants.ts, ADR-0003 수동 미러링). */
 const MIN_QUIZ_SONG_COUNT = 5;
+/** apps/api MAX_ANSWERS_PER_SONG과 동일(create-quiz-song-input.dto.ts, ADR-0003 수동 미러링). */
+const MAX_ANSWERS_PER_SONG = 10;
 const SEARCH_DEBOUNCE_MS = 300;
 
 function formatRemainingTime(seconds: number): string {
@@ -73,6 +76,11 @@ export function QuizBuilderPage() {
   const [editingSongId, setEditingSongId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // 곡별로 마지막에 요청한 검증 순번을 기록해둔다 - 링크 A를 확인하는 도중
+  // 링크 B로 다시 저장하면, A의 응답이 B보다 늦게 와도 무시해야 한다(응답
+  // 순서가 뒤바뀌어 오래된 A가 최종 상태를 덮어쓰는 걸 방지).
+  const validationSeqRef = useRef<Record<string, number>>({});
 
   // 로그인 없이 URL로 직접 들어오는 경우를 막는다(주 진입 경로는 RoomListPage의
   // 로그인/등록 가능 여부 확인이지만, 이 페이지 자체도 최소한의 방어선을 둔다).
@@ -273,9 +281,16 @@ export function QuizBuilderPage() {
       verificationToken: string | null;
     }>,
   ) => {
+    const seq = (validationSeqRef.current[songId] ?? 0) + 1;
+    validationSeqRef.current[songId] = seq;
+    const isStale = () => validationSeqRef.current[songId] !== seq;
+
     updateSong(songId, { status: 'checking', failReason: null });
     try {
       const result = await call();
+      if (isStale()) {
+        return;
+      }
       if (result.valid && result.verificationToken) {
         updateSong(songId, {
           status: 'valid',
@@ -291,6 +306,9 @@ export function QuizBuilderPage() {
         });
       }
     } catch (err) {
+      if (isStale()) {
+        return;
+      }
       updateSong(songId, {
         status: 'invalid',
         verificationToken: null,
@@ -310,13 +328,35 @@ export function QuizBuilderPage() {
     runValidation(songId, () => validateYoutubeLink(songId, youtubeUrl));
   };
 
-  const handleAutoFill = (songId: string) => {
-    runValidation(songId, () => autoFillYoutubeLink(songId));
+  const handleAutoFill = async (songId: string) => {
+    await runValidation(songId, () => autoFillYoutubeLink(songId));
+
+    // 자동으로 찾기는 링크만 채우고 정답은 그대로 두므로, 정답이 비어 있으면
+    // 여기서 기본 후보로 채워준다 - 그러지 않으면 카드는 ✅인데 서버가
+    // ArrayMinSize(1)에서 거부하는 상태로 남는다.
+    const song = songs.find((item) => item.songId === songId);
+    if (!song || song.answers.length > 0) {
+      return;
+    }
+    try {
+      const candidates = await getAnswerCandidates(songId);
+      updateSong(songId, {
+        answers: candidates.slice(0, MAX_ANSWERS_PER_SONG),
+      });
+    } catch {
+      // 후보를 못 가져와도 조용히 무시한다 - 유저가 카드를 눌러 직접 추가하면 된다.
+    }
   };
 
   const canSubmit =
     songs.length >= MIN_QUIZ_SONG_COUNT &&
-    songs.every((song) => song.status === 'valid' && song.verificationToken);
+    songs.every(
+      (song) =>
+        song.status === 'valid' &&
+        song.verificationToken &&
+        song.answers.length >= 1 &&
+        song.answers.length <= MAX_ANSWERS_PER_SONG,
+    );
 
   const handleSubmit = async () => {
     if (!canSubmit || submitting) {
@@ -545,6 +585,12 @@ export function QuizBuilderPage() {
                       </button>
                     )}
 
+                    {song.status === 'valid' && song.answers.length === 0 && (
+                      <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-600">
+                        정답 없음
+                      </span>
+                    )}
+
                     <span className="shrink-0 text-lg" title={song.failReason ?? undefined}>
                       {song.status === 'checking' && '⏳'}
                       {song.status === 'valid' && '✅'}
@@ -566,6 +612,13 @@ export function QuizBuilderPage() {
                   <p className="text-xs text-rose-500">
                     확인에 실패한 곡이 있어요. 카드를 눌러 링크를 다시
                     확인해주세요.
+                  </p>
+                )}
+                {songs.some(
+                  (song) => song.status === 'valid' && song.answers.length === 0,
+                ) && (
+                  <p className="text-xs text-amber-600">
+                    정답이 없는 곡이 있어요. 카드를 눌러 정답을 추가해주세요.
                   </p>
                 )}
               </div>

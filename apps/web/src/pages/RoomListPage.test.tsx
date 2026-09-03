@@ -85,6 +85,7 @@ function renderRoomListPage() {
         <Route path="/rooms/new" element={<div>방 만들기 화면</div>} />
         <Route path="/rooms/:roomId" element={<div>게임 화면</div>} />
         <Route path="/quizzes/new" element={<div>퀴즈 만들기 화면</div>} />
+        <Route path="/mypage" element={<div>마이페이지 화면</div>} />
         <Route path="/" element={<div>로그인 화면</div>} />
       </Routes>
     </MemoryRouter>,
@@ -296,6 +297,19 @@ describe('RoomListPage', () => {
 
     expect(logout).toHaveBeenCalledTimes(1);
     expect(await screen.findByText('로그인 화면')).toBeInTheDocument();
+  });
+
+  it('로그인 상태면 마이페이지 버튼을 보여주고 클릭 시 마이페이지로 이동한다', async () => {
+    mockedUseSession.mockReturnValue(
+      makeSessionValue({ isAuthenticated: true }),
+    );
+    mockedGetRooms.mockResolvedValue([]);
+    const user = userEvent.setup();
+
+    renderRoomListPage();
+    await user.click(await screen.findByRole('button', { name: '마이페이지' }));
+
+    expect(await screen.findByText('마이페이지 화면')).toBeInTheDocument();
   });
 
   it('비로그인 상태로 퀴즈 만들기를 누르면 로그인 필요 모달을 보여준다', async () => {

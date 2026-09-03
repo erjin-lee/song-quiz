@@ -17,6 +17,7 @@ import {
 import type {
   DbSongSearchResultDto,
   QuizEditDetailDto,
+  YoutubeLinkValidationResultDto,
 } from '../types/quiz-registration';
 
 vi.mock('../context/SessionContext', () => ({
@@ -55,6 +56,14 @@ vi.setConfig({ testTimeout: 20000 });
 
 function waitForLong<T>(callback: () => T | Promise<T>) {
   return waitFor(callback, { timeout: 8000 });
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }
 
 function makeSessionValue(
@@ -307,6 +316,164 @@ describe('QuizBuilderPage', () => {
       expect(mockedAutoFillYoutubeLink).toHaveBeenCalledWith('s1');
       expect(screen.getByText('✅')).toBeInTheDocument();
     });
+  });
+
+  it('자동으로 찾기 후 정답 후보가 있으면 자동으로 채워서 정답 없음 경고가 뜨지 않는다', async () => {
+    mockedUseSession.mockReturnValue(makeSessionValue({}));
+    mockedSearchDbSongs.mockResolvedValue([makeDbResult()]);
+    mockedAutoFillYoutubeLink.mockResolvedValue({
+      valid: true,
+      youtubeUrl: 'https://www.youtube.com/watch?v=v1',
+      youtubeVideoId: 'v1',
+      durationSec: 200,
+      startSec: 0,
+      endSec: 30,
+      reason: null,
+      verificationToken: 'auto-token',
+    });
+    mockedGetAnswerCandidates.mockResolvedValue(['봄날', 'Spring Day']);
+    const user = userEvent.setup();
+
+    renderNewBuilder();
+    await user.type(
+      await screen.findByPlaceholderText('곡명 또는 아티스트명으로 검색'),
+      '봄날',
+    );
+    await user.click(await screen.findByText('봄날 - 방탄소년단'));
+    await user.click(
+      await screen.findByRole('button', { name: '자동으로 찾기' }),
+    );
+
+    await waitForLong(() => {
+      expect(mockedGetAnswerCandidates).toHaveBeenCalledWith('s1');
+      expect(screen.getByText('✅')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('정답 없음')).not.toBeInTheDocument();
+  });
+
+  it('정답이 없는 곡이 있으면 나머지 조건을 만족해도 등록 버튼이 비활성 상태를 유지한다', async () => {
+    mockedUseSession.mockReturnValue(makeSessionValue({}));
+    mockedSearchDbSongs.mockImplementation((keyword) =>
+      Promise.resolve([
+        makeDbResult({
+          songId: keyword,
+          songNm: keyword,
+          displayLabel: keyword,
+        }),
+      ]),
+    );
+    mockedAutoFillYoutubeLink.mockResolvedValue({
+      valid: true,
+      youtubeUrl: 'https://www.youtube.com/watch?v=v1',
+      youtubeVideoId: 'v1',
+      durationSec: 200,
+      startSec: 0,
+      endSec: 30,
+      reason: null,
+      verificationToken: 'auto-token',
+    });
+    mockedGetAnswerCandidates.mockResolvedValue([]);
+    const user = userEvent.setup();
+
+    renderNewBuilder();
+    await user.type(
+      await screen.findByPlaceholderText('예) 내가 좋아하는 노래 모음'),
+      '내 퀴즈',
+    );
+    const searchInput = screen.getByPlaceholderText(
+      '곡명 또는 아티스트명으로 검색',
+    );
+    for (let i = 1; i <= 5; i += 1) {
+      await user.clear(searchInput);
+      await user.type(searchInput, `곡${i}`);
+      await user.click(await screen.findByText(`곡${i}`));
+    }
+    await user.clear(searchInput);
+
+    for (const button of screen.getAllByRole('button', {
+      name: '자동으로 찾기',
+    })) {
+      await user.click(button);
+    }
+
+    await waitForLong(() => {
+      expect(screen.getAllByText('✅')).toHaveLength(5);
+    });
+
+    expect(screen.getByRole('button', { name: '등록하기' })).toBeDisabled();
+    expect(screen.getAllByText('정답 없음').length).toBe(5);
+  });
+
+  it('이전 링크 검증 응답이 나중에 도착해도 최신 링크 상태를 덮어쓰지 않는다', async () => {
+    mockedUseSession.mockReturnValue(makeSessionValue({}));
+    mockedSearchDbSongs.mockResolvedValue([makeDbResult()]);
+    const first = deferred<YoutubeLinkValidationResultDto>();
+    const second = deferred<YoutubeLinkValidationResultDto>();
+    mockedValidateYoutubeLink
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const user = userEvent.setup();
+
+    renderNewBuilder();
+    await user.type(
+      await screen.findByPlaceholderText('곡명 또는 아티스트명으로 검색'),
+      '봄날',
+    );
+    await user.click(await screen.findByText('봄날 - 방탄소년단'));
+
+    // 1차 저장: 링크 A(아직 응답 대기 중)
+    await user.click(screen.getByText('봄날'));
+    await user.type(
+      screen.getByPlaceholderText('https://www.youtube.com/watch?v=...'),
+      'https://www.youtube.com/watch?v=vA',
+    );
+    await user.type(
+      screen.getByPlaceholderText('정답 추가 후 Enter'),
+      '정답A{enter}',
+    );
+    await user.click(screen.getByRole('button', { name: '확인' }));
+
+    // A 응답이 오기 전에 링크 B로 다시 저장
+    await user.click(screen.getByText('봄날'));
+    const urlInput = screen.getByPlaceholderText(
+      'https://www.youtube.com/watch?v=...',
+    );
+    await user.clear(urlInput);
+    await user.type(urlInput, 'https://www.youtube.com/watch?v=vB');
+    await user.click(screen.getByRole('button', { name: '확인' }));
+
+    // B가 먼저 응답
+    second.resolve({
+      valid: true,
+      youtubeUrl: 'https://www.youtube.com/watch?v=vB',
+      youtubeVideoId: 'vB',
+      durationSec: 200,
+      startSec: 0,
+      endSec: 30,
+      reason: null,
+      verificationToken: 'token-B',
+    });
+    await waitForLong(() => {
+      expect(screen.getByText('✅')).toBeInTheDocument();
+    });
+
+    // A가 뒤늦게 응답 - 무시되어야 한다
+    first.resolve({
+      valid: true,
+      youtubeUrl: 'https://www.youtube.com/watch?v=vA',
+      youtubeVideoId: 'vA',
+      durationSec: 200,
+      startSec: 0,
+      endSec: 30,
+      reason: null,
+      verificationToken: 'token-A',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    await user.click(screen.getByText('봄날'));
+    expect(
+      screen.getByDisplayValue('https://www.youtube.com/watch?v=vB'),
+    ).toBeInTheDocument();
   });
 
   it('수정 화면 진입 시 서버가 재검증에 통과시킨 기존 곡은 바로 확인 완료 상태로 표시한다', async () => {

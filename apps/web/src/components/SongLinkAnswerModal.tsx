@@ -3,6 +3,8 @@ import { getAnswerCandidates } from '../api/quiz-registration';
 import type { QuizDraftSong } from '../utils/quizDraft';
 
 const ANSWER_MAX_LENGTH = 300;
+/** apps/api MAX_ANSWERS_PER_SONG과 동일(create-quiz-song-input.dto.ts, ADR-0003 수동 미러링). */
+const MAX_ANSWERS_PER_SONG = 10;
 
 /**
  * 클라이언트 형식 검증(spec.md 3.3-①) - UX용 즉시 피드백일 뿐, 신뢰 경계는
@@ -54,7 +56,7 @@ export function SongLinkAnswerModal({
     getAnswerCandidates(song.songId)
       .then((candidates) => {
         if (!cancelled) {
-          setAnswers(candidates);
+          setAnswers(candidates.slice(0, MAX_ANSWERS_PER_SONG));
         }
       })
       .catch(() => {
@@ -74,10 +76,12 @@ export function SongLinkAnswerModal({
   const urlTrimmed = youtubeUrl.trim();
   const urlValid = urlTrimmed.length === 0 || isPlausibleYoutubeUrl(urlTrimmed);
 
+  const answersFull = answers.length >= MAX_ANSWERS_PER_SONG;
+
   const handleAddAnswer = (event: FormEvent) => {
     event.preventDefault();
     const trimmed = answerDraft.trim();
-    if (!trimmed || answers.includes(trimmed)) {
+    if (!trimmed || answers.includes(trimmed) || answersFull) {
       setAnswerDraft('');
       return;
     }
@@ -130,7 +134,10 @@ export function SongLinkAnswerModal({
 
           <div className="flex flex-col gap-1 text-sm text-slate-600">
             <span>
-              정답 <span className="text-rose-400">*</span>
+              정답 <span className="text-rose-400">*</span>{' '}
+              <span className="text-xs text-slate-400">
+                ({answers.length}/{MAX_ANSWERS_PER_SONG})
+              </span>
               {loadingCandidates && (
                 <span className="ml-1 text-xs text-slate-400">
                   (후보 불러오는 중...)
@@ -160,28 +167,34 @@ export function SongLinkAnswerModal({
                 </span>
               )}
             </div>
-            <div className="mt-1 flex gap-1.5">
-              <input
-                type="text"
-                value={answerDraft}
-                onChange={(event) => setAnswerDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    handleAddAnswer(event);
-                  }
-                }}
-                maxLength={ANSWER_MAX_LENGTH}
-                placeholder="정답 추가 후 Enter"
-                className="flex-1 rounded-xl border border-slate-200 px-4 py-2 text-sm outline-none focus:border-purple-300"
-              />
-              <button
-                type="button"
-                onClick={handleAddAnswer}
-                className="rounded-full bg-slate-100 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200"
-              >
-                추가
-              </button>
-            </div>
+            {answersFull ? (
+              <span className="text-xs text-slate-400">
+                정답은 최대 {MAX_ANSWERS_PER_SONG}개까지 추가할 수 있어요.
+              </span>
+            ) : (
+              <div className="mt-1 flex gap-1.5">
+                <input
+                  type="text"
+                  value={answerDraft}
+                  onChange={(event) => setAnswerDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      handleAddAnswer(event);
+                    }
+                  }}
+                  maxLength={ANSWER_MAX_LENGTH}
+                  placeholder="정답 추가 후 Enter"
+                  className="flex-1 rounded-xl border border-slate-200 px-4 py-2 text-sm outline-none focus:border-purple-300"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddAnswer}
+                  className="rounded-full bg-slate-100 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200"
+                >
+                  추가
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="mt-2 flex shrink-0 justify-end gap-2">

@@ -11,4 +11,4 @@
 | 2026-09-01 | [`CreateAlbmAtstAndSongAtstTables`](../apps/api/src/migrations/1788191000000-CreateAlbmAtstAndSongAtstTables.ts) | `SQ_ALBM_ATST`/`SQ_SONG_ATST`(앨범/곡 다대다 아티스트 관계 테이블) 생성 | - |
 | 2026-09-01 | [`BackfillSongAlbumArtistLinks`](../apps/api/src/migrations/1788191795553-BackfillSongAlbumArtistLinks.ts) | 정션 테이블 도입 이전 곡/앨범 행의 대표 아티스트를 백필 | - |
 | 2026-09-02 | [`Notification`](../apps/api/src/migrations/1788328901865-notification.ts) | `SQ_NOTI`/`SQ_NOTI_READ`(알림 마스터 + 유저별 읽음 여부) 생성 | [범용 알림 시스템](features/notification-system/spec.md) |
-| 2026-09-02 | [`AddQuizCrtUserKey`](../apps/api/src/migrations/1788437170629-AddQuizCrtUserKey.ts) | `SQ_QUIZ.CRT_USER_KEY`(등록한 유저) 컬럼 추가 — 손으로 작성, `migration:generate` 재확인 필요 | [로그인 유저 퀴즈 등록](features/user-quiz-registration/spec.md) |
+| 2026-09-03 | [`AddQuizCrtUserKey`](../apps/api/src/migrations/1788437170629-AddQuizCrtUserKey.ts) | `SQ_QUIZ.CRT_USER_KEY`(등록한 유저) 컬럼 추가 — `migration:generate`로 재생성 후 `migration:run` 완료. 이전에 손으로 작성했던 동명의 `1788400000000` 파일은 실행된 적이 없어 안전하게 이 파일로 교체함 | [로그인 유저 퀴즈 등록](features/user-quiz-registration/spec.md) |
