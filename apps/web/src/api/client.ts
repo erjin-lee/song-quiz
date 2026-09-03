@@ -62,6 +62,10 @@ export function apiPatch<T>(path: string, body?: unknown): Promise<T> {
   });
 }
 
+export function apiDelete<T>(path: string): Promise<T> {
+  return request<T>(API_BASE_URL, path, { method: 'DELETE' });
+}
+
 /** apps/game(Room REST) 전용 요청 헬퍼. 인증 토큰 첨부/에러 처리 방식은 apiGet 등과 동일하다. */
 export function gameGet<T>(path: string): Promise<T> {
   return request<T>(GAME_BASE_URL, path, { method: 'GET' });

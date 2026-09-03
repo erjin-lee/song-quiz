@@ -28,6 +28,8 @@ import {
 } from '../user/guards/user-auth.guard';
 import { CreateQuizRequestDto } from './dto/create-quiz-request.dto';
 import { CreateQuizResultDto } from './dto/create-quiz-result.dto';
+import { MyQuizListItemDto } from './dto/my-quiz-list-item.dto';
+import { QuizEditDetailDto } from './dto/quiz-edit-detail.dto';
 import { RegistrationEligibilityDto } from './dto/registration-eligibility.dto';
 import { UserQuizRegistrationService } from './user-quiz-registration.service';
 
@@ -47,6 +49,15 @@ export class UserQuizRegistrationController {
     @Req() req: UserAuthenticatedRequest,
   ): Promise<RegistrationEligibilityDto> {
     return this.userQuizRegistrationService.getEligibility(req.user.userId);
+  }
+
+  @Get('mine')
+  @ApiOperation({ summary: '내가 등록한 퀴즈 목록(마이페이지, 최신순)' })
+  @ApiOkResponse({ type: MyQuizListItemDto, isArray: true })
+  getMyQuizzes(
+    @Req() req: UserAuthenticatedRequest,
+  ): Promise<MyQuizListItemDto[]> {
+    return this.userQuizRegistrationService.getMyQuizzes(req.user.userId);
   }
 
   @Post()
@@ -91,6 +102,23 @@ export class UserQuizRegistrationController {
     @Param('quizId', ParseIntPipe) quizId: number,
   ): Promise<void> {
     return this.userQuizRegistrationService.deleteQuiz(
+      req.user.userId,
+      String(quizId),
+    );
+  }
+
+  // 'mine'보다 뒤에 선언해야 한다 - 먼저 선언하면 GET /quizzes/mine 요청도
+  // :quizId 파라미터 라우트로 먼저 매칭돼버린다(Express는 라우트를 선언 순서대로 매칭).
+  @Get(':quizId')
+  @ApiOperation({ summary: '본인 소유 퀴즈 상세 조회(수정 화면 프리필용)' })
+  @ApiOkResponse({ type: QuizEditDetailDto })
+  @ApiForbiddenResponse({ description: '본인 소유 퀴즈가 아님' })
+  @ApiNotFoundResponse({ description: '퀴즈를 찾을 수 없음' })
+  getQuizForEdit(
+    @Req() req: UserAuthenticatedRequest,
+    @Param('quizId', ParseIntPipe) quizId: number,
+  ): Promise<QuizEditDetailDto> {
+    return this.userQuizRegistrationService.getQuizForEdit(
       req.user.userId,
       String(quizId),
     );

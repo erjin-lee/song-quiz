@@ -140,12 +140,15 @@
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/melon/songs/search?keyword=` | 멜론 곡 검색 상위 10건 |
+| GET | `/songs/search?keyword=` | DB 곡 검색(1차) — `UserAuthGuard`. 프런트엔드 작업 중 3.1에 명시된 "1차: 기존 DB 검색"이 실제로는 구현돼 있지 않았던 걸 발견해서 함께 추가했다 |
+| GET | `/melon/songs/search?keyword=` | 멜론 곡 검색 상위 10건(2차 폴백) |
 | POST | `/songs/from-melon` | 검색 결과 선택 시 곡/아티스트/앨범 멱등 저장 |
 | GET | `/songs/:songId/answers` | 기존 정답 목록(등록 화면 디폴트 노출용) |
 | POST | `/songs/:songId/youtube-link/validate` | 유저 입력 링크 즉시 검증(형식+콘텐츠 매칭) — `UserAuthGuard` |
 | POST | `/songs/:songId/youtube-link/auto` | 링크 공란 곡에 대해 자동 스크래핑 |
 | GET | `/quizzes/registration-eligibility` | 24시간 등록 제한 상태 조회 — `UserAuthGuard` |
+| GET | `/quizzes/mine` | 내가 등록한 퀴즈 목록(마이페이지) — `UserAuthGuard`. 프런트엔드 작업 중 추가 |
+| GET | `/quizzes/:quizId` | 본인 소유 퀴즈 상세(수정 화면 프리필용, 소유권 확인) — `UserAuthGuard`. 프런트엔드 작업 중 추가. 조회 시점에 각 곡을 서버가 다시 검증해서 통과하면 검증 토큰도 함께 내려준다(모든 곡을 "미확인" 상태로 띄우지 않기 위함) |
 | POST | `/quizzes` | 퀴즈 등록 신청(24시간 제한, 최소 5곡) — 곧바로 응답하고, 링크 안전망 재검증은 응답 후 백그라운드에서 진행 후 완료 알림으로 결과 통지 — `UserAuthGuard` |
 | PATCH | `/quizzes/:quizId` | 본인 소유 퀴즈 수정 — `UserAuthGuard` + 소유자 검증 |
 | DELETE | `/quizzes/:quizId` | 본인 소유 퀴즈 soft delete — `UserAuthGuard` + 소유자 검증 |

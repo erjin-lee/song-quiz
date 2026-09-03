@@ -7,6 +7,8 @@ import { CreateRoomPage } from './pages/CreateRoomPage';
 import { RoomGamePage } from './pages/RoomGamePage';
 import { PrivacyPolicyPage } from './pages/PrivacyPolicyPage';
 import { NotificationDetailPage } from './pages/NotificationDetailPage';
+import { QuizBuilderPage } from './pages/QuizBuilderPage';
+import { MyPage } from './pages/MyPage';
 
 function App() {
   return (
@@ -21,6 +23,9 @@ function App() {
           path="/notifications/:notiId"
           element={<NotificationDetailPage />}
         />
+        <Route path="/quizzes/new" element={<QuizBuilderPage />} />
+        <Route path="/quizzes/:quizId/edit" element={<QuizBuilderPage />} />
+        <Route path="/mypage" element={<MyPage />} />
         <Route path="/privacy" element={<PrivacyPolicyPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RoomListPage } from './RoomListPage';
 import { useSession } from '../context/SessionContext';
 import { getAdConfig } from '../api/config';
+import { getRegistrationEligibility } from '../api/quiz-registration';
 import { getRooms, joinRoom } from '../api/room';
 import { ApiError } from '../api/client';
 import { loadRoomSession } from '../utils/roomSession';
@@ -23,10 +24,15 @@ vi.mock('../api/room', () => ({
   joinRoom: vi.fn(),
 }));
 
+vi.mock('../api/quiz-registration', () => ({
+  getRegistrationEligibility: vi.fn(),
+}));
+
 const mockedUseSession = vi.mocked(useSession);
 const mockedGetAdConfig = vi.mocked(getAdConfig);
 const mockedGetRooms = vi.mocked(getRooms);
 const mockedJoinRoom = vi.mocked(joinRoom);
+const mockedGetRegistrationEligibility = vi.mocked(getRegistrationEligibility);
 
 function makeSessionValue(
   overrides: Partial<ReturnType<typeof useSession>>,
@@ -78,6 +84,8 @@ function renderRoomListPage() {
         <Route path="/rooms" element={<RoomListPage />} />
         <Route path="/rooms/new" element={<div>방 만들기 화면</div>} />
         <Route path="/rooms/:roomId" element={<div>게임 화면</div>} />
+        <Route path="/quizzes/new" element={<div>퀴즈 만들기 화면</div>} />
+        <Route path="/mypage" element={<div>마이페이지 화면</div>} />
         <Route path="/" element={<div>로그인 화면</div>} />
       </Routes>
     </MemoryRouter>,
@@ -289,5 +297,72 @@ describe('RoomListPage', () => {
 
     expect(logout).toHaveBeenCalledTimes(1);
     expect(await screen.findByText('로그인 화면')).toBeInTheDocument();
+  });
+
+  it('로그인 상태면 마이페이지 버튼을 보여주고 클릭 시 마이페이지로 이동한다', async () => {
+    mockedUseSession.mockReturnValue(
+      makeSessionValue({ isAuthenticated: true }),
+    );
+    mockedGetRooms.mockResolvedValue([]);
+    const user = userEvent.setup();
+
+    renderRoomListPage();
+    await user.click(await screen.findByRole('button', { name: '마이페이지' }));
+
+    expect(await screen.findByText('마이페이지 화면')).toBeInTheDocument();
+  });
+
+  it('비로그인 상태로 퀴즈 만들기를 누르면 로그인 필요 모달을 보여준다', async () => {
+    mockedUseSession.mockReturnValue(makeSessionValue({}));
+    mockedGetRooms.mockResolvedValue([]);
+    const user = userEvent.setup();
+
+    renderRoomListPage();
+    await user.click(
+      await screen.findByRole('button', { name: '+ 퀴즈 만들기' }),
+    );
+
+    expect(screen.getByText('🔒 로그인이 필요해요')).toBeInTheDocument();
+    expect(mockedGetRegistrationEligibility).not.toHaveBeenCalled();
+  });
+
+  it('로그인 상태에서 등록 가능하면 퀴즈 만들기 화면으로 이동한다', async () => {
+    mockedUseSession.mockReturnValue(
+      makeSessionValue({ isAuthenticated: true }),
+    );
+    mockedGetRooms.mockResolvedValue([]);
+    mockedGetRegistrationEligibility.mockResolvedValue({
+      eligible: true,
+      remainingSeconds: 0,
+    });
+    const user = userEvent.setup();
+
+    renderRoomListPage();
+    await user.click(
+      await screen.findByRole('button', { name: '+ 퀴즈 만들기' }),
+    );
+
+    expect(await screen.findByText('퀴즈 만들기 화면')).toBeInTheDocument();
+  });
+
+  it('로그인 상태에서 24시간 제한에 걸려 있으면 남은 시간을 안내한다', async () => {
+    mockedUseSession.mockReturnValue(
+      makeSessionValue({ isAuthenticated: true }),
+    );
+    mockedGetRooms.mockResolvedValue([]);
+    mockedGetRegistrationEligibility.mockResolvedValue({
+      eligible: false,
+      remainingSeconds: 3600,
+    });
+    const user = userEvent.setup();
+
+    renderRoomListPage();
+    await user.click(
+      await screen.findByRole('button', { name: '+ 퀴즈 만들기' }),
+    );
+
+    expect(
+      await screen.findByText('1시간 0분 후 다시 등록할 수 있어요.'),
+    ).toBeInTheDocument();
   });
 });

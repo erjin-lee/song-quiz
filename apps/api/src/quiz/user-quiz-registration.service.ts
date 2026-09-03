@@ -24,17 +24,23 @@ import { UserService } from '../user/user.service';
 import { CreateQuizRequestDto } from './dto/create-quiz-request.dto';
 import { CreateQuizResultDto } from './dto/create-quiz-result.dto';
 import { CreateQuizSongInputDto } from './dto/create-quiz-song-input.dto';
+import { MyQuizListItemDto } from './dto/my-quiz-list-item.dto';
+import { QuizEditDetailDto } from './dto/quiz-edit-detail.dto';
 import { RegistrationEligibilityDto } from './dto/registration-eligibility.dto';
 import { QuizAnswer } from './entities/quiz-answer.entity';
 import { QuizArtist } from './entities/quiz-artist.entity';
 import { QuizSong } from './entities/quiz-song.entity';
 import { Quiz } from './entities/quiz.entity';
 import { Song } from './entities/song.entity';
-import { verifyLinkVerificationToken } from './link-verification-token.util';
+import {
+  issueLinkVerificationToken,
+  verifyLinkVerificationToken,
+} from './link-verification-token.util';
 import {
   MIN_USER_QUIZ_SONG_COUNT,
   QUIZ_REGISTRATION_INTERVAL_MS,
 } from './quiz.constants';
+import { QuizService } from './quiz.service';
 import { YoutubeLinkValidationService } from './youtube-link-validation.service';
 
 interface ExcludedSongInfo {
@@ -66,6 +72,7 @@ export class UserQuizRegistrationService {
     private readonly userService: UserService,
     private readonly youtubeLinkValidationService: YoutubeLinkValidationService,
     private readonly notificationService: NotificationService,
+    private readonly quizService: QuizService,
   ) {}
 
   async getEligibility(userId: string): Promise<RegistrationEligibilityDto> {
@@ -75,6 +82,106 @@ export class UserQuizRegistrationService {
     return this.computeEligibility(this.quizRepository.manager, userKey, {
       lock: false,
     });
+  }
+
+  /** 마이페이지 "내가 등록한 퀴즈" 목록(4.6) - 최신 등록순. */
+  async getMyQuizzes(userId: string): Promise<MyQuizListItemDto[]> {
+    const userKey = await this.resolveUserKey(userId);
+    const quizzes = await this.quizRepository.find({
+      where: { crtUserKey: userKey, useYn: 'Y' },
+      order: { crtDt: 'DESC' },
+    });
+    if (quizzes.length === 0) {
+      return [];
+    }
+
+    const songCountRows = await this.quizRepository.manager
+      .createQueryBuilder(QuizSong, 'quizSong')
+      .select('quizSong.quizId', 'quizId')
+      .addSelect('COUNT(*)', 'count')
+      .where('quizSong.quizId IN (:...quizIds)', {
+        quizIds: quizzes.map((quiz) => quiz.quizId),
+      })
+      .groupBy('quizSong.quizId')
+      .getRawMany<{ quizId: string; count: string }>();
+    const songCountByQuizId = new Map(
+      songCountRows.map((row) => [row.quizId, Number(row.count)]),
+    );
+
+    return quizzes.map((quiz) => ({
+      quizId: quiz.quizId,
+      quizTtl: quiz.quizTtl,
+      quizDesc: quiz.quizDesc,
+      songCount: songCountByQuizId.get(quiz.quizId) ?? 0,
+      playCnt: quiz.playCnt,
+      crtDt: quiz.crtDt.toISOString(),
+    }));
+  }
+
+  /**
+   * 수정 화면(/quizzes/:quizId/edit) 프리필용 - 본인 소유 퀴즈만 조회 가능.
+   * 조회 시점에 유튜브를 다시 스크래핑해서 재검증하지 않는다 - 이 QuizSong
+   * 행이 지금 존재한다는 사실 자체가 "이미 검증을 통과했다"는 뜻이기
+   * 때문이다: 생성/수정 시점에 이미 서명된 토큰(즉시 검증 통과 증명)이
+   * 없으면 애초에 저장되지 않고, 그 이후 백그라운드 안전망이 재검증해서
+   * 실패하면 QuizSong/QuizAnswer 행 자체를 삭제한다(runBackgroundSafetyNet
+   * 참고) - 그래서 살아남은 행은 항상 "검증을 통과한 상태"만 나타낸다.
+   * 곡 수만큼 유튜브에 매번 실시간으로 재검증 요청을 보내면(이전 구현)
+   * 곡이 많은 퀴즈를 열 때마다 외부 요청이 무제한으로 몰리는 문제도 있었다
+   * (코드 리뷰 지적) - 저장된 상태를 그대로 신뢰하는 쪽으로 바꿔 이 문제도
+   * 함께 해소된다. 대신 이 사이 영상이 비공개/삭제된 것 같은 드문 TOCTOU는
+   * 여기서 잡지 못하고, 다음 등록/수정 시점의 안전망이 마지막 방어선이 된다.
+   */
+  async getQuizForEdit(
+    userId: string,
+    quizId: string,
+  ): Promise<QuizEditDetailDto> {
+    const userKey = await this.resolveUserKey(userId);
+    const quiz = await this.quizRepository.findOne({ where: { quizId } });
+    if (!quiz) {
+      throw new NotFoundException(
+        `퀴즈를 찾을 수 없습니다. (quizId: ${quizId})`,
+      );
+    }
+    if (quiz.crtUserKey !== userKey) {
+      throw new ForbiddenException('본인이 등록한 퀴즈만 수정할 수 있습니다.');
+    }
+
+    const songs = await this.quizService.getQuizSongs(quizId);
+    return {
+      quizId: quiz.quizId,
+      quizTtl: quiz.quizTtl,
+      quizDesc: quiz.quizDesc,
+      songs: songs.map((song) => {
+        // QuizService.getQuizSongs()의 youtubeUrl은 재생용으로 t=를 1초
+        // 앞당겨 보정한 값이다(플레이어 로딩 버퍼 대응) - 그 값을 그대로
+        // 수정 화면에 돌려주면, 건드리지 않은 곡도 저장할 때마다 시작
+        // 지점이 계속 1초씩 줄어든다. 원본 videoId+startSec으로 다시
+        // 조합한 URL을 써야 한다.
+        const editYoutubeUrl = song.youtubeVideoId
+          ? buildYoutubeWatchUrl(song.youtubeVideoId, song.startSec)
+          : song.youtubeUrl;
+        const verificationToken = song.youtubeVideoId
+          ? issueLinkVerificationToken(
+              song.songId,
+              song.youtubeVideoId,
+              'MANUAL',
+            )
+          : null;
+
+        return {
+          songId: song.songId,
+          songNm: song.songNm,
+          atstNm: song.atstNm,
+          youtubeUrl: editYoutubeUrl,
+          answers: song.answers.map((answer) => answer.answerTxt),
+          verificationToken,
+          failReason: verificationToken
+            ? null
+            : '유튜브 영상 정보를 확인할 수 없습니다. 링크를 다시 확인해주세요.',
+        };
+      }),
+    };
   }
 
   async createQuiz(
@@ -185,12 +292,22 @@ export class UserQuizRegistrationService {
         // 클라이언트가 계산한 최종 리스트를 그대로 반영하는 게 스펙 의도라, 부분
         // upsert로 곡 순서·추가/삭제를 각각 맞추는 것보다 이 편이 훨씬 단순하다.
         // 트랜잭션 하나로 묶여 있어 중간에 실패해도 기존 구성이 사라지지 않는다.
-        const existingQuizSongIds = (
-          await manager.find(QuizSong, {
-            where: { quizId },
-            select: { quizSongId: true },
-          })
-        ).map((quizSong) => quizSong.quizSongId);
+        const existingQuizSongs = await manager.find(QuizSong, {
+          where: { quizId },
+          select: { quizSongId: true, songId: true, youtubeVideoId: true },
+        });
+        // 삭제 전에 songId별 기존 videoId를 기억해둔다 - saveQuizSongsAndAnswers가
+        // 이걸로 "링크를 안 건드린 곡"을 가려내 안전망 제목 매칭을 생략해야
+        // 한다(위 saveQuizSongsAndAnswers 주석 참고).
+        const previousVideoIdBySongId = new Map(
+          existingQuizSongs.map((quizSong) => [
+            quizSong.songId,
+            quizSong.youtubeVideoId,
+          ]),
+        );
+        const existingQuizSongIds = existingQuizSongs.map(
+          (quizSong) => quizSong.quizSongId,
+        );
         if (existingQuizSongIds.length > 0) {
           await manager.delete(QuizAnswer, {
             quizSongId: In(existingQuizSongIds),
@@ -200,7 +317,12 @@ export class UserQuizRegistrationService {
         await manager.delete(QuizArtist, { quizId });
 
         const { quizSongs, skipContentCheckByQuizSongId } =
-          await this.saveQuizSongsAndAnswers(manager, quizId, dto.songs);
+          await this.saveQuizSongsAndAnswers(
+            manager,
+            quizId,
+            dto.songs,
+            previousVideoIdBySongId,
+          );
         await this.populateQuizArtists(
           manager,
           quizId,
@@ -273,6 +395,14 @@ export class UserQuizRegistrationService {
     manager: EntityManager,
     quizId: string,
     songs: CreateQuizSongInputDto[],
+    // 수정(updateQuiz)에서만 넘어온다 - 이 songId+videoId 조합이 수정 전에도
+    // 이미 이 퀴즈에 들어있던 조합이면(링크를 안 건드린 곡), 토큰 출처와
+    // 무관하게 안전망 제목 매칭을 생략한다. "예전에 통과했음을 그대로
+    // 신뢰한다"는 원칙(getQuizForEdit과 동일)을 안전망에도 적용하지 않으면,
+    // 원래 AUTO로 등록돼 표기 차이가 있던 곡이 설명만 고쳐도 수정 화면이
+    // 항상 MANUAL 토큰을 발급한다는 이유만으로 안전망에서 삭제돼버린다
+    // (코드 리뷰 지적).
+    previousVideoIdBySongId?: Map<string, string | null>,
   ): Promise<{
     quizSongs: QuizSong[];
     skipContentCheckByQuizSongId: Map<string, boolean>;
@@ -308,6 +438,8 @@ export class UserQuizRegistrationService {
           `링크 검증이 확인되지 않았거나 만료됐습니다. 다시 검증해주세요. (songId: ${songInput.songId})`,
         );
       }
+      const isUnchangedLink =
+        previousVideoIdBySongId?.get(songInput.songId) === videoId;
 
       const quizSong = await manager.save(
         QuizSong,
@@ -325,7 +457,7 @@ export class UserQuizRegistrationService {
       quizSongs.push(quizSong);
       skipContentCheckByQuizSongId.set(
         quizSong.quizSongId,
-        verifiedSource === 'AUTO',
+        isUnchangedLink || verifiedSource === 'AUTO',
       );
 
       // 같은 곡에 중복 정답을 보내도 유니크 제약과 충돌하지 않도록 dedupe한다.
