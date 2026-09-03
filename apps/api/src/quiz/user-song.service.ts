@@ -5,6 +5,7 @@ import { DbSongSearchResultDto } from './dto/db-song-search-result.dto';
 import { QuizAnswer } from './entities/quiz-answer.entity';
 import { Song } from './entities/song.entity';
 import { issueLinkVerificationToken } from './link-verification-token.util';
+import { YOUTUBE_LINK_VERIFICATION_ENABLED } from './quiz.constants';
 import { stripFeatAnnotations } from './song-title-normalizer';
 import {
   YoutubeLinkValidationResult,
@@ -107,6 +108,21 @@ export class UserSongService {
   async autoFillYoutubeLink(
     songId: string,
   ): Promise<YoutubeLinkValidationResponse> {
+    if (!YOUTUBE_LINK_VERIFICATION_ENABLED) {
+      // quiz.constants.ts 참고 - 동시 등록으로 인한 유튜브 차단 위험 때문에
+      // 임시로 검색 자체를 하지 않는다. 유저는 링크를 직접 입력해야 한다.
+      return {
+        valid: false,
+        youtubeUrl: null,
+        youtubeVideoId: null,
+        durationSec: null,
+        startSec: null,
+        endSec: null,
+        reason: '자동 찾기가 잠시 중단됐어요. 링크를 직접 입력해주세요.',
+        verificationToken: null,
+      };
+    }
+
     const { song, artistNm } = await this.getSongWithMainArtistOrThrow(songId);
 
     const searchResult = await this.youtubeScraperClient
