@@ -1,9 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import * as quizConstants from './quiz.constants';
 import { YoutubeScraperClient } from './youtube-scraper.client';
 import { YoutubeLinkValidationService } from './youtube-link-validation.service';
 
 describe('YoutubeLinkValidationService', () => {
   let service: YoutubeLinkValidationService;
+  const originalEnabled = quizConstants.YOUTUBE_LINK_VERIFICATION_ENABLED;
 
   const youtubeScraperClientMock = {
     getVideoInfo: jest.fn(),
@@ -11,6 +13,13 @@ describe('YoutubeLinkValidationService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    // 아래 테스트 대부분은 YOUTUBE_LINK_VERIFICATION_ENABLED가 꺼져 있는
+    // "임시 비활성화" 상태에서도 다시 켰을 때의 실제 검증 로직이 그대로
+    // 맞는지 확인하려는 것이므로, 이 파일에서는 켜진 상태를 기본으로 한다
+    // ("비활성화 상태" 자체는 아래 별도 describe에서 검증한다).
+    (
+      quizConstants as Record<string, unknown>
+    ).YOUTUBE_LINK_VERIFICATION_ENABLED = true;
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -22,6 +31,12 @@ describe('YoutubeLinkValidationService', () => {
     service = module.get<YoutubeLinkValidationService>(
       YoutubeLinkValidationService,
     );
+  });
+
+  afterAll(() => {
+    (
+      quizConstants as Record<string, unknown>
+    ).YOUTUBE_LINK_VERIFICATION_ENABLED = originalEnabled;
   });
 
   it('링크 형식이 올바르지 않으면 영상 정보를 조회하지 않고 거부한다', async () => {
@@ -157,5 +172,37 @@ describe('YoutubeLinkValidationService', () => {
     expect(result.valid).toBe(true);
     expect(result.startSec).toBe(0);
     expect(result.endSec).toBe(30);
+  });
+
+  describe('YOUTUBE_LINK_VERIFICATION_ENABLED이 꺼져 있을 때(임시 비활성화)', () => {
+    beforeEach(() => {
+      (
+        quizConstants as Record<string, unknown>
+      ).YOUTUBE_LINK_VERIFICATION_ENABLED = false;
+    });
+
+    it('스크래핑 없이 형식만 확인하고 통과시킨다', async () => {
+      const result = await service.validate(
+        'https://www.youtube.com/watch?v=abc123&t=50',
+        '전혀 다른 곡명이어도 상관없음',
+      );
+
+      expect(result.valid).toBe(true);
+      expect(result.youtubeVideoId).toBe('abc123');
+      expect(result.startSec).toBe(50);
+      expect(result.endSec).toBe(80);
+      expect(result.durationSec).toBeNull();
+      expect(youtubeScraperClientMock.getVideoInfo).not.toHaveBeenCalled();
+    });
+
+    it('형식이 올바르지 않으면 그래도 거부한다', async () => {
+      const result = await service.validate(
+        'https://www.youtube.com/results?v=abc',
+        '봄날',
+      );
+
+      expect(result.valid).toBe(false);
+      expect(result.reason).toContain('형식');
+    });
   });
 });

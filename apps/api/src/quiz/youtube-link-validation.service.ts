@@ -3,6 +3,7 @@ import {
   buildYoutubeWatchUrl,
   parseYoutubeUrl,
 } from '../common/youtube-url.util';
+import { YOUTUBE_LINK_VERIFICATION_ENABLED } from './quiz.constants';
 import {
   stripFeatAnnotations,
   toComparableText,
@@ -75,6 +76,25 @@ export class YoutubeLinkValidationService {
     const { videoId, startSec: requestedStartSec } = parseYoutubeUrl(rawUrl);
     if (!videoId) {
       return invalid('유튜브 영상 링크 형식이 올바르지 않습니다.');
+    }
+
+    if (!YOUTUBE_LINK_VERIFICATION_ENABLED) {
+      // quiz.constants.ts 참고 - 동시 등록으로 인한 유튜브 차단 위험 때문에
+      // 임시로 실제 스크래핑·제목 대조를 건너뛴다. videoId는 여전히 서버가
+      // 파싱한 값만 쓰므로(ADR-0009) 신뢰 경계는 그대로 유지된다.
+      const { startSec, endSec } = this.resolveClipRange(
+        requestedStartSec,
+        null,
+      );
+      return {
+        valid: true,
+        youtubeUrl: buildYoutubeWatchUrl(videoId, startSec),
+        youtubeVideoId: videoId,
+        durationSec: null,
+        startSec,
+        endSec,
+        reason: null,
+      };
     }
 
     const videoInfo = await this.youtubeScraperClient

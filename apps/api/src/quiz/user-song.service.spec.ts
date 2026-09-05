@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { verifyLinkVerificationToken } from './link-verification-token.util';
 import { QuizAnswer } from './entities/quiz-answer.entity';
+import * as quizConstants from './quiz.constants';
 import { Song } from './entities/song.entity';
 import { UserSongService } from './user-song.service';
 import { YoutubeLinkValidationService } from './youtube-link-validation.service';
@@ -11,6 +12,7 @@ import { YoutubeScraperClient } from './youtube-scraper.client';
 describe('UserSongService', () => {
   let service: UserSongService;
   const originalSecret = process.env.USER_JWT_SECRET;
+  const originalEnabled = quizConstants.YOUTUBE_LINK_VERIFICATION_ENABLED;
 
   const songRepositoryMock = {
     findOne: jest.fn(),
@@ -42,6 +44,12 @@ describe('UserSongService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     process.env.USER_JWT_SECRET = 'test-secret';
+    // autoFillYoutubeLink의 실제 검색 로직을 검증하는 테스트가 있어서, 이
+    // 파일에서는 기본으로 켜둔다("임시 비활성화" 상태 자체는 아래 별도
+    // describe에서 검증한다).
+    (
+      quizConstants as Record<string, unknown>
+    ).YOUTUBE_LINK_VERIFICATION_ENABLED = true;
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -64,6 +72,9 @@ describe('UserSongService', () => {
 
   afterAll(() => {
     process.env.USER_JWT_SECRET = originalSecret;
+    (
+      quizConstants as Record<string, unknown>
+    ).YOUTUBE_LINK_VERIFICATION_ENABLED = originalEnabled;
   });
 
   describe('searchSongs', () => {
@@ -190,6 +201,19 @@ describe('UserSongService', () => {
 
       expect(result.valid).toBe(false);
       expect(result.verificationToken).toBeNull();
+    });
+
+    it('YOUTUBE_LINK_VERIFICATION_ENABLED이 꺼져 있으면 검색 자체를 하지 않고 실패로 응답한다(임시 비활성화)', async () => {
+      (
+        quizConstants as Record<string, unknown>
+      ).YOUTUBE_LINK_VERIFICATION_ENABLED = false;
+
+      const result = await service.autoFillYoutubeLink('s1');
+
+      expect(result.valid).toBe(false);
+      expect(result.verificationToken).toBeNull();
+      expect(youtubeScraperClientMock.search).not.toHaveBeenCalled();
+      expect(songRepositoryMock.createQueryBuilder).not.toHaveBeenCalled();
     });
   });
 });
